@@ -1,5 +1,5 @@
 :root {
-  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Krub', system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
@@ -21,6 +21,38 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+.light-theme {
+  --bg-color: #f1f5f9;
+  --card-bg: rgba(255, 255, 255, 0.9);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border-color: rgba(0, 0, 0, 0.05);
+  color-scheme: light;
+}
+
+/* Krub Font Weights */
+.krub-extralight { font-family: "Krub", sans-serif; font-weight: 200; font-style: normal; }
+.krub-light { font-family: "Krub", sans-serif; font-weight: 300; font-style: normal; }
+.krub-regular { font-family: "Krub", sans-serif; font-weight: 400; font-style: normal; }
+.krub-medium { font-family: "Krub", sans-serif; font-weight: 500; font-style: normal; }
+.krub-semibold { font-family: "Krub", sans-serif; font-weight: 600; font-style: normal; }
+.krub-bold { font-family: "Krub", sans-serif; font-weight: 700; font-style: normal; }
+.krub-extralight-italic { font-family: "Krub", sans-serif; font-weight: 200; font-style: italic; }
+.krub-light-italic { font-family: "Krub", sans-serif; font-weight: 300; font-style: italic; }
+.krub-regular-italic { font-family: "Krub", sans-serif; font-weight: 400; font-style: italic; }
+.krub-medium-italic { font-family: "Krub", sans-serif; font-weight: 500; font-style: italic; }
+.krub-semibold-italic { font-family: "Krub", sans-serif; font-weight: 600; font-style: italic; }
+.krub-bold-italic { font-family: "Krub", sans-serif; font-weight: 700; font-style: italic; }
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  caret-color: transparent;
+}
+
+input, textarea, select, [contenteditable="true"] {
+  caret-color: auto;
+}
+
 body {
   margin: 0;
   min-width: 320px;
@@ -40,7 +72,7 @@ body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-color);
-  border-radius: 1rem;
+  border-radius: 3rem;
 }
 
 .gradient-text {
@@ -134,4 +166,15 @@ body {
 .pulse-animation {
   animation: pulse-ring 2s infinite ease-in-out;
   box-shadow: 0 0 15px var(--accent-primary);
+}
+
+.light-theme input::placeholder, 
+.light-theme textarea::placeholder {
+  color: #64748b;
+  opacity: 1;
+}
+
+.light-theme input,
+.light-theme select {
+  color: var(--text-primary) !important;
 }

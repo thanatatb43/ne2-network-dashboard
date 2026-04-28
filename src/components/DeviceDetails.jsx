@@ -1,8 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, Share2, Globe, Shield, Cpu, Users, ArrowRight, Loader2, Search, RefreshCw, Clock, CalendarDays, CalendarRange, Activity, Calendar } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { ChevronLeft, Share2, Globe, Shield, Cpu, Users, ArrowRight, Loader2, Search, RefreshCw, Clock, CalendarDays, CalendarRange, Activity, Calendar, Download } from 'lucide-react';
+import AvailabilityHistoryChart from './AvailabilityHistoryChart';
+import html2pdf from 'html2pdf.js';
 
-const DeviceDetails = ({ deviceId, onBack }) => {
+const DeviceDetails = ({ deviceId, onBack, user, token }) => {
+  const isAdmin = user && ['computer_admin', 'network_admin', 'super_admin'].includes(user.role);
   const [deviceData, setDeviceData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scanStatus, setScanStatus] = useState('idle'); // idle, scanning, completed
@@ -14,7 +18,26 @@ const DeviceDetails = ({ deviceId, onBack }) => {
     month: null,
     year: null
   });
+  const [realtimeStats, setRealtimeStats] = useState({
+    status: 'loading',
+    latency: null,
+    packetLoss: null,
+    lastUpdated: null
+  });
+  const [refreshingStatus, setRefreshingStatus] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [availabilityHistory, setAvailabilityHistory] = useState([]);
+  const [fullAvailabilityHistory, setFullAvailabilityHistory] = useState([]);
   const itemsPerPage = 10;
+  const scanTimeoutRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (scanTimeoutRef.current) {
+        clearTimeout(scanTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const fetchResults = async () => {
     try {
@@ -25,6 +48,45 @@ const DeviceDetails = ({ deviceId, onBack }) => {
       }
     } catch (error) {
       console.error('Error fetching client results:', error);
+    }
+  };
+
+  const fetchRealtimeStats = async () => {
+    try {
+      const metricsRes = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latency/metrics`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      const metricsResult = await metricsRes.json();
+      if (metricsResult.success && metricsResult.data) {
+        const currentStats = metricsResult.data.find(d => (d.device_id || d.id) === deviceId);
+        if (currentStats) {
+          setRealtimeStats({
+            status: currentStats.status === 'up' ? 'online' : 'offline',
+            latency: currentStats.latency_ms,
+            packetLoss: currentStats.packet_loss,
+            lastUpdated: currentStats.updated_at || currentStats.checked_at || new Date().toISOString()
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching realtime stats:', err);
+    }
+  };
+
+  const handleManualStatusCheck = async () => {
+    setRefreshingStatus(true);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latency/check/${deviceId}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      if (response.ok) {
+        // After checking, re-fetch the latest metrics to update UI
+        await fetchRealtimeStats();
+      }
+    } catch (error) {
+      console.error('Error checking device status:', error);
+    } finally {
+      setRefreshingStatus(false);
     }
   };
 
@@ -61,6 +123,36 @@ const DeviceDetails = ({ deviceId, onBack }) => {
         } catch (err) {
           console.error('Error fetching availability:', err);
         }
+
+        // Fetch availability snapshots for history chart
+        try {
+          const snapshotsRes = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latency/availability-snapshots/${deviceId}`, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+          });
+          const snapshotsResult = await snapshotsRes.json();
+          if (snapshotsResult.success && snapshotsResult.data) {
+            const formattedHistory = snapshotsResult.data.map(d => {
+              const dateString = d.date || d.createdAt;
+              const dateObj = new Date(dateString);
+              return {
+                time: isNaN(dateObj.getTime()) ? 'Invalid Date' : dateObj.toLocaleDateString('th-TH', { 
+                  day: 'numeric', 
+                  month: 'short',
+                  year: 'numeric'
+                }),
+                value: parseFloat(parseFloat(d.uptime_pct || 0).toFixed(2))
+              };
+            });
+            // Keep the raw history for the report, show only 30 days on chart
+            setFullAvailabilityHistory(snapshotsResult.data);
+            setAvailabilityHistory(formattedHistory.slice(-30));
+          }
+        } catch (err) {
+          console.error('Error fetching availability snapshots:', err);
+        }
+
+        // Fetch real-time latency metrics
+        await fetchRealtimeStats();
       } catch (error) {
         console.error('Error fetching device details:', error);
       } finally {
@@ -74,17 +166,32 @@ const DeviceDetails = ({ deviceId, onBack }) => {
   }, [deviceId]);
 
   const startScan = async () => {
+    if (!isAdmin) {
+      toast.error('สิทธิ์การใช้งานไม่เพียงพอ: กรุณาเข้าสู่ระบบด้วยสิทธิ์ผู้ดูแลระบบเพื่อเริ่มการสแกนอุปกรณ์', {
+        icon: '⚠️',
+        style: {
+          borderRadius: '10px',
+          background: '#1e293b',
+          color: '#fff',
+          border: '1px solid rgba(244, 63, 94, 0.2)'
+        },
+      });
+      return;
+    }
     setScanStatus('scanning');
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/clients/scan/${deviceId}`, {
-        method: 'POST'
+      const scanIndex = deviceData.index || deviceId;
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/clients/scan/${scanIndex}`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
       const result = await response.json();
 
       if (result.success) {
-        setTimeout(async () => {
+        scanTimeoutRef.current = setTimeout(async () => {
           await fetchResults();
           setScanStatus('completed');
+          scanTimeoutRef.current = null;
         }, 3000);
       } else {
         setScanStatus('idle');
@@ -94,6 +201,69 @@ const DeviceDetails = ({ deviceId, onBack }) => {
       console.error('Scan error:', error);
       setScanStatus('idle');
     }
+  };
+
+  const handleExportPDF = () => {
+    setIsExporting(true);
+    
+    // Create a standalone wrapper for the PDF table
+    const wrapper = document.createElement('div');
+    wrapper.style.padding = '20px';
+    wrapper.style.background = '#ffffff'; // White background for printing
+    wrapper.style.color = '#000000';
+    wrapper.style.fontFamily = 'sans-serif';
+    
+    let tableRows = fullAvailabilityHistory.map(item => {
+      const dateString = item.date || item.createdAt;
+      const dateObj = new Date(dateString);
+      const displayDate = isNaN(dateObj.getTime()) ? 'Invalid Date' : dateObj.toLocaleDateString('th-TH', { 
+        day: 'numeric', month: 'short', year: 'numeric' 
+      });
+      const uptime = item.uptime_pct != null ? parseFloat(item.uptime_pct).toFixed(2) : '-';
+      const latency = item.avg_latency_ms != null ? parseFloat(item.avg_latency_ms).toFixed(2) : '-';
+
+      return `
+      <tr style="border-bottom: 1px solid #e2e8f0">
+        <td style="padding: 10px; border: 1px solid #e2e8f0;">${displayDate}</td>
+        <td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold; color: ${uptime >= 99 ? '#059669' : '#dc2626'};">${uptime}%</td>
+        <td style="padding: 10px; border: 1px solid #e2e8f0;">${latency} ms</td>
+      </tr>
+    `}).join('');
+
+    wrapper.innerHTML = `
+      <h2 style="margin-top: 0; margin-bottom: 5px; font-size: 1.5rem; color: #0f172a;">รายงานประวัติความพร้อมใช้งาน</h2>
+      <p style="color: #475569; margin-top: 0; margin-bottom: 20px;">อุปกรณ์: ${deviceData?.pea_name || 'N/A'} (IP: ${deviceData?.gateway || 'N/A'})</p>
+      <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
+        <thead>
+          <tr style="background: #f1f5f9; color: #0f172a;">
+            <th style="padding: 10px; border: 1px solid #e2e8f0;">วันที่ (date)</th>
+            <th style="padding: 10px; border: 1px solid #e2e8f0;">Uptime Percent (uptime_pct)</th>
+            <th style="padding: 10px; border: 1px solid #e2e8f0;">Average Latency (avg_latency_ms)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${tableRows}
+        </tbody>
+      </table>
+    `;
+    
+    // Configure html2pdf options
+    const opt = {
+      margin:       0.5,
+      filename:     `Device_Report_${deviceData?.pea_name || 'Network'}.pdf`,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { scale: 2, useCORS: true, logging: false },
+      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+    };
+
+    html2pdf().set(opt).from(wrapper).save().then(() => {
+      setIsExporting(false);
+      toast.success('Report exported successfully!', { icon: '📄' });
+    }).catch(err => {
+      console.error('Export error:', err);
+      setIsExporting(false);
+      toast.error('Failed to export report');
+    });
   };
 
   // Pagination logic
@@ -128,12 +298,14 @@ const DeviceDetails = ({ deviceId, onBack }) => {
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
       className="device-details"
+      id="device-report-content"
     >
       <header style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <button
             onClick={onBack}
             className="glass"
+            data-html2canvas-ignore="true"
             style={{
               padding: '0.75rem',
               borderRadius: '50%',
@@ -149,37 +321,48 @@ const DeviceDetails = ({ deviceId, onBack }) => {
           </button>
           <div>
             <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 700 }}>{deviceData.pea_name}</h1>
-            <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }}>Network Segment Explorer & Live Scan</p>
+            <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }}>ตรวจสอบสถานะเครือข่ายและการเชื่อมต่ออุปกรณ์ภายในสำนักงาน</p>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ display: 'flex', gap: '1rem' }} data-html2canvas-ignore="true">
+          <button
+            onClick={handleExportPDF}
+            disabled={isExporting}
+            className="glass"
+            style={{ padding: '0.75rem 1.5rem', borderRadius: '0.75rem', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', cursor: isExporting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: isExporting ? 0.7 : 1 }}
+            title="Export Report to PDF"
+          >
+            {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+            {isExporting ? 'Exporting...' : 'Export PDF'}
+          </button>
           <button
             onClick={fetchResults}
             className="glass"
             style={{ padding: '0.75rem', borderRadius: '0.75rem', color: 'var(--text-secondary)', border: 'none', cursor: 'pointer' }}
-            title="Refresh results"
+            title="Refresh Discovery Info (Local Network Scan)"
           >
             <RefreshCw size={18} className={scanStatus === 'scanning' ? 'animate-spin' : ''} />
           </button>
           <button
             onClick={startScan}
-            disabled={scanStatus === 'scanning'}
+            disabled={scanStatus === 'scanning' || !isAdmin}
             className="glass"
             style={{
               padding: '0.75rem 1.5rem',
               borderRadius: '0.75rem',
-              background: 'linear-gradient(135deg, var(--accent-primary), #818cf8)',
-              color: '#fff',
-              border: 'none',
+              background: !isAdmin ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, var(--accent-primary), #818cf8)',
+              color: !isAdmin ? 'var(--text-secondary)' : '#fff',
+              border: !isAdmin ? '1px solid rgba(255,255,255,0.1)' : 'none',
               fontWeight: 600,
-              cursor: scanStatus === 'scanning' ? 'not-allowed' : 'pointer',
+              cursor: (scanStatus === 'scanning' || !isAdmin) ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              boxShadow: '0 4px 20px rgba(56, 189, 248, 0.3)',
-              opacity: scanStatus === 'scanning' ? 0.7 : 1
+              boxShadow: !isAdmin ? 'none' : '0 4px 20px rgba(56, 189, 248, 0.3)',
+              opacity: (scanStatus === 'scanning' || !isAdmin) ? 0.7 : 1
             }}
+            title={!isAdmin ? 'Administrative role required for live scanning' : ''}
           >
             <Share2 size={18} />
             {scanStatus === 'scanning' ? 'Scanning...' : scanStatus === 'completed' ? 'Scan Again' : 'Live Scan Now'}
@@ -214,7 +397,86 @@ const DeviceDetails = ({ deviceId, onBack }) => {
         )}
       </AnimatePresence>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem' }}>
+        {/* Real-time Status & Latency Card */}
+        <div className="card glass" style={{
+          background: realtimeStats.status === 'online' ? 'rgba(52, 211, 153, 0.05)' : 'rgba(239, 68, 68, 0.05)',
+          border: `1px solid ${realtimeStats.status === 'online' ? 'rgba(52, 211, 153, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <div style={{
+                background: realtimeStats.status === 'online' ? 'rgba(52, 211, 153, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                padding: '0.5rem', borderRadius: '0.5rem',
+                color: realtimeStats.status === 'online' ? 'var(--accent-success)' : 'var(--accent-danger)'
+              }}>
+                <Activity size={20} />
+              </div>
+              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>สถานะอุปกรณ์</h3>
+            </div>
+            <div style={{
+              fontSize: '0.7rem',
+              fontWeight: 800,
+              padding: '0.25rem 0.75rem',
+              borderRadius: '1rem',
+              background: realtimeStats.status === 'online' ? 'var(--accent-success)' : 'var(--accent-danger)',
+              color: '#fff',
+              textTransform: 'uppercase'
+            }}>
+              {realtimeStats.status}
+            </div>
+          </div>
+
+          {realtimeStats.lastUpdated && (
+            <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+              <Clock size={12} />
+              <span>อัปเดตล่าสุด: {new Date(realtimeStats.lastUpdated).toLocaleTimeString('th-TH')}</span>
+            </div>
+          )}
+          
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
+            <div>
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Current Latency</p>
+              <h2 style={{ margin: '0.25rem 0 0', fontSize: '1.75rem', fontWeight: 700, color: realtimeStats.status === 'online' ? '#fff' : 'var(--text-secondary)' }}>
+                {realtimeStats.latency !== null ? `${realtimeStats.latency.toFixed(1)}ms` : '--'}
+              </h2>
+            </div>
+            <div>
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Packet Loss</p>
+              <h2 style={{ margin: '0.25rem 0 0', fontSize: '1.75rem', fontWeight: 700, color: (realtimeStats.packetLoss || 0) > 0 ? 'var(--accent-danger)' : '#fff' }}>
+                {realtimeStats.packetLoss !== null ? `${realtimeStats.packetLoss}%` : '--'}
+              </h2>
+            </div>
+          </div>
+
+          <button
+            onClick={handleManualStatusCheck}
+            disabled={refreshingStatus}
+            style={{
+              width: '100%',
+              padding: '0.6rem',
+              borderRadius: '0.5rem',
+              background: 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: '#fff',
+              fontSize: '0.85rem',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              cursor: refreshingStatus ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s',
+              opacity: refreshingStatus ? 0.7 : 1
+            }}
+            className="refresh-button-hover"
+            title="Update connectivity status"
+          >
+            <RefreshCw size={14} className={refreshingStatus ? 'animate-spin' : ''} />
+            {refreshingStatus ? 'Checking...' : 'Check Connectivity Status'}
+          </button>
+        </div>
+
         <div className="card glass">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
             <div style={{ background: 'rgba(56, 189, 248, 0.1)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-primary)' }}>
@@ -225,7 +487,13 @@ const DeviceDetails = ({ deviceId, onBack }) => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Main Gateway</span>
-              <span style={{ fontWeight: 600, fontFamily: 'ui-monospace' }}>{deviceData.gateway || '-'}</span>
+              <span style={{ 
+                fontWeight: 600, 
+                fontFamily: 'ui-monospace',
+                filter: !user ? 'blur(4px)' : 'none',
+                transition: 'filter 0.3s ease',
+                userSelect: !user ? 'none' : 'auto'
+              }}>{deviceData.gateway || '-'}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Subnet / NetID</span>
@@ -248,15 +516,33 @@ const DeviceDetails = ({ deviceId, onBack }) => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Sub-IP 1</span>
-              <span style={{ fontWeight: 600, fontFamily: 'ui-monospace' }}>{deviceData.sub_ip1_gateway || '-'}</span>
+              <span style={{ 
+                fontWeight: 600, 
+                fontFamily: 'ui-monospace',
+                filter: !user ? 'blur(4px)' : 'none',
+                transition: 'filter 0.3s ease',
+                userSelect: !user ? 'none' : 'auto'
+              }}>{deviceData.sub_ip1_gateway || '-'}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Sub-IP 2</span>
-              <span style={{ fontWeight: 600, fontFamily: 'ui-monospace' }}>{deviceData.sub_ip2_gateway || '-'}</span>
+              <span style={{ 
+                fontWeight: 600, 
+                fontFamily: 'ui-monospace',
+                filter: !user ? 'blur(4px)' : 'none',
+                transition: 'filter 0.3s ease',
+                userSelect: !user ? 'none' : 'auto'
+              }}>{deviceData.sub_ip2_gateway || '-'}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>WAN MPLS</span>
-              <span style={{ fontWeight: 600, fontFamily: 'ui-monospace' }}>{deviceData.wan_gateway_mpls || '-'}</span>
+              <span style={{ 
+                fontWeight: 600, 
+                fontFamily: 'ui-monospace',
+                filter: !user ? 'blur(4px)' : 'none',
+                transition: 'filter 0.3s ease',
+                userSelect: !user ? 'none' : 'auto'
+              }}>{deviceData.wan_gateway_mpls || '-'}</span>
             </div>
           </div>
         </div>
@@ -266,7 +552,7 @@ const DeviceDetails = ({ deviceId, onBack }) => {
             <div style={{ background: 'rgba(52, 211, 153, 0.1)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-success)' }}>
               <Users size={20} />
             </div>
-            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Connectivity Discovery</h3>
+            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>จำนวนอุปกรณ์ในสำนักงาน</h3>
           </div>
           <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
             <h2 style={{ margin: 0, fontSize: '2.5rem', color: scannedClients.length > 0 ? 'var(--accent-success)' : 'inherit' }}>
@@ -280,10 +566,10 @@ const DeviceDetails = ({ deviceId, onBack }) => {
       {/* System Availability Section */}
       <h3 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '1.25rem' }}>
         <Activity size={24} color="var(--accent-primary)" />
-        System Availability
+        รายงานความพร้อมใช้ของอุปกรณ์เครือข่ายภายในสำนักงาน
       </h3>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem' }}>
-        
+
         {/* Daily Availability */}
         <div className="card glass" style={{
           position: 'relative', overflow: 'hidden',
@@ -299,7 +585,7 @@ const DeviceDetails = ({ deviceId, onBack }) => {
               <Clock size={24} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>Daily (24h)</h3>
+              <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>รายวัน (24 ชั่วโมง)</h3>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
@@ -308,9 +594,9 @@ const DeviceDetails = ({ deviceId, onBack }) => {
             </span>
           </div>
           <div style={{ marginTop: '1rem', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-            <motion.div 
-              initial={{ width: 0 }} 
-              animate={{ width: `${availability.day ?? deviceData?.availability_day ?? 100}%` }} 
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${availability.day ?? deviceData?.availability_day ?? 100}%` }}
               transition={{ duration: 1, ease: 'easeOut' }}
               style={{ height: '100%', background: 'linear-gradient(90deg, var(--accent-primary), #d946ef)' }}
             />
@@ -332,7 +618,7 @@ const DeviceDetails = ({ deviceId, onBack }) => {
               <CalendarDays size={24} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>Weekly (7d)</h3>
+              <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>รายสัปดาห์ (7 วัน)</h3>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
@@ -341,9 +627,9 @@ const DeviceDetails = ({ deviceId, onBack }) => {
             </span>
           </div>
           <div style={{ marginTop: '1rem', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-            <motion.div 
-              initial={{ width: 0 }} 
-              animate={{ width: `${availability.week ?? deviceData?.availability_week ?? 99.8}%` }} 
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${availability.week ?? deviceData?.availability_week ?? 99.8}%` }}
               transition={{ duration: 1, ease: 'easeOut', delay: 0.2 }}
               style={{ height: '100%', background: 'linear-gradient(90deg, var(--accent-secondary), #f59e0b)' }}
             />
@@ -365,7 +651,7 @@ const DeviceDetails = ({ deviceId, onBack }) => {
               <CalendarRange size={24} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>Monthly (30d)</h3>
+              <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>รายเดือน (30 วัน)</h3>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
@@ -374,9 +660,9 @@ const DeviceDetails = ({ deviceId, onBack }) => {
             </span>
           </div>
           <div style={{ marginTop: '1rem', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-            <motion.div 
-              initial={{ width: 0 }} 
-              animate={{ width: `${availability.month ?? deviceData?.availability_month ?? 99.5}%` }} 
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${availability.month ?? deviceData?.availability_month ?? 99.5}%` }}
               transition={{ duration: 1, ease: 'easeOut', delay: 0.4 }}
               style={{ height: '100%', background: 'linear-gradient(90deg, #f8fafc, #94a3b8)' }}
             />
@@ -398,7 +684,7 @@ const DeviceDetails = ({ deviceId, onBack }) => {
               <Calendar size={24} />
             </div>
             <div>
-              <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>Yearly (365d)</h3>
+              <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--text-secondary)' }}>รายปี (365 วัน)</h3>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
@@ -407,9 +693,9 @@ const DeviceDetails = ({ deviceId, onBack }) => {
             </span>
           </div>
           <div style={{ marginTop: '1rem', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-            <motion.div 
-              initial={{ width: 0 }} 
-              animate={{ width: `${availability.year ?? 99}%` }} 
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${availability.year ?? 99}%` }}
               transition={{ duration: 1, ease: 'easeOut', delay: 0.6 }}
               style={{ height: '100%', background: 'linear-gradient(90deg, #a855f7, #eab308)' }}
             />
@@ -418,9 +704,11 @@ const DeviceDetails = ({ deviceId, onBack }) => {
 
       </div>
 
+      <AvailabilityHistoryChart history={availabilityHistory} />
+
       <div className="card glass" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ margin: 0 }}>Client Devices Information</h3>
+          <h3 style={{ margin: 0 }}>รายการอุปกรณ์เชื่อมต่อระบบเครือข่ายภายในสำนักงาน</h3>
           {scannedClients.length > 0 && (
             <span style={{ fontSize: '0.8rem', color: 'var(--accent-success)', fontWeight: 600 }}>
               {scannedClients.length} devices detected
@@ -445,8 +733,22 @@ const DeviceDetails = ({ deviceId, onBack }) => {
                 return (
                   <tr key={client.id || index} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', transition: 'background 0.2s' }} className="table-row-hover">
                     <td style={{ padding: '1rem 1.5rem', fontWeight: 600 }}>{client.client_name || 'Unknown Device'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontFamily: 'ui-monospace', color: 'var(--accent-primary)' }}>{client.ip_address}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontFamily: 'ui-monospace', color: 'var(--text-secondary)' }}>{client.mac_address}</td>
+                    <td style={{ 
+                      padding: '1rem 1.5rem', 
+                      fontFamily: 'ui-monospace', 
+                      color: 'var(--accent-primary)',
+                      filter: !user ? 'blur(4px)' : 'none',
+                      transition: 'filter 0.3s ease',
+                      userSelect: !user ? 'none' : 'auto'
+                    }}>{client.ip_address}</td>
+                    <td style={{ 
+                      padding: '1rem 1.5rem', 
+                      fontFamily: 'ui-monospace', 
+                      color: 'var(--text-secondary)',
+                      filter: !user ? 'blur(4px)' : 'none',
+                      transition: 'filter 0.3s ease',
+                      userSelect: !user ? 'none' : 'auto'
+                    }}>{client.mac_address}</td>
                     <td style={{ padding: '1rem 1.5rem' }}>
                       <span style={{
                         fontSize: '0.75rem',

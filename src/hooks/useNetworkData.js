@@ -5,7 +5,7 @@ export const useNetworkData = () => {
     cpu: 0,
     ram: 0,
     latency: 0,
-    throughput: 0,
+    packetLoss: 0,
   });
 
   const [history, setHistory] = useState([]);
@@ -33,12 +33,15 @@ export const useNetworkData = () => {
         const onlineDevices = devices.filter(d => d.status === 'up').length;
         const totalLatency = devices.reduce((sum, d) => sum + (d.latency_ms || 0), 0);
         const avgLatency = devices.length > 0 ? (totalLatency / devices.length).toFixed(2) : 0;
+        
+        const totalPacketLoss = devices.reduce((sum, d) => sum + (d.packet_loss || 0), 0);
+        const avgPacketLoss = devices.length > 0 ? (totalPacketLoss / devices.length).toFixed(2) : 0;
 
         setMetrics({
           totalDevices,
           onlineDevices,
           latency: avgLatency,
-          throughput: Math.floor(Math.random() * 1000), // Placeholder for throughput if needed
+          packetLoss: avgPacketLoss,
         });
       } catch (error) {
         console.error('Error fetching dashboard data:', error);

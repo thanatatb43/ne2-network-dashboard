@@ -6,13 +6,143 @@ import DeviceTable from './components/DeviceTable';
 import Devices from './components/Devices';
 import Analytics from './components/Analytics';
 import DeviceDetails from './components/DeviceDetails';
+import AdminSettings from './components/AdminSettings';
+import Management from './components/Management';
+import About from './components/About';
+import Auth from './components/Auth';
+import BudgetDashboard from './components/BudgetDashboard';
 import { useNetworkData } from './hooks/useNetworkData';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Toaster } from 'react-hot-toast';
+import { useEffect } from 'react';
 
 function App() {
   const { metrics, history } = useNetworkData();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedDeviceId, setSelectedDeviceId] = useState(null);
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem('user');
+    const savedToken = localStorage.getItem('token');
+    
+    if (savedUser && savedUser !== 'undefined') {
+      try {
+        setUser(JSON.parse(savedUser));
+      } catch (err) {
+        console.error('Failed to parse user session:', err);
+        localStorage.removeItem('user');
+      }
+    }
+    
+    if (savedToken && savedToken !== 'undefined') {
+      setToken(savedToken);
+    }
+  }, []);
+
+  // Simple Path-based Routing
+  useEffect(() => {
+    const checkPath = () => {
+      const path = window.location.pathname;
+      if (path === '/budget-dashboard') {
+        setActiveTab('budget');
+      }
+    };
+
+    checkPath();
+    window.addEventListener('popstate', checkPath);
+    return () => window.removeEventListener('popstate', checkPath);
+  }, []);
+
+  // Site Statistics Tracking
+  useEffect(() => {
+    // 1. Initialize Session
+    let sessionId = sessionStorage.getItem('session_id');
+    if (!sessionId) {
+      // Fallback for insecure contexts (HTTP) where crypto.randomUUID is unavailable
+      if (window.crypto?.randomUUID) {
+        sessionId = crypto.randomUUID();
+      } else {
+        sessionId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+      }
+      sessionStorage.setItem('session_id', sessionId);
+    }
+
+    // 2. Track Visit/Heartbeat Logic
+    const trackEvent = async () => {
+      const hasBeenTracked = sessionStorage.getItem('view_tracked');
+      
+      // Determine if this is a new visit or just maintaining the online status
+      const eventType = !hasBeenTracked ? 'visit' : 'ping';
+      
+      try {
+        await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/stats/track`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            event: eventType,
+            session_token: sessionId,
+            user_id: user?.id || null,
+            path: activeTab,
+            is_new_view: eventType === 'visit',
+            timestamp: new Date().toISOString()
+          })
+        });
+        
+        // Mark as tracked ONLY after a successful 'visit' event
+        if (eventType === 'visit') {
+          sessionStorage.setItem('view_tracked', 'true');
+        }
+      } catch (err) {
+        console.error('Stats tracking failed:', err);
+      }
+    };
+
+    // Trigger tracking on mount
+    trackEvent();
+
+    // 3. Heartbeat (Every 3 minutes)
+    const heartbeat = setInterval(() => {
+      trackEvent();
+    }, 3 * 60 * 1000);
+
+    return () => clearInterval(heartbeat);
+  }, [user]); // Re-sync tracking if user logs in/out
+
+  const handleAuthSuccess = (userData, userToken) => {
+    if (!userData || !userToken) {
+      console.error('Invalid auth data received');
+      return;
+    }
+    setUser(userData);
+    setToken(userToken);
+    localStorage.setItem('user', JSON.stringify(userData));
+    localStorage.setItem('token', userToken);
+    setActiveTab('dashboard');
+  };
+
+  const handleLogout = async () => {
+    try {
+      if (token) {
+        await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/auth/logout`, { 
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+    setUser(null);
+    setToken(null);
+    localStorage.removeItem('user');
+    localStorage.removeItem('token');
+    sessionStorage.removeItem('session_id');
+    sessionStorage.removeItem('view_tracked');
+    setActiveTab('login');
+  };
 
   const handleDeviceClick = (id) => {
     setSelectedDeviceId(id);
@@ -21,7 +151,8 @@ function App() {
 
   return (
     <div className="dashboard-container">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
+      <Toaster position="top-right" reverseOrder={false} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} user={user} onLogout={handleLogout} />
       <main className="main-content">
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' ? (
@@ -45,7 +176,7 @@ function App() {
 
               <StatsGrid metrics={metrics} />
               <NetworkChart history={history} />
-              <DeviceTable onViewAll={() => setActiveTab('devices')} />
+              <DeviceTable onViewAll={() => setActiveTab('devices')} user={user} />
             </motion.div>
           ) : activeTab === 'devices' ? (
             <motion.div
@@ -55,12 +186,14 @@ function App() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
             >
-              <Devices onDeviceClick={handleDeviceClick} />
+              <Devices onDeviceClick={handleDeviceClick} user={user} />
             </motion.div>
           ) : activeTab === 'deviceDetails' ? (
             <DeviceDetails 
               deviceId={selectedDeviceId} 
               onBack={() => setActiveTab('devices')} 
+              user={user}
+              token={token}
             />
           ) : activeTab === 'analytics' ? (
             <motion.div
@@ -70,7 +203,33 @@ function App() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
             >
-              <Analytics />
+              <Analytics user={user} token={token} />
+            </motion.div>
+          ) : activeTab === 'settings' ? (
+            <AdminSettings token={token} user={user} />
+          ) : activeTab === 'about' ? (
+            <About />
+          ) : activeTab === 'login' ? (
+            <Auth onAuthSuccess={handleAuthSuccess} />
+          ) : activeTab === 'security' ? (
+            <motion.div
+              key="security"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.2 }}
+            >
+              <Management user={user} token={token} />
+            </motion.div>
+          ) : activeTab === 'budget' ? (
+            <motion.div
+              key="budget"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.2 }}
+            >
+              <BudgetDashboard token={token} />
             </motion.div>
           ) : (
             <motion.div

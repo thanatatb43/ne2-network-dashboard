@@ -3,10 +3,10 @@ import { Activity, Database, CheckCircle, Globe } from 'lucide-react';
 
 const StatsGrid = ({ metrics }) => {
   const stats = [
-    { label: 'อุปกรณ์เครือข่ายทั้งหมด', value: `${metrics.totalDevices || 0} Node`, icon: Database, color: 'var(--accent-primary)' },
-    { label: 'อุปกรณ์ที่ออนไลน์', value: `${metrics.onlineDevices || 0} Node`, icon: CheckCircle, color: 'var(--accent-success)' },
+    { label: 'อุปกรณ์เครือข่ายทั้งหมด', value: `${metrics.totalDevices || 0} Devices`, icon: Database, color: 'var(--accent-primary)' },
+    { label: 'อุปกรณ์ที่ออนไลน์', value: `${metrics.onlineDevices || 0} Devices`, icon: CheckCircle, color: 'var(--accent-success)' },
     { label: 'ค่าเฉลี่ย กฟฉ.2', value: `${metrics.latency || 0} ms`, icon: Activity, color: 'var(--accent-warning)' },
-    { label: 'ความเร็วเน็ตของคุณ', value: `${metrics.throughput || 0} Mb/s`, icon: Globe, color: 'var(--accent-secondary)' },
+    { label: 'ค่าเฉลี่ย Packet Loss', value: `${metrics.packetLoss || 0} %`, icon: Globe, color: 'var(--accent-secondary)' },
   ];
 
   return (
