@@ -264,7 +264,7 @@ const BudgetDashboard = ({ token }) => {
     { title: 'งบประมาณทั้งหมด', value: `฿${totalRow.budget_allocated.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: 'Allocated', icon: Wallet, color: '#a855f7' },
     { title: 'งบประมาณที่ใช้ไปแล้ว', value: `฿${totalRow.budget_used.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: `${totalRow.usage_percentage}% Used`, icon: DollarSign, color: '#3b82f6' },
     { title: 'คงเหลือ', value: `฿${totalRow.remaining_budget.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: `${(100 - totalRow.usage_percentage).toFixed(1)}% Left`, icon: Target, color: totalRow.remaining_budget < 0 ? '#ef4444' : '#10b981' },
-    { title: 'งบประมาณที่ใช้ไปแล้ว', value: `฿${(totalRow.budget_used / (new Date().getMonth() + 1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: 'YTD Avg', icon: TrendingUp, color: '#f59e0b' },
+    { title: 'งบประมาณที่ใช้ไปแล้ว', value: `฿${(totalRow.budget_used / (new Date().getMonth() + 1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: 'ปัจจุบัน', icon: TrendingUp, color: '#f59e0b' },
   ] : [
     { title: 'งบประมาณทั้งหมด', value: '฿0', change: '-', icon: Wallet, color: '#a855f7' },
     { title: 'งบประมาณที่ใช้ไปแล้ว', value: '฿0', change: '-', icon: DollarSign, color: '#3b82f6' },
@@ -583,7 +583,7 @@ const BudgetDashboard = ({ token }) => {
                 </select>
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', fontWeight: 500 }}>ศูนย์ต้นทุน (Cost Center)</label>
+                <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', fontWeight: 500 }}>รหัสบัญชี</label>
                 <input
                   list="cost-centers"
                   value={searchFormData.cost_center}
