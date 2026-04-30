@@ -263,17 +263,17 @@ const AdminSettings = ({ token, user: currentUser }) => {
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: '#fff',
+                      color: 'var(--text-primary)',
                       outline: 'none',
                       cursor: 'pointer',
                       fontSize: '0.85rem',
                       fontWeight: 600
                     }}
                   >
-                    <option value="10" style={{ background: '#1e293b' }}>10</option>
-                    <option value="25" style={{ background: '#1e293b' }}>25</option>
-                    <option value="50" style={{ background: '#1e293b' }}>50</option>
-                    <option value="100" style={{ background: '#1e293b' }}>100</option>
+                    <option value="10" style={{ background: '#ffffff', color: '#0f172a' }}>10</option>
+                    <option value="25" style={{ background: '#ffffff', color: '#0f172a' }}>25</option>
+                    <option value="50" style={{ background: '#ffffff', color: '#0f172a' }}>50</option>
+                    <option value="100" style={{ background: '#ffffff', color: '#0f172a' }}>100</option>
                   </select>
                 </div>
                 <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.5rem 1rem', gap: '0.5rem', minWidth: '250px', borderRadius: '0.5rem' }}>
@@ -283,7 +283,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                     placeholder="Search users..." 
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    style={{ background: 'transparent', border: 'none', color: '#fff', outline: 'none', width: '100%' }}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none', width: '100%' }}
                     className="krub-regular"
                   />
                 </div>
@@ -301,7 +301,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                   <thead>
-                    <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
+                    <tr style={{ background: 'var(--glass-bg-subtle)' }}>
                       <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }} className="krub-medium">User</th>
                       <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }} className="krub-medium">Role</th>
                       <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }} className="krub-medium">Branch/Division</th>
@@ -316,7 +316,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           className="table-row-hover"
-                          style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}
+                          style={{ borderBottom: '1px solid var(--border-subtle)' }}
                         >
                           <td style={{ padding: '1rem 1.5rem' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -339,7 +339,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                           <td style={{ padding: '1rem 1.5rem' }}>
                             <span style={{ 
                               fontSize: '0.7rem', fontWeight: 700, padding: '0.2rem 0.5rem', borderRadius: '0.5rem',
-                              background: user.role?.includes('admin') ? 'rgba(52, 211, 153, 0.1)' : 'rgba(255,255,255,0.05)',
+                              background: user.role?.includes('admin') ? 'rgba(52, 211, 153, 0.1)' : 'rgba(128,128,128,0.1)',
                               color: user.role?.includes('admin') ? 'var(--accent-success)' : 'var(--text-secondary)',
                               textTransform: 'uppercase'
                             }}>
@@ -405,7 +405,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
 
               {/* Pagination Controls */}
               {!loading && filteredUsers.length > itemsPerPage && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(255,255,255,0.01)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid var(--border-subtle)', background: 'var(--glass-bg-subtle)' }}>
                   <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                     Showing {indexOfFirstUser + 1} to {Math.min(indexOfLastUser, filteredUsers.length)} of {filteredUsers.length} users
                   </span>
@@ -413,8 +413,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                     <button
                       onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                       disabled={currentPage === 1}
-                      className="glass"
-                      style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: 'none', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1, color: '#fff' }}
+                      style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1, color: '#0f172a' }}
                     >
                       Prev
                     </button>
@@ -424,8 +423,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                     <button
                       onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                       disabled={currentPage === totalPages}
-                      className="glass"
-                      style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: 'none', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1, color: '#fff' }}
+                      style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1, color: '#0f172a' }}
                     >
                       Next
                     </button>
@@ -477,7 +475,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                     <input 
                       type="text" 
                       className="glass"
-                      style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', outline: 'none', borderRadius: '0.5rem' }}
+                      style={{ width: '100%', padding: '0.75rem', background: 'var(--glass-bg-subtle)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', outline: 'none', borderRadius: '0.5rem' }}
                       value={editingUser.first_name || ''}
                       onChange={(e) => setEditingUser({...editingUser, first_name: e.target.value})}
                     />
@@ -487,7 +485,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                     <input 
                       type="text" 
                       className="glass"
-                      style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', outline: 'none', borderRadius: '0.5rem' }}
+                      style={{ width: '100%', padding: '0.75rem', background: 'var(--glass-bg-subtle)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', outline: 'none', borderRadius: '0.5rem' }}
                       value={editingUser.last_name || ''}
                       onChange={(e) => setEditingUser({...editingUser, last_name: e.target.value})}
                     />
@@ -500,9 +498,9 @@ const AdminSettings = ({ token, user: currentUser }) => {
                       style={{ 
                         width: '100%', 
                         padding: '0.75rem', 
-                        background: 'rgba(22, 20, 50, 0.95)', 
-                        border: '1px solid rgba(255,255,255,0.1)', 
-                        color: editingUser.role === 'super_admin' ? 'var(--text-secondary)' : '#fff', 
+                        background: 'var(--card-bg)', 
+                        border: '1px solid var(--border-subtle)', 
+                        color: editingUser.role === 'super_admin' ? 'var(--text-secondary)' : 'var(--text-primary)', 
                         outline: 'none', 
                         borderRadius: '0.5rem', 
                         appearance: 'none',
@@ -525,7 +523,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                     <input 
                       type="text" 
                       className="glass"
-                      style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', outline: 'none', borderRadius: '0.5rem' }}
+                      style={{ width: '100%', padding: '0.75rem', background: 'var(--glass-bg-subtle)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', outline: 'none', borderRadius: '0.5rem' }}
                       value={editingUser.pea_branch || ''}
                       onChange={(e) => setEditingUser({...editingUser, pea_branch: e.target.value})}
                     />
@@ -535,7 +533,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                     <input 
                       type="text" 
                       className="glass"
-                      style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', outline: 'none', borderRadius: '0.5rem' }}
+                      style={{ width: '100%', padding: '0.75rem', background: 'var(--glass-bg-subtle)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', outline: 'none', borderRadius: '0.5rem' }}
                       value={editingUser.pea_division || ''}
                       onChange={(e) => setEditingUser({...editingUser, pea_division: e.target.value})}
                     />
@@ -582,7 +580,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                           type="password" 
                           placeholder="Min 10 characters..."
                           className="glass"
-                          style={{ width: '100%', padding: '0.6rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem', outline: 'none' }}
+                          style={{ width: '100%', padding: '0.6rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem', outline: 'none' }}
                           value={passwordData.password}
                           onChange={(e) => setPasswordData({...passwordData, password: e.target.value})}
                         />
@@ -593,7 +591,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
                           type="password" 
                           placeholder="Repeat password..."
                           className="glass"
-                          style={{ width: '100%', padding: '0.6rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem', outline: 'none' }}
+                          style={{ width: '100%', padding: '0.6rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem', outline: 'none' }}
                           value={passwordData.confirm_password}
                           onChange={(e) => setPasswordData({...passwordData, confirm_password: e.target.value})}
                         />

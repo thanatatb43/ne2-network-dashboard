@@ -81,18 +81,26 @@ const About = () => {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', gap: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '0.75rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ display: 'flex', gap: '1rem', padding: '1rem', background: 'var(--glass-bg-subtle)', borderRadius: '0.75rem', border: '1px solid var(--border-subtle)' }}>
                 <div style={{ color: 'var(--accent-primary)' }}><ShieldCheck size={18} /></div>
                 <div>
                   <div className="krub-semibold" style={{ fontSize: '0.9rem' }}>ตำแหน่ง</div>
                   <div className="krub-regular" style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>นักระบบงานคอมพิวเตอร์</div>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.03)', borderRadius: '0.75rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ display: 'flex', gap: '1rem', padding: '1rem', background: 'var(--glass-bg-subtle)', borderRadius: '0.75rem', border: '1px solid var(--border-subtle)' }}>
                 <div style={{ color: 'var(--accent-primary)' }}><Globe size={18} /></div>
                 <div>
                   <div className="krub-semibold" style={{ fontSize: '0.9rem' }}>สังกัด</div>
                   <div className="krub-regular" style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ผคข.กดส.ฉ.2 (การไฟฟ้าส่วนภูมิภาคเขต 2 ภาคตะวันออกเฉียงเหนือ)</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '1rem', padding: '1rem', background: 'var(--bg-accent-subtle)', borderRadius: '0.75rem', border: '1px solid var(--border-color)', marginTop: '0.5rem' }}>
+                <div style={{ color: 'var(--accent-primary)' }}><Info size={18} /></div>
+                <div>
+                  <div className="krub-regular" style={{ color: 'var(--text-primary)', fontSize: '0.85rem', lineHeight: '1.5' }}>
+                    หากพบข้อมูลไม่ถูกต้องหรือไม่ครบถ้วน กรุณาติดต่อ <strong style={{ color: 'var(--accent-primary)' }}>(22)10369</strong> เพื่อเร่งดำเนินการแก้ไขโดยเร็วที่สุด
+                  </div>
                 </div>
               </div>
             </div>
@@ -116,7 +124,7 @@ const About = () => {
             ) : null}
 
             {stats.map((stat, idx) => (
-              <div key={idx} className="glass" style={{ padding: '1.25rem', borderRadius: '1rem', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <div key={idx} className="glass" style={{ padding: '1.25rem', borderRadius: '1rem', background: 'var(--glass-bg-subtle)', border: '1px solid var(--border-subtle)' }}>
                 <div style={{ color: stat.color, marginBottom: '0.75rem' }}>
                   <stat.icon size={20} />
                 </div>

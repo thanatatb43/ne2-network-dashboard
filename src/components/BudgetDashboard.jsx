@@ -263,13 +263,13 @@ const BudgetDashboard = ({ token }) => {
   const stats = totalRow ? [
     { title: 'งบประมาณทั้งหมด', value: `฿${totalRow.budget_allocated.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: 'Allocated', icon: Wallet, color: '#a855f7' },
     { title: 'งบประมาณที่ใช้ไปแล้ว', value: `฿${totalRow.budget_used.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: `${totalRow.usage_percentage}% Used`, icon: DollarSign, color: '#3b82f6' },
-    { title: 'คงเหลือ', value: `฿${totalRow.remaining_budget.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: `${(100 - totalRow.usage_percentage).toFixed(1)}% Left`, icon: Target, color: totalRow.remaining_budget < 0 ? '#ef4444' : '#10b981' },
-    { title: 'งบประมาณที่ใช้ไปแล้ว', value: `฿${(totalRow.budget_used / (new Date().getMonth() + 1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: 'ปัจจุบัน', icon: TrendingUp, color: '#f59e0b' },
+    { title: 'คงเหลือ', value: `฿${totalRow.remaining_budget.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: `${(100 - totalRow.usage_percentage).toFixed(1)}% Left`, icon: Target, color: totalRow.remaining_budget < 0 ? 'var(--accent-danger)' : 'var(--accent-success)' },
+    { title: 'เฉลี่ยรายเดือน', value: `฿${(totalRow.budget_used / (new Date().getMonth() + 1)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`, change: 'Average', icon: TrendingUp, color: '#f59e0b' },
   ] : [
     { title: 'งบประมาณทั้งหมด', value: '฿0', change: '-', icon: Wallet, color: '#a855f7' },
     { title: 'งบประมาณที่ใช้ไปแล้ว', value: '฿0', change: '-', icon: DollarSign, color: '#3b82f6' },
     { title: 'คงเหลือ', value: '฿0', change: '-', icon: Target, color: '#10b981' },
-    { title: 'งบประมาณที่ใช้ไปแล้ว', value: '฿0', change: '-', icon: TrendingUp, color: '#f59e0b' },
+    { title: 'เฉลี่ยรายเดือน', value: '฿0', change: '-', icon: TrendingUp, color: '#f59e0b' },
   ];
 
   const colors = ['#a855f7', '#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6'];
@@ -300,7 +300,6 @@ const BudgetDashboard = ({ token }) => {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
-      className="light-theme"
       style={{
         padding: '2rem',
         paddingBottom: '4rem',
@@ -448,7 +447,7 @@ const BudgetDashboard = ({ token }) => {
                                 <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Code: {data.code}</p>
                                 <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                                   <p style={{ margin: 0, color: data.color, fontSize: '0.85rem' }}>ได้รับ: ฿{data.allocated.toLocaleString()}</p>
-                                  <p style={{ margin: 0, color: 'var(--accent-danger)', fontSize: '0.85rem' }}>ใช้แล้ว: ฿{data.spent.toLocaleString()}</p>
+                                  <p style={{ margin: 0, color: 'var(--accent-warning)', fontSize: '0.85rem' }}>ใช้แล้ว: ฿{data.spent.toLocaleString()}</p>
                                 </div>
                               </div>
                             );
@@ -462,7 +461,7 @@ const BudgetDashboard = ({ token }) => {
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Bar>
-                      <Bar dataKey="spent" name="งบประมาณที่ใช้ไป" fill="var(--accent-danger)" radius={[4, 4, 0, 0]} barSize={15} />
+                      <Bar dataKey="spent" name="งบประมาณที่ใช้ไป" fill="var(--accent-warning)" radius={[4, 4, 0, 0]} barSize={15} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
@@ -577,7 +576,7 @@ const BudgetDashboard = ({ token }) => {
             <form onSubmit={handleSearch} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.5rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', fontWeight: 500 }}>ปีงบประมาณ</label>
-                <select value={searchFormData.year} onChange={(e) => setSearchFormData({ ...searchFormData, year: e.target.value })} className="glass" style={{ width: '100%', padding: '0.75rem', border: '1px solid rgba(0,0,0,0.15)', color: 'var(--text-primary)', borderRadius: '1.5rem', background: 'var(--card-bg)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)', fontSize: '0.95rem' }}>
+                <select value={searchFormData.year} onChange={(e) => setSearchFormData({ ...searchFormData, year: e.target.value })} style={{ width: '100%', padding: '0.75rem', border: '1px solid rgba(0,0,0,0.15)', color: 'var(--text-primary)', borderRadius: '1.5rem', background: 'var(--card-bg)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)', fontSize: '0.95rem', appearance: 'auto', WebkitAppearance: 'auto' }}>
                   <option value="">ทั้งหมด</option>
                   {searchSelectors.year?.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
@@ -588,9 +587,8 @@ const BudgetDashboard = ({ token }) => {
                   list="cost-centers"
                   value={searchFormData.cost_center}
                   onChange={(e) => setSearchFormData({ ...searchFormData, cost_center: e.target.value })}
-                  className="glass"
                   placeholder="พิมพ์รหัสหรือชื่อ..."
-                  style={{ width: '100%', padding: '0.75rem', border: '1px solid rgba(0,0,0,0.15)', color: 'var(--text-primary)', borderRadius: '1.5rem', background: 'var(--card-bg)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)', fontSize: '0.95rem' }}
+                  style={{ width: '100%', padding: '0.75rem', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '1.5rem', background: 'var(--input-bg)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)', fontSize: '0.95rem' }}
                 />
                 <datalist id="cost-centers">
                   {searchSelectors.cost_center?.map((c, i) => {
@@ -613,7 +611,6 @@ const BudgetDashboard = ({ token }) => {
                     setSearchFormData({ ...searchFormData, clearing_account_name: e.target.value });
                     triggerListVisibility('clearing_account');
                   }}
-                  className="glass"
                   placeholder="พิมพ์ชื่อบัญชี..."
                   style={{ width: '100%', padding: '0.75rem', border: '1px solid rgba(0,0,0,0.15)', color: 'var(--text-primary)', borderRadius: '1.5rem', background: 'var(--card-bg)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)', fontSize: '0.95rem' }}
                 />
@@ -630,7 +627,6 @@ const BudgetDashboard = ({ token }) => {
                     setSearchFormData({ ...searchFormData, username: e.target.value });
                     triggerListVisibility('username');
                   }}
-                  className="glass"
                   placeholder="ระบุชื่อผู้ใช้..."
                   style={{ width: '100%', padding: '0.75rem', border: '1px solid rgba(0,0,0,0.15)', color: 'var(--text-primary)', borderRadius: '1.5rem', background: 'var(--card-bg)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)', fontSize: '0.95rem' }}
                 />
@@ -647,7 +643,6 @@ const BudgetDashboard = ({ token }) => {
                     setSearchFormData({ ...searchFormData, reference_doc_no: e.target.value });
                     triggerListVisibility('reference_doc');
                   }}
-                  className="glass"
                   placeholder="ระบุเลขที่เอกสาร..."
                   style={{ width: '100%', padding: '0.75rem', border: '1px solid rgba(0,0,0,0.15)', color: 'var(--text-primary)', borderRadius: '1.5rem', background: 'var(--card-bg)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)', fontSize: '0.95rem' }}
                 />
@@ -664,7 +659,6 @@ const BudgetDashboard = ({ token }) => {
                     setSearchFormData({ ...searchFormData, description: e.target.value });
                     triggerListVisibility('description');
                   }}
-                  className="glass"
                   placeholder="ค้นหาตามรายละเอียด..."
                   style={{ width: '100%', padding: '0.75rem', border: '1px solid rgba(0,0,0,0.15)', color: 'var(--text-primary)', borderRadius: '1.5rem', background: 'var(--card-bg)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.05)', fontSize: '0.95rem' }}
                 />
@@ -721,24 +715,24 @@ const BudgetDashboard = ({ token }) => {
                     />
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                  <div className="glass" style={{ padding: '0.75rem 1.25rem', borderRadius: '1.5rem', borderLeft: '5px solid var(--accent-success)', background: 'rgba(16, 185, 129, 0.05)' }}>
-                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>ยอดรวมเงินเบิกจ่าย</p>
-                    <h3 style={{ margin: '0.25rem 0 0', color: 'var(--accent-success)', fontSize: '1.25rem' }}>฿{positiveTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
-                  </div>
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
                   <div className="glass" style={{ padding: '0.75rem 1.25rem', borderRadius: '1.5rem', borderLeft: '5px solid var(--accent-danger)', background: 'rgba(239, 68, 68, 0.05)' }}>
-                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>ยอดรวมไม่เบิกจ่าย</p>
-                    <h3 style={{ margin: '0.25rem 0 0', color: 'var(--accent-danger)', fontSize: '1.25rem' }}>฿{Math.abs(negativeTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>ยอดรวมเงินเบิกจ่าย</p>
+                    <h3 style={{ margin: '0.25rem 0 0', color: 'var(--accent-danger)', fontSize: '1.25rem' }}>฿{positiveTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
                   </div>
-                  <div className="glass" style={{ padding: '0.75rem 1.25rem', borderRadius: '1.5rem', borderLeft: '5px solid var(--accent-primary)', background: 'rgba(168, 85, 247, 0.05)' }}>
+                  <div className="glass" style={{ padding: '0.75rem 1.25rem', borderRadius: '1.5rem', borderLeft: '5px solid var(--accent-success)', background: 'rgba(16, 185, 129, 0.05)' }}>
+                    <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>ยอดรวมไม่เบิกจ่าย</p>
+                    <h3 style={{ margin: '0.25rem 0 0', color: 'var(--accent-success)', fontSize: '1.25rem' }}>฿{Math.abs(negativeTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                  </div>
+                  <div className="glass" style={{ padding: '0.75rem 1.25rem', borderRadius: '1.5rem', borderLeft: '5px solid var(--accent-warning)', background: 'rgba(245, 158, 11, 0.05)' }}>
                     <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600 }}>ยอดเบิกจ่ายทั้งหมด</p>
-                    <h3 style={{ margin: '0.25rem 0 0', color: 'var(--accent-primary)', fontSize: '1.25rem' }}>฿{(positiveTotal + negativeTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
+                    <h3 style={{ margin: '0.25rem 0 0', color: 'var(--accent-warning)', fontSize: '1.25rem' }}>฿{(positiveTotal + negativeTotal).toLocaleString(undefined, { minimumFractionDigits: 2 })}</h3>
                   </div>
                 </div>
               </div>
 
               <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: '1.5rem', background: 'var(--card-bg)' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.95rem' }}>
+                <table style={{ width: '100%', minWidth: '1000px', borderCollapse: 'collapse', fontSize: '0.95rem' }}>
                   <thead style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '2px solid var(--border-color)' }}>
                     <tr>
                       {[
@@ -783,7 +777,7 @@ const BudgetDashboard = ({ token }) => {
                           <td style={{ padding: '1.25rem 1rem' }}>{item.username}</td>
                           <td style={{ padding: '1.25rem 1rem' }}>{item.year}</td>
                           <td style={{ padding: '1.25rem 1rem', color: 'var(--text-secondary)' }}>{item.clearing_account_name}</td>
-                          <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 700, fontSize: '1rem', color: parseFloat(item.value_co_curr || 0) < 0 ? 'var(--accent-danger)' : 'var(--accent-success)' }}>
+                          <td style={{ padding: '1.25rem 1rem', textAlign: 'right', fontWeight: 700, fontSize: '1rem', color: parseFloat(item.value_co_curr || 0) < 0 ? 'var(--accent-success)' : 'var(--accent-danger)' }}>
                             ฿{parseFloat(item.value_co_curr || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </td>
                         </tr>

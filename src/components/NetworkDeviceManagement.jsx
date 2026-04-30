@@ -311,21 +311,21 @@ const NetworkDeviceManagement = ({ token, onBack, user }) => {
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: '#fff',
+                    color: '#0f172a',
                     outline: 'none',
                     cursor: 'pointer',
                     fontSize: '0.85rem',
                     fontWeight: 700,
                     paddingRight: '1.5rem',
                     appearance: 'none',
-                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0\' fill=\'none\' stroke=\'white\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
+                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%230f172a\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
                     backgroundRepeat: 'no-repeat',
                     backgroundPosition: 'right center',
                     backgroundSize: '1rem'
                   }}
                 >
                   {peaTypes.map(type => (
-                    <option key={type} value={type} style={{ background: '#1e293b' }}>{type}</option>
+                    <option key={type} value={type} style={{ background: '#ffffff', color: '#0f172a' }}>{type}</option>
                   ))}
                 </select>
               </div>
@@ -340,23 +340,23 @@ const NetworkDeviceManagement = ({ token, onBack, user }) => {
                   style={{
                     background: 'none',
                     border: 'none',
-                    color: '#fff',
+                    color: '#0f172a',
                     outline: 'none',
                     cursor: 'pointer',
                     fontSize: '0.85rem',
                     fontWeight: 700,
                     paddingRight: '1.5rem',
                     appearance: 'none',
-                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0\' fill=\'none\' stroke=\'white\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
+                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%230f172a\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
                     backgroundRepeat: 'no-repeat',
                     backgroundPosition: 'right center',
                     backgroundSize: '1rem'
                   }}
                 >
-                  <option value="10" style={{ background: '#1e293b' }}>10</option>
-                  <option value="25" style={{ background: '#1e293b' }}>25</option>
-                  <option value="50" style={{ background: '#1e293b' }}>50</option>
-                  <option value="100" style={{ background: '#1e293b' }}>100</option>
+                  <option value="10" style={{ background: '#ffffff', color: '#0f172a' }}>10</option>
+                  <option value="25" style={{ background: '#ffffff', color: '#0f172a' }}>25</option>
+                  <option value="50" style={{ background: '#ffffff', color: '#0f172a' }}>50</option>
+                  <option value="100" style={{ background: '#ffffff', color: '#0f172a' }}>100</option>
                 </select>
               </div>
               <div style={{ position: 'relative' }}>
@@ -371,9 +371,9 @@ const NetworkDeviceManagement = ({ token, onBack, user }) => {
                   style={{
                     padding: '0.5rem 1rem 0.5rem 2.5rem',
                     borderRadius: '0.5rem',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'rgba(0,0,0,0.2)',
-                    color: 'white',
+                    border: '1px solid var(--input-border)',
+                    background: 'var(--input-bg)',
+                    color: 'var(--text-primary)',
                     outline: 'none',
                     width: '200px'
                   }}
@@ -429,9 +429,9 @@ const NetworkDeviceManagement = ({ token, onBack, user }) => {
                   style={{
                     padding: '0.75rem',
                     borderRadius: '0.5rem',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: 'rgba(0,0,0,0.2)',
-                    color: 'white'
+                    border: '1px solid var(--input-border)',
+                    background: 'var(--input-bg)',
+                    color: 'var(--text-primary)'
                   }}
                   required={field.name === 'pea_name' || field.name === 'gateway'}
                 />
@@ -565,8 +565,7 @@ const NetworkDeviceManagement = ({ token, onBack, user }) => {
                 <button
                   onClick={prevPage}
                   disabled={currentPage === 1}
-                  className="glass"
-                  style={{ padding: '0.5rem', borderRadius: '0.25rem', border: 'none', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1, color: 'var(--text-primary)' }}
+                  style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1, color: 'var(--text-primary)' }}
                 >
                   <ChevronLeft size={16} />
                 </button>
@@ -576,8 +575,7 @@ const NetworkDeviceManagement = ({ token, onBack, user }) => {
                 <button
                   onClick={nextPage}
                   disabled={currentPage === totalPages}
-                  className="glass"
-                  style={{ padding: '0.5rem', borderRadius: '0.25rem', border: 'none', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1, color: 'var(--text-primary)' }}
+                  style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1, color: 'var(--text-primary)' }}
                 >
                   <ChevronRight size={16} />
                 </button>

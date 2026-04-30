@@ -400,9 +400,9 @@ const BudgetManagement = ({ token, onBack, user }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Show:</span>
-              <select value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} style={{ background: 'none', border: 'none', color: '#fff', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-                {[10, 25, 50, 100].map(v => <option key={v} value={v} style={{ background: '#1e293b' }}>{v}</option>)}
-                <option value={999999} style={{ background: '#1e293b' }}>All</option>
+              <select value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
+                {[10, 25, 50, 100].map(v => <option key={v} value={v} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{v}</option>)}
+                <option value={999999} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>All</option>
               </select>
             </div>
             {canAdd && (
@@ -439,7 +439,7 @@ const BudgetManagement = ({ token, onBack, user }) => {
           </div>
           <div style={{ position: 'relative', width: '300px' }}>
             <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-            <input type="text" placeholder={activeSubTab === 'budgets' ? "Search budgets..." : "Search transactions..."} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '0.6rem 1rem 0.6rem 2.5rem', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem', outline: 'none' }} />
+            <input type="text" placeholder={activeSubTab === 'budgets' ? "Search budgets..." : "Search transactions..."} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '0.6rem 1rem 0.6rem 2.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem', outline: 'none' }} />
           </div>
         </div>
 
@@ -578,10 +578,10 @@ const BudgetManagement = ({ token, onBack, user }) => {
                 value={currentPage}
                 onChange={(e) => setCurrentPage(Number(e.target.value))}
                 className="glass"
-                style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: '#fff', padding: '0.2rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', outline: 'none' }}
+                style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', padding: '0.2rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', outline: 'none' }}
               >
                 {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                  <option key={p} value={p} style={{ background: '#1e293b' }}>Page {p} of {totalPages}</option>
+                  <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>Page {p} of {totalPages}</option>
                 ))}
               </select>
 
@@ -608,36 +608,36 @@ const BudgetManagement = ({ token, onBack, user }) => {
               <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1.25rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>กลุ่มศูนย์ต้นทุน</label>
-                  <input type="text" list="cost_center_groups" name="cost_center_group" value={formData.cost_center_group} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem' }} />
+                  <input type="text" list="cost_center_groups" name="cost_center_group" value={formData.cost_center_group} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
                   <datalist id="cost_center_groups">
                     {selectors.cost_center_groups.map(g => <option key={g} value={g} />)}
                   </datalist>
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Account Code (ส่วนประกอบต้นทุน)</label>
-                  <input type="text" list="account_codes" name="account_code" value={formData.account_code} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem' }} />
+                  <input type="text" list="account_codes" name="account_code" value={formData.account_code} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
                   <datalist id="account_codes">
                     {selectors.account_codes.map(c => <option key={c} value={c} />)}
                   </datalist>
                 </div>
                 <div style={{ gridColumn: 'span 2' }}>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Account Name</label>
-                  <input type="text" list="account_names" name="account_name" value={formData.account_name} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem' }} />
+                  <input type="text" list="account_names" name="account_name" value={formData.account_name} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
                   <datalist id="account_names">
                     {selectors.account_names.map(n => <option key={n} value={n} />)}
                   </datalist>
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Budget Used (ต้นทุนจริง)</label>
-                  <input type="number" step="0.01" name="budget_used" value={formData.budget_used} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem' }} />
+                  <input type="number" step="0.01" name="budget_used" value={formData.budget_used} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Budget Allocated (ต/ทตามแผน)</label>
-                  <input type="number" step="0.01" name="budget_allocated" value={formData.budget_allocated} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem' }} />
+                  <input type="number" step="0.01" name="budget_allocated" value={formData.budget_allocated} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Year</label>
-                  <input type="text" list="years" name="year" value={formData.year} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem' }} />
+                  <input type="text" list="years" name="year" value={formData.year} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
                   <datalist id="years">
                     {selectors.years.map(y => <option key={y} value={y} />)}
                   </datalist>
@@ -645,15 +645,15 @@ const BudgetManagement = ({ token, onBack, user }) => {
                 <div>
                   <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Month / Period</label>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <input type="text" name="month" placeholder="Month" value={formData.month} onChange={handleInputChange} required className="glass" style={{ flex: 1, padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem' }} />
-                    <input type="text" name="period" placeholder="Period" value={formData.period} onChange={handleInputChange} required className="glass" style={{ flex: 1, padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem' }} />
+                    <input type="text" name="month" placeholder="Month" value={formData.month} onChange={handleInputChange} required className="glass" style={{ flex: 1, padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
+                    <input type="text" name="period" placeholder="Period" value={formData.period} onChange={handleInputChange} required className="glass" style={{ flex: 1, padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '1rem', gridColumn: 'span 2', marginTop: '1rem' }}>
                   <button type="submit" disabled={actionLoading} className="glass" style={{ flex: 1, padding: '1rem', background: 'var(--accent-primary)', color: '#fff', border: 'none', borderRadius: '0.75rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                     {actionLoading ? <Loader2 size={18} className="animate-spin" /> : <><Save size={18} /> {editingBudget ? 'บันทึกการแก้ไข' : 'เพิ่มข้อมูลงบประมาณ'}</>}
                   </button>
-                  <button type="button" onClick={resetForm} className="glass" style={{ padding: '1rem 2rem', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', border: 'none', borderRadius: '0.75rem', cursor: 'pointer' }}>ยกเลิก</button>
+                  <button type="button" onClick={resetForm} className="glass" style={{ padding: '1rem 2rem', background: 'var(--bg-accent-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderRadius: '0.75rem', cursor: 'pointer' }}>ยกเลิก</button>
                 </div>
               </form>
             </motion.div>
@@ -699,10 +699,10 @@ const BudgetManagement = ({ token, onBack, user }) => {
                     value={uploadFormData.year}
                     onChange={(e) => setUploadFormData({ ...uploadFormData, year: e.target.value })}
                     className="glass"
-                    style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem', outline: 'none' }}
+                    style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem', outline: 'none' }}
                   >
                     {Array.from({ length: new Date().getFullYear() - 2023 + 1 }, (_, i) => 2023 + i).map(y => (
-                      <option key={y} value={y} style={{ background: '#1e293b' }}>{y}</option>
+                      <option key={y} value={y} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{y}</option>
                     ))}
                   </select>
                 </div>
@@ -713,17 +713,17 @@ const BudgetManagement = ({ token, onBack, user }) => {
                     value={uploadFormData.cost_center}
                     onChange={(e) => setUploadFormData({ ...uploadFormData, cost_center: e.target.value })}
                     className="glass"
-                    style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', borderRadius: '0.5rem', outline: 'none' }}
+                    style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem', outline: 'none' }}
                   >
-                    <option value="53051060" style={{ background: '#1e293b' }}>53051060 ค่าบำรุงฯ/ซ่อม-IT</option>
-                    <option value="53032070" style={{ background: '#1e293b' }}>53032070 ค่าInst.Equipสื่อ</option>
-                    <option value="53032080" style={{ background: '#1e293b' }}>53032080 คชจ.ใช้ Internet</option>
+                    <option value="53051060" style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>53051060 ค่าบำรุงฯ/ซ่อม-IT</option>
+                    <option value="53032070" style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>53032070 ค่าInst.Equipสื่อ</option>
+                    <option value="53032080" style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>53032080 คชจ.ใช้ Internet</option>
                   </select>
                 </div>
 
                 <div
                   style={{
-                    border: '2px dashed rgba(255,255,255,0.1)',
+                    border: '2px dashed var(--input-border)',
                     borderRadius: '1rem',
                     padding: '2rem',
                     textAlign: 'center',
@@ -796,7 +796,7 @@ const BudgetManagement = ({ token, onBack, user }) => {
                   >
                     {actionLoading ? <Loader2 size={18} className="animate-spin" /> : <><Upload size={18} /> เริ่มอัพโหลด</>}
                   </button>
-                  <button type="button" onClick={() => setShowUploadModal(false)} className="glass" style={{ padding: '1rem 2rem', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', border: 'none', borderRadius: '0.75rem', cursor: 'pointer' }}>ยกเลิก</button>
+                  <button type="button" onClick={() => setShowUploadModal(false)} className="glass" style={{ padding: '1rem 2rem', background: 'var(--bg-accent-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderRadius: '0.75rem', cursor: 'pointer' }}>ยกเลิก</button>
                 </div>
               </form>
             </motion.div>
@@ -831,7 +831,7 @@ const BudgetManagement = ({ token, onBack, user }) => {
                 <button
                   onClick={() => setShowUploadConfirm(false)}
                   className="glass"
-                  style={{ flex: 1, padding: '0.75rem', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', border: 'none', borderRadius: '0.75rem', cursor: 'pointer' }}
+                  style={{ flex: 1, padding: '0.75rem', background: 'var(--bg-accent-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderRadius: '0.75rem', cursor: 'pointer' }}
                 >
                   ยกเลิก
                 </button>
@@ -870,10 +870,10 @@ const BudgetManagement = ({ token, onBack, user }) => {
                 {uploadResult.data && Array.isArray(uploadResult.data) && uploadResult.data.length > 0 && (
                   <div>
                     <p style={{ marginBottom: '0.75rem', fontWeight: 600 }}>ข้อมูลที่อัพโหลด:</p>
-                    <div style={{ maxHeight: '400px', overflowY: 'auto', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '0.5rem' }}>
+                    <div style={{ maxHeight: '400px', overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: '0.5rem' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-                        <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: '#1e293b' }}>
-                          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                        <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--card-bg)' }}>
+                          <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                             <th style={{ padding: '0.5rem', textAlign: 'left' }}>Postg Date</th>
                             <th style={{ padding: '0.5rem', textAlign: 'left' }}>Reference No</th>
                             <th style={{ padding: '0.5rem', textAlign: 'left' }}>Description</th>
@@ -882,7 +882,7 @@ const BudgetManagement = ({ token, onBack, user }) => {
                         </thead>
                         <tbody>
                           {uploadResult.data.map((item, idx) => (
-                            <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                             <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle)', opacity: 0.8 }}>
                               <td style={{ padding: '0.5rem' }}>{item.posting_date || '-'}</td>
                               <td style={{ padding: '0.5rem' }}>{item.reference_doc_no || '-'}</td>
                               <td style={{ padding: '0.5rem' }}>{item.description || '-'}</td>

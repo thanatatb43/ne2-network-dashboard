@@ -14,7 +14,7 @@ const NetworkChart = ({ history }) => {
                 <stop offset="95%" stopColor="var(--accent-primary)" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--grid-stroke)" vertical={false} />
             <XAxis
               dataKey="time"
               stroke="var(--text-secondary)"
@@ -31,10 +31,11 @@ const NetworkChart = ({ history }) => {
             />
             <Tooltip
               contentStyle={{
-                background: 'rgba(15, 23, 42, 0.9)',
-                border: '1px solid var(--border-color)',
+                background: 'var(--tooltip-bg)',
+                border: '1px solid var(--border-subtle)',
                 borderRadius: '8px',
-                backdropFilter: 'blur(4px)'
+                backdropFilter: 'blur(4px)',
+                color: 'var(--text-primary)'
               }}
               itemStyle={{ color: 'var(--accent-primary)' }}
             />

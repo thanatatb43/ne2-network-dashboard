@@ -61,7 +61,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
         const currentStats = metricsResult.data.find(d => (d.device_id || d.id) === deviceId);
         if (currentStats) {
           setRealtimeStats({
-            status: currentStats.status === 'up' ? 'online' : 'offline',
+            status: (currentStats.alive === true || currentStats.status === 'up' || currentStats.status === 'online' || currentStats.latency_ms !== null || currentStats.latency !== null) ? 'online' : 'offline',
             latency: currentStats.latency_ms,
             packetLoss: currentStats.packet_loss,
             lastUpdated: currentStats.updated_at || currentStats.checked_at || new Date().toISOString()
@@ -135,8 +135,8 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
               const dateString = d.date || d.createdAt;
               const dateObj = new Date(dateString);
               return {
-                time: isNaN(dateObj.getTime()) ? 'Invalid Date' : dateObj.toLocaleDateString('th-TH', { 
-                  day: 'numeric', 
+                time: isNaN(dateObj.getTime()) ? 'Invalid Date' : dateObj.toLocaleDateString('th-TH', {
+                  day: 'numeric',
                   month: 'short',
                   year: 'numeric'
                 }),
@@ -205,19 +205,19 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
 
   const handleExportPDF = () => {
     setIsExporting(true);
-    
+
     // Create a standalone wrapper for the PDF table
     const wrapper = document.createElement('div');
     wrapper.style.padding = '20px';
     wrapper.style.background = '#ffffff'; // White background for printing
     wrapper.style.color = '#000000';
     wrapper.style.fontFamily = 'sans-serif';
-    
+
     let tableRows = fullAvailabilityHistory.map(item => {
       const dateString = item.date || item.createdAt;
       const dateObj = new Date(dateString);
-      const displayDate = isNaN(dateObj.getTime()) ? 'Invalid Date' : dateObj.toLocaleDateString('th-TH', { 
-        day: 'numeric', month: 'short', year: 'numeric' 
+      const displayDate = isNaN(dateObj.getTime()) ? 'Invalid Date' : dateObj.toLocaleDateString('th-TH', {
+        day: 'numeric', month: 'short', year: 'numeric'
       });
       const uptime = item.uptime_pct != null ? parseFloat(item.uptime_pct).toFixed(2) : '-';
       const latency = item.avg_latency_ms != null ? parseFloat(item.avg_latency_ms).toFixed(2) : '-';
@@ -246,14 +246,14 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
         </tbody>
       </table>
     `;
-    
+
     // Configure html2pdf options
     const opt = {
-      margin:       0.5,
-      filename:     `Device_Report_${deviceData?.pea_name || 'Network'}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { scale: 2, useCORS: true, logging: false },
-      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+      margin: 0.5,
+      filename: `Device_Report_${deviceData?.pea_name || 'Network'}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, logging: false },
+      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
     };
 
     html2pdf().set(opt).from(wrapper).save().then(() => {
@@ -310,11 +310,13 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
               padding: '0.75rem',
               borderRadius: '50%',
               border: 'none',
+              background: 'var(--accent-primary)',
               color: '#fff',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center'
+              justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(168, 85, 247, 0.3)'
             }}
           >
             <ChevronLeft size={20} />
@@ -330,7 +332,19 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             onClick={handleExportPDF}
             disabled={isExporting}
             className="glass"
-            style={{ padding: '0.75rem 1.5rem', borderRadius: '0.75rem', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', cursor: isExporting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', opacity: isExporting ? 0.7 : 1 }}
+            style={{
+              padding: '0.75rem 1.5rem',
+              borderRadius: '0.75rem',
+              color: 'var(--accent-primary)',
+              background: 'var(--input-bg)',
+              border: '1px solid var(--input-border)',
+              cursor: isExporting ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              opacity: isExporting ? 0.7 : 1,
+              fontWeight: 600
+            }}
             title="Export Report to PDF"
           >
             {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
@@ -351,15 +365,15 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             style={{
               padding: '0.75rem 1.5rem',
               borderRadius: '0.75rem',
-              background: !isAdmin ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg, var(--accent-primary), #818cf8)',
-              color: !isAdmin ? 'var(--text-secondary)' : '#fff',
-              border: !isAdmin ? '1px solid rgba(255,255,255,0.1)' : 'none',
+              background: !isAdmin ? 'linear-gradient(135deg, var(--accent-primary), #c881f8ff)' : 'linear-gradient(135deg, var(--accent-primary), #c881f8ff)',
+              color: '#ffffff',
+              border: !isAdmin ? '1px solid var(--border-subtle)' : 'none',
               fontWeight: 600,
               cursor: (scanStatus === 'scanning' || !isAdmin) ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              boxShadow: !isAdmin ? 'none' : '0 4px 20px rgba(56, 189, 248, 0.3)',
+              boxShadow: !isAdmin ? 'none' : '0 4px 20px rgba(168, 85, 247, 0.3)',
               opacity: (scanStatus === 'scanning' || !isAdmin) ? 0.7 : 1
             }}
             title={!isAdmin ? 'Administrative role required for live scanning' : ''}
@@ -386,7 +400,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
               </div>
               <Loader2 className="animate-spin" size={20} color="var(--accent-primary)" />
             </div>
-            <div style={{ height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
+            <div style={{ height: '4px', background: 'var(--glass-bg-subtle)', borderRadius: '4px', overflow: 'hidden' }}>
               <motion.div
                 style={{ height: '100%', background: 'linear-gradient(90deg, var(--accent-primary), #818cf8)' }}
                 animate={{ x: ['-100%', '100%'] }}
@@ -400,13 +414,13 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem' }}>
         {/* Real-time Status & Latency Card */}
         <div className="card glass" style={{
-          background: realtimeStats.status === 'online' ? 'rgba(52, 211, 153, 0.05)' : 'rgba(239, 68, 68, 0.05)',
-          border: `1px solid ${realtimeStats.status === 'online' ? 'rgba(52, 211, 153, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`
+          background: realtimeStats.status === 'online' ? 'var(--bg-success-subtle)' : 'var(--bg-danger-subtle)',
+          border: `1px solid ${realtimeStats.status === 'online' ? 'var(--border-success)' : 'var(--border-danger)'}`
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <div style={{
-                background: realtimeStats.status === 'online' ? 'rgba(52, 211, 153, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                background: realtimeStats.status === 'online' ? 'var(--bg-success-subtle)' : 'var(--bg-danger-subtle)',
                 padding: '0.5rem', borderRadius: '0.5rem',
                 color: realtimeStats.status === 'online' ? 'var(--accent-success)' : 'var(--accent-danger)'
               }}>
@@ -433,17 +447,17 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
               <span>อัปเดตล่าสุด: {new Date(realtimeStats.lastUpdated).toLocaleTimeString('th-TH')}</span>
             </div>
           )}
-          
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
             <div>
               <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Current Latency</p>
-              <h2 style={{ margin: '0.25rem 0 0', fontSize: '1.75rem', fontWeight: 700, color: realtimeStats.status === 'online' ? '#fff' : 'var(--text-secondary)' }}>
+              <h2 style={{ margin: '0.25rem 0 0', fontSize: '1.75rem', fontWeight: 700, color: realtimeStats.status === 'online' ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
                 {realtimeStats.latency !== null ? `${realtimeStats.latency.toFixed(1)}ms` : '--'}
               </h2>
             </div>
             <div>
               <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Packet Loss</p>
-              <h2 style={{ margin: '0.25rem 0 0', fontSize: '1.75rem', fontWeight: 700, color: (realtimeStats.packetLoss || 0) > 0 ? 'var(--accent-danger)' : '#fff' }}>
+              <h2 style={{ margin: '0.25rem 0 0', fontSize: '1.75rem', fontWeight: 700, color: (realtimeStats.packetLoss || 0) > 0 ? 'var(--accent-danger)' : 'var(--text-primary)' }}>
                 {realtimeStats.packetLoss !== null ? `${realtimeStats.packetLoss}%` : '--'}
               </h2>
             </div>
@@ -456,9 +470,14 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
               width: '100%',
               padding: '0.6rem',
               borderRadius: '0.5rem',
-              background: 'rgba(255,255,255,0.05)',
-              border: '1px solid rgba(255,255,255,0.1)',
+              background: realtimeStats.status === 'online' ? 'var(--accent-success)' :
+                          realtimeStats.status === 'offline' ? 'var(--accent-danger)' :
+                          'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+              border: 'none',
               color: '#fff',
+              boxShadow: realtimeStats.status === 'online' ? '0 4px 12px rgba(34, 197, 94, 0.3)' :
+                         realtimeStats.status === 'offline' ? '0 4px 12px rgba(239, 68, 68, 0.3)' :
+                         '0 4px 12px rgba(168, 85, 247, 0.3)',
               fontSize: '0.85rem',
               fontWeight: 600,
               display: 'flex',
@@ -473,13 +492,13 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             title="Update connectivity status"
           >
             <RefreshCw size={14} className={refreshingStatus ? 'animate-spin' : ''} />
-            {refreshingStatus ? 'Checking...' : 'Check Connectivity Status'}
+            {refreshingStatus ? 'กำลังตรวจสอบ...' : 'ตรวจสอบเดี๋ยวนี้!'}
           </button>
         </div>
 
         <div className="card glass">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-            <div style={{ background: 'rgba(56, 189, 248, 0.1)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-primary)' }}>
+            <div style={{ background: 'var(--bg-accent-subtle)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-primary)' }}>
               <Globe size={20} />
             </div>
             <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Network Configuration</h3>
@@ -487,8 +506,8 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Main Gateway</span>
-              <span style={{ 
-                fontWeight: 600, 
+              <span style={{
+                fontWeight: 600,
                 fontFamily: 'ui-monospace',
                 filter: !user ? 'blur(4px)' : 'none',
                 transition: 'filter 0.3s ease',
@@ -516,8 +535,8 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Sub-IP 1</span>
-              <span style={{ 
-                fontWeight: 600, 
+              <span style={{
+                fontWeight: 600,
                 fontFamily: 'ui-monospace',
                 filter: !user ? 'blur(4px)' : 'none',
                 transition: 'filter 0.3s ease',
@@ -526,8 +545,8 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>Sub-IP 2</span>
-              <span style={{ 
-                fontWeight: 600, 
+              <span style={{
+                fontWeight: 600,
                 fontFamily: 'ui-monospace',
                 filter: !user ? 'blur(4px)' : 'none',
                 transition: 'filter 0.3s ease',
@@ -536,8 +555,8 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-secondary)' }}>WAN MPLS</span>
-              <span style={{ 
-                fontWeight: 600, 
+              <span style={{
+                fontWeight: 600,
                 fontFamily: 'ui-monospace',
                 filter: !user ? 'blur(4px)' : 'none',
                 transition: 'filter 0.3s ease',
@@ -549,13 +568,13 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
 
         <div className="card glass">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-            <div style={{ background: 'rgba(52, 211, 153, 0.1)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-success)' }}>
+            <div style={{ background: 'var(--bg-success-subtle)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-success)' }}>
               <Users size={20} />
             </div>
             <h3 style={{ margin: 0, fontSize: '1.1rem' }}>จำนวนอุปกรณ์ในสำนักงาน</h3>
           </div>
           <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
-            <h2 style={{ margin: 0, fontSize: '2.5rem', color: scannedClients.length > 0 ? 'var(--accent-success)' : 'inherit' }}>
+            <h2 style={{ margin: 0, fontSize: '2.5rem', color: scannedClients.length > 0 ? 'var(--accent-success)' : 'var(--text-primary)' }}>
               {scannedClients.length}
             </h2>
             <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Discovered Devices</p>
@@ -573,7 +592,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
         {/* Daily Availability */}
         <div className="card glass" style={{
           position: 'relative', overflow: 'hidden',
-          background: 'linear-gradient(145deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)'
+          background: 'var(--glass-bg-subtle)'
         }}>
           <div style={{
             position: 'absolute', top: 0, right: 0, width: '150px', height: '150px',
@@ -589,11 +608,11 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-            <span style={{ fontSize: '2.5rem', fontWeight: 700, color: '#fff' }}>
+            <span style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
               {availability.day ?? deviceData?.availability_day ?? '100'}%
             </span>
           </div>
-          <div style={{ marginTop: '1rem', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
+          <div style={{ marginTop: '1rem', height: '6px', background: 'var(--border-subtle)', borderRadius: '4px', overflow: 'hidden' }}>
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${availability.day ?? deviceData?.availability_day ?? 100}%` }}
@@ -606,7 +625,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
         {/* Weekly Availability */}
         <div className="card glass" style={{
           position: 'relative', overflow: 'hidden',
-          background: 'linear-gradient(145deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)'
+          background: 'var(--glass-bg-subtle)'
         }}>
           <div style={{
             position: 'absolute', top: 0, right: 0, width: '150px', height: '150px',
@@ -622,11 +641,11 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-            <span style={{ fontSize: '2.5rem', fontWeight: 700, color: '#fff' }}>
+            <span style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
               {availability.week ?? deviceData?.availability_week ?? '99.8'}%
             </span>
           </div>
-          <div style={{ marginTop: '1rem', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
+          <div style={{ marginTop: '1rem', height: '6px', background: 'var(--border-subtle)', borderRadius: '4px', overflow: 'hidden' }}>
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${availability.week ?? deviceData?.availability_week ?? 99.8}%` }}
@@ -639,7 +658,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
         {/* Monthly Availability */}
         <div className="card glass" style={{
           position: 'relative', overflow: 'hidden',
-          background: 'linear-gradient(145deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)'
+          background: 'var(--glass-bg-subtle)'
         }}>
           <div style={{
             position: 'absolute', top: 0, right: 0, width: '150px', height: '150px',
@@ -647,7 +666,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             transform: 'translate(30%, -30%)'
           }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-            <div style={{ background: 'rgba(255, 255, 255, 0.1)', padding: '0.75rem', borderRadius: '0.75rem', color: '#fff' }}>
+            <div style={{ background: 'var(--bg-secondary-subtle)', padding: '0.75rem', borderRadius: '0.75rem', color: 'var(--text-primary)' }}>
               <CalendarRange size={24} />
             </div>
             <div>
@@ -655,16 +674,16 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-            <span style={{ fontSize: '2.5rem', fontWeight: 700, color: '#fff' }}>
+            <span style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
               {availability.month ?? deviceData?.availability_month ?? '99.5'}%
             </span>
           </div>
-          <div style={{ marginTop: '1rem', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
+          <div style={{ marginTop: '1rem', height: '6px', background: 'var(--border-subtle)', borderRadius: '4px', overflow: 'hidden' }}>
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${availability.month ?? deviceData?.availability_month ?? 99.5}%` }}
               transition={{ duration: 1, ease: 'easeOut', delay: 0.4 }}
-              style={{ height: '100%', background: 'linear-gradient(90deg, #f8fafc, #94a3b8)' }}
+              style={{ height: '100%', background: 'linear-gradient(90deg, var(--text-primary), var(--text-secondary))' }}
             />
           </div>
         </div>
@@ -672,7 +691,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
         {/* Yearly Availability */}
         <div className="card glass" style={{
           position: 'relative', overflow: 'hidden',
-          background: 'linear-gradient(145deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%)'
+          background: 'var(--glass-bg-subtle)'
         }}>
           <div style={{
             position: 'absolute', top: 0, right: 0, width: '150px', height: '150px',
@@ -688,11 +707,11 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem' }}>
-            <span style={{ fontSize: '2.5rem', fontWeight: 700, color: '#fff' }}>
+            <span style={{ fontSize: '2.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>
               {availability.year ?? '99.0'}%
             </span>
           </div>
-          <div style={{ marginTop: '1rem', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
+          <div style={{ marginTop: '1rem', height: '6px', background: 'var(--border-subtle)', borderRadius: '4px', overflow: 'hidden' }}>
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${availability.year ?? 99}%` }}
@@ -707,7 +726,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
       <AvailabilityHistoryChart history={availabilityHistory} />
 
       <div className="card glass" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ margin: 0 }}>รายการอุปกรณ์เชื่อมต่อระบบเครือข่ายภายในสำนักงาน</h3>
           {scannedClients.length > 0 && (
             <span style={{ fontSize: '0.8rem', color: 'var(--accent-success)', fontWeight: 600 }}>
@@ -718,7 +737,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
-              <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
+              <tr style={{ background: 'var(--glass-bg-subtle)' }}>
                 <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 500 }}>Client Name</th>
                 <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 500 }}>IP Address</th>
                 <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 500 }}>MAC Address</th>
@@ -731,19 +750,19 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
                 const diff = new Date() - new Date(client.last_online);
                 const isOnline = client.last_online && diff >= 0 && diff < 300000; // 5 mins
                 return (
-                  <tr key={client.id || index} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', transition: 'background 0.2s' }} className="table-row-hover">
+                  <tr key={client.id || index} style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.2s' }} className="table-row-hover">
                     <td style={{ padding: '1rem 1.5rem', fontWeight: 600 }}>{client.client_name || 'Unknown Device'}</td>
-                    <td style={{ 
-                      padding: '1rem 1.5rem', 
-                      fontFamily: 'ui-monospace', 
+                    <td style={{
+                      padding: '1rem 1.5rem',
+                      fontFamily: 'ui-monospace',
                       color: 'var(--accent-primary)',
                       filter: !user ? 'blur(4px)' : 'none',
                       transition: 'filter 0.3s ease',
                       userSelect: !user ? 'none' : 'auto'
                     }}>{client.ip_address}</td>
-                    <td style={{ 
-                      padding: '1rem 1.5rem', 
-                      fontFamily: 'ui-monospace', 
+                    <td style={{
+                      padding: '1rem 1.5rem',
+                      fontFamily: 'ui-monospace',
                       color: 'var(--text-secondary)',
                       filter: !user ? 'blur(4px)' : 'none',
                       transition: 'filter 0.3s ease',
@@ -754,8 +773,8 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
                         fontSize: '0.75rem',
                         padding: '0.2rem 0.6rem',
                         borderRadius: '1rem',
-                        background: isOnline ? 'rgba(52, 211, 153, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                        color: isOnline ? 'var(--accent-success)' : 'var(--accent-error)',
+                        background: isOnline ? 'var(--bg-success-subtle)' : 'var(--bg-danger-subtle)',
+                        color: isOnline ? 'var(--accent-success)' : 'var(--accent-danger)',
                         fontWeight: 600
                       }}>
                         {isOnline ? 'ONLINE' : 'OFFLINE'}
@@ -778,7 +797,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
                       style={{ color: 'var(--text-secondary)', maxWidth: '400px', margin: '0 auto' }}
                     >
                       <Users size={48} style={{ marginBottom: '1.5rem', opacity: 0.2 }} />
-                      <h4 style={{ color: '#fff', marginBottom: '0.5rem' }}>No Client Data</h4>
+                      <h4 style={{ color: 'var(--text-primary)', marginBottom: '0.5rem' }}>No Client Data</h4>
                       <p style={{ marginBottom: '1.5rem' }}>This segment hasn't been scanned or no active devices were found. Start a live scan to discover users.</p>
                       <button
                         onClick={startScan}
@@ -810,8 +829,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             <button
               disabled={currentPage === 1}
               onClick={() => paginate(currentPage - 1)}
-              className="glass"
-              style={{ padding: '0.5rem 1rem', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: '#fff', opacity: currentPage === 1 ? 0.3 : 1 }}
+              style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: '#0f172a', opacity: currentPage === 1 ? 0.3 : 1 }}
             >
               Prev
             </button>
@@ -820,20 +838,25 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
               <select
                 value={currentPage}
                 onChange={(e) => paginate(Number(e.target.value))}
-                className="glass"
                 style={{
-                  background: 'rgba(255,255,255,0.05)',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '0.4rem 0.8rem',
+                  background: 'var(--input-bg)',
+                  color: '#0f172a',
+                  border: '1px solid var(--input-border)',
+                  padding: '0.4rem 1.8rem 0.4rem 0.8rem',
                   borderRadius: '0.5rem',
                   outline: 'none',
                   cursor: 'pointer',
-                  fontSize: '0.9rem'
+                  fontSize: '0.9rem',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%230f172a\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 0.5rem center',
+                  backgroundSize: '1rem'
                 }}
               >
                 {[...Array(totalPages).keys()].map(n => (
-                  <option key={n + 1} value={n + 1} style={{ background: '#1e293b' }}>
+                  <option key={n + 1} value={n + 1} style={{ background: '#ffffff', color: '#0f172a' }}>
                     Page {n + 1}
                   </option>
                 ))}
@@ -843,8 +866,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             <button
               disabled={currentPage === totalPages}
               onClick={() => paginate(currentPage + 1)}
-              className="glass"
-              style={{ padding: '0.5rem 1rem', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: '#fff', opacity: currentPage === totalPages ? 0.3 : 1 }}
+              style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: '#0f172a', opacity: currentPage === totalPages ? 0.3 : 1 }}
             >
               Next
             </button>

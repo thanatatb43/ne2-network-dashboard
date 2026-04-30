@@ -13,7 +13,7 @@ import Auth from './components/Auth';
 import BudgetDashboard from './components/BudgetDashboard';
 import { useNetworkData } from './hooks/useNetworkData';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Toaster } from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 import { useEffect } from 'react';
 
 function App() {
@@ -22,6 +22,21 @@ function App() {
   const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth > 1024) {
+        setIsSidebarOpen(true);
+      } else {
+        setIsSidebarOpen(false);
+      }
+    };
+
+    handleResize(); // Initial check
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     const savedUser = localStorage.getItem('user');
@@ -110,6 +125,42 @@ function App() {
     return () => clearInterval(heartbeat);
   }, [user]); // Re-sync tracking if user logs in/out
 
+  // Idle/Visibility Warning
+  useEffect(() => {
+    let lastHiddenTime = 0;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        lastHiddenTime = Date.now();
+      } else if (document.visibilityState === 'visible') {
+        // Only show if they were away for more than 30 minutes (1800000ms) to avoid spamming
+        // Or if it's the first time they come back
+        const timeAway = Date.now() - lastHiddenTime;
+        if (lastHiddenTime > 0 && timeAway > 1800000) {
+          toast('หากพบอาการกระตุก หรือ ดีเลย์ กรุณา ปิดโปรแกรม(Tab) และเข้าใหม่อีกครั้ง', {
+            icon: '⚠️',
+            duration: 6000,
+            position: 'top-center',
+            style: {
+              background: 'var(--card-bg)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--accent-warning)',
+              fontSize: '1rem',
+              fontWeight: 500,
+              fontFamily: '"Krub", sans-serif',
+              marginTop: '15vh',
+              padding: '1rem 2rem',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.15)'
+            },
+          });
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
   const handleAuthSuccess = (userData, userToken) => {
     if (!userData || !userToken) {
       console.error('Invalid auth data received');
@@ -150,9 +201,42 @@ function App() {
   };
 
   return (
-    <div className="dashboard-container">
+    <div className={`dashboard-container ${!isSidebarOpen ? 'sidebar-closed' : ''}`}>
       <Toaster position="top-right" reverseOrder={false} />
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} user={user} onLogout={handleLogout} />
+      
+      {/* Mobile Menu Button */}
+      {!isSidebarOpen && (
+        <button 
+          onClick={() => setIsSidebarOpen(true)}
+          className="glass"
+          style={{
+            position: 'fixed',
+            top: '1.5rem',
+            left: '1.5rem',
+            zIndex: 100,
+            padding: '0.75rem',
+            borderRadius: '0.75rem',
+            background: 'var(--accent-primary)',
+            color: '#fff',
+            border: 'none',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(168, 85, 247, 0.4)'
+          }}
+        >
+          <div style={{ width: '20px', height: '2px', background: '#fff', marginBottom: '4px', borderRadius: '2px' }} />
+          <div style={{ width: '20px', height: '2px', background: '#fff', marginBottom: '4px', borderRadius: '2px' }} />
+          <div style={{ width: '20px', height: '2px', background: '#fff', borderRadius: '2px' }} />
+        </button>
+      )}
+
+      <Sidebar 
+        activeTab={activeTab} 
+        setActiveTab={setActiveTab} 
+        user={user} 
+        onLogout={handleLogout}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+      />
       <main className="main-content">
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' ? (

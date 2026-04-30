@@ -131,7 +131,7 @@ const Auth = ({ onAuthSuccess }) => {
               display: 'inline-flex',
               padding: '1rem',
               borderRadius: '1rem',
-              background: 'rgba(255,255,255,0.05)',
+              background: 'var(--glass-bg-subtle)',
               marginBottom: '1rem',
               color: 'var(--accent-primary)'
             }}>
@@ -165,10 +165,10 @@ const Auth = ({ onAuthSuccess }) => {
                   style={{
                     width: '100%',
                     padding: '0.75rem 1rem 0.75rem 2.8rem',
-                    background: 'rgba(255,255,255,0.03)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'var(--input-bg)',
+                    border: '1px solid var(--input-border)',
                     borderRadius: '0.75rem',
-                    color: '#fff',
+                    color: 'var(--text-primary)',
                     outline: 'none',
                     transition: 'all 0.2s'
                   }}
@@ -198,10 +198,10 @@ const Auth = ({ onAuthSuccess }) => {
                     style={{
                       width: '100%',
                       padding: '0.75rem 1rem',
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.1)',
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)',
                       borderRadius: '0.75rem',
-                      color: '#fff',
+                      color: 'var(--text-primary)',
                       outline: 'none'
                     }}
                   />
@@ -221,10 +221,10 @@ const Auth = ({ onAuthSuccess }) => {
                     style={{
                       width: '100%',
                       padding: '0.75rem 1rem',
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.1)',
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)',
                       borderRadius: '0.75rem',
-                      color: '#fff',
+                      color: 'var(--text-primary)',
                       outline: 'none'
                     }}
                   />
@@ -246,10 +246,10 @@ const Auth = ({ onAuthSuccess }) => {
                     style={{
                       width: '100%',
                       padding: '0.75rem 1rem',
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.1)',
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)',
                       borderRadius: '0.75rem',
-                      color: '#fff',
+                      color: 'var(--text-primary)',
                       outline: 'none'
                     }}
                   />
@@ -269,10 +269,10 @@ const Auth = ({ onAuthSuccess }) => {
                     style={{
                       width: '100%',
                       padding: '0.75rem 1rem',
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.1)',
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)',
                       borderRadius: '0.75rem',
-                      color: '#fff',
+                      color: 'var(--text-primary)',
                       outline: 'none'
                     }}
                   />
@@ -297,10 +297,10 @@ const Auth = ({ onAuthSuccess }) => {
                   style={{
                     width: '100%',
                     padding: '0.75rem 1rem 0.75rem 2.8rem',
-                    background: 'rgba(255,255,255,0.03)',
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: 'var(--input-bg)',
+                    border: '1px solid var(--input-border)',
                     borderRadius: '0.75rem',
-                    color: '#fff',
+                    color: 'var(--text-primary)',
                     outline: 'none'
                   }}
                 />
@@ -329,10 +329,10 @@ const Auth = ({ onAuthSuccess }) => {
                     style={{
                       width: '100%',
                       padding: '0.75rem 1rem 0.75rem 2.8rem',
-                      background: 'rgba(255,255,255,0.03)',
-                      border: '1px solid rgba(255,255,255,0.1)',
+                      background: 'var(--input-bg)',
+                      border: '1px solid var(--input-border)',
                       borderRadius: '0.75rem',
-                      color: '#fff',
+                      color: 'var(--text-primary)',
                       outline: 'none'
                     }}
                   />

@@ -121,17 +121,17 @@ const NetworkTestHistory = ({ token, onBack }) => {
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#fff',
+                color: 'var(--text-primary)',
                 outline: 'none',
                 cursor: 'pointer',
                 fontSize: '0.85rem',
                 fontWeight: 600
               }}
             >
-              <option value="10" style={{ background: '#1e293b' }}>10</option>
-              <option value="25" style={{ background: '#1e293b' }}>25</option>
-              <option value="50" style={{ background: '#1e293b' }}>50</option>
-              <option value="100" style={{ background: '#1e293b' }}>100</option>
+              <option value="10" style={{ background: '#ffffff', color: '#0f172a' }}>10</option>
+              <option value="25" style={{ background: '#ffffff', color: '#0f172a' }}>25</option>
+              <option value="50" style={{ background: '#ffffff', color: '#0f172a' }}>50</option>
+              <option value="100" style={{ background: '#ffffff', color: '#0f172a' }}>100</option>
             </select>
           </div>
           <div style={{ position: 'relative' }}>
@@ -146,9 +146,9 @@ const NetworkTestHistory = ({ token, onBack }) => {
               style={{
                 padding: '0.5rem 1rem 0.5rem 2.5rem',
                 borderRadius: '0.5rem',
-                border: '1px solid rgba(255,255,255,0.1)',
-                background: 'rgba(0,0,0,0.2)',
-                color: 'white',
+                border: '1px solid var(--input-border)',
+                background: 'var(--input-bg)',
+                color: 'var(--text-primary)',
                 outline: 'none',
                 width: '200px'
               }}
@@ -169,7 +169,7 @@ const NetworkTestHistory = ({ token, onBack }) => {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
-              <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
+              <tr style={{ background: 'var(--glass-bg-subtle)' }}>
                 <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>วันที่และเวลา</th>
                 <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ไอพี</th>
                 <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ชื่อคอมพิวเตอร์</th>
@@ -197,7 +197,7 @@ const NetworkTestHistory = ({ token, onBack }) => {
                 </tr>
               ) : (
                 currentItems.map((item, index) => (
-                  <tr key={index} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }} className="table-row-hover">
+                  <tr key={index} style={{ borderBottom: '1px solid var(--border-subtle)' }} className="table-row-hover">
                     <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', whiteSpace: 'nowrap' }}>
                       {new Date(item.timestamp).toLocaleString('th-TH')}
                     </td>
@@ -222,7 +222,7 @@ const NetworkTestHistory = ({ token, onBack }) => {
         
         {/* Pagination Controls */}
         {!loading && filteredHistory.length > itemsPerPage && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(255,255,255,0.01)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid var(--border-subtle)', background: 'var(--glass-bg-subtle)' }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
               Showing {indexOfFirstItem + 1} to {Math.min(indexOfLastItem, filteredHistory.length)} of {filteredHistory.length} entries
             </span>
@@ -230,8 +230,7 @@ const NetworkTestHistory = ({ token, onBack }) => {
               <button
                 onClick={prevPage}
                 disabled={currentPage === 1}
-                className="glass"
-                style={{ padding: '0.5rem', borderRadius: '0.25rem', border: 'none', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1, color: 'var(--text-primary)' }}
+                style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1, color: '#0f172a' }}
               >
                 <ChevronLeft size={16} />
               </button>
@@ -241,8 +240,7 @@ const NetworkTestHistory = ({ token, onBack }) => {
               <button
                 onClick={nextPage}
                 disabled={currentPage === totalPages}
-                className="glass"
-                style={{ padding: '0.5rem', borderRadius: '0.25rem', border: 'none', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1, color: 'var(--text-primary)' }}
+                style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1, color: '#0f172a' }}
               >
                 <ChevronRight size={16} />
               </button>

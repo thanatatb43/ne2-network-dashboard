@@ -149,18 +149,20 @@ const Devices = ({ onDeviceClick, user }) => {
             style={{ 
               display: 'flex', 
               alignItems: 'center', 
-              padding: '0.5rem 1rem', 
+              padding: '0.6rem 1.2rem', 
               gap: '0.5rem', 
-              borderRadius: '0.5rem',
-              color: 'var(--accent-primary)',
+              borderRadius: '0.75rem',
+              background: 'var(--accent-primary)',
+              color: '#fff',
               border: 'none',
               cursor: 'pointer',
-              fontWeight: 600
+              fontWeight: 600,
+              boxShadow: '0 4px 12px rgba(168, 85, 247, 0.2)'
             }}
           >
             <Download size={18} /> Export PDF
           </button>
-          <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
+          <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)' }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Type:</span>
             <select
               value={selectedType}
@@ -171,25 +173,25 @@ const Devices = ({ onDeviceClick, user }) => {
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#fff',
+                color: '#0f172a',
                 outline: 'none',
                 cursor: 'pointer',
                 fontSize: '0.85rem',
                 fontWeight: 700,
                 paddingRight: '1.5rem',
                 appearance: 'none',
-                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0\' fill=\'none\' stroke=\'white\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
                 backgroundRepeat: 'no-repeat',
                 backgroundPosition: 'right center',
                 backgroundSize: '1rem'
               }}
             >
               {peaTypes.map(type => (
-                <option key={type} value={type} style={{ background: '#1e293b' }}>{type}</option>
+                <option key={type} value={type}>{type}</option>
               ))}
             </select>
           </div>
-          <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
+          <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)' }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Show:</span>
             <select
               value={itemsPerPage}
@@ -200,26 +202,26 @@ const Devices = ({ onDeviceClick, user }) => {
               style={{
                 background: 'none',
                 border: 'none',
-                color: '#fff',
+                color: '#0f172a',
                 outline: 'none',
                 cursor: 'pointer',
                 fontSize: '0.85rem',
                 fontWeight: 700,
                 paddingRight: '1.5rem',
                 appearance: 'none',
-                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0\' fill=\'none\' stroke=\'white\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
                 backgroundRepeat: 'no-repeat',
                 backgroundPosition: 'right center',
                 backgroundSize: '1rem'
               }}
             >
-              <option value="10" style={{ background: '#1e293b' }}>10</option>
-              <option value="25" style={{ background: '#1e293b' }}>25</option>
-              <option value="50" style={{ background: '#1e293b' }}>50</option>
-              <option value="100" style={{ background: '#1e293b' }}>100</option>
+              <option value="10" style={{ background: '#ffffff', color: '#0f172a' }}>10</option>
+              <option value="25" style={{ background: '#ffffff', color: '#0f172a' }}>25</option>
+              <option value="50" style={{ background: '#ffffff', color: '#0f172a' }}>50</option>
+              <option value="100" style={{ background: '#ffffff', color: '#0f172a' }}>100</option>
             </select>
           </div>
-          <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.5rem 1rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
+          <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.5rem 1rem', gap: '0.5rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)' }}>
             <Search size={18} color="var(--text-secondary)" />
             <input
               type="text"
@@ -229,7 +231,7 @@ const Devices = ({ onDeviceClick, user }) => {
                 setSearchTerm(e.target.value);
                 setCurrentPage(1);
               }}
-              style={{ background: 'none', border: 'none', color: '#fff', outline: 'none', width: '200px' }}
+              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', width: '200px' }}
             />
           </div>
         </div>
@@ -366,8 +368,7 @@ const Devices = ({ onDeviceClick, user }) => {
           <button
             disabled={currentPage === 1}
             onClick={() => paginate(currentPage - 1)}
-            className="glass"
-            style={{ padding: '0.5rem 1rem', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: '#fff', opacity: currentPage === 1 ? 0.3 : 1 }}
+            style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: '#0f172a', opacity: currentPage === 1 ? 0.3 : 1 }}
           >
             Prev
           </button>
@@ -376,20 +377,25 @@ const Devices = ({ onDeviceClick, user }) => {
             <select
               value={currentPage}
               onChange={(e) => paginate(Number(e.target.value))}
-              className="glass"
               style={{
-                background: 'rgba(255,255,255,0.05)',
-                color: '#fff',
-                border: 'none',
-                padding: '0.4rem 0.8rem',
+                background: 'var(--input-bg)',
+                color: '#0f172a',
+                border: '1px solid var(--input-border)',
+                padding: '0.4rem 1.8rem 0.4rem 0.8rem',
                 borderRadius: '0.5rem',
                 outline: 'none',
                 cursor: 'pointer',
-                fontSize: '0.9rem'
+                fontSize: '0.9rem',
+                appearance: 'none',
+                WebkitAppearance: 'none',
+                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 0.5rem center',
+                backgroundSize: '1rem'
               }}
             >
               {[...Array(totalPages).keys()].map(n => (
-                <option key={n + 1} value={n + 1} style={{ background: '#1e293b' }}>
+                <option key={n + 1} value={n + 1} style={{ background: '#ffffff', color: '#0f172a' }}>
                   Page {n + 1}
                 </option>
               ))}
@@ -399,8 +405,7 @@ const Devices = ({ onDeviceClick, user }) => {
           <button
             disabled={currentPage === totalPages}
             onClick={() => paginate(currentPage + 1)}
-            className="glass"
-            style={{ padding: '0.5rem 1rem', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: '#fff', opacity: currentPage === totalPages ? 0.3 : 1 }}
+            style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: '#0f172a', opacity: currentPage === totalPages ? 0.3 : 1 }}
           >
             Next
           </button>

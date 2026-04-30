@@ -11,7 +11,7 @@ const AvailabilityHistoryChart = ({ history }) => {
         </div>
         <h3 style={{ margin: 0, fontSize: '1.25rem' }}>ประวัติความพร้อมใช้งาน (Availability History)</h3>
       </div>
-      
+
       <div style={{ width: '100%', height: 'calc(100% - 3.5rem)' }}>
         {history && history.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
@@ -40,7 +40,7 @@ const AvailabilityHistoryChart = ({ history }) => {
               />
               <Tooltip
                 contentStyle={{
-                  background: 'rgba(15, 23, 42, 0.9)',
+                  background: 'rgba(255, 255, 255, 0.9)',
                   border: '1px solid var(--border-color)',
                   borderRadius: '8px',
                   backdropFilter: 'blur(4px)'

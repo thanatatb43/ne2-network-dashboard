@@ -78,13 +78,14 @@ const DeviceTable = ({ onViewAll, user }) => {
           }}>ดูทั้งหมด</button>
       </div>
 
-      <div style={{ width: '100%' }}>
+      <div style={{ width: '100%', overflowX: 'auto' }}>
+        <div style={{ minWidth: '800px' }}>
         {/* Header */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: '2fr 1.5fr 1fr 3.5fr',
           padding: '0 1rem 1rem 1rem',
-          borderBottom: '1px solid rgba(255,255,255,0.1)',
+          borderBottom: '1px solid var(--border-subtle)',
           color: 'var(--text-secondary)',
           fontSize: '0.875rem',
           gap: '1rem',
@@ -104,7 +105,7 @@ const DeviceTable = ({ onViewAll, user }) => {
               gridTemplateColumns: '2fr 1.5fr 1fr 3.5fr',
               alignItems: 'center',
               padding: '1rem',
-              borderBottom: '1px solid rgba(255,255,255,0.05)',
+              borderBottom: '1px solid var(--border-subtle)',
               gap: '1rem'
             }}>
               <div>
@@ -150,7 +151,7 @@ const DeviceTable = ({ onViewAll, user }) => {
                       </linearGradient>
                     </defs>
                     <Tooltip
-                      contentStyle={{ background: 'rgba(15, 23, 42, 0.9)', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '4px 8px', fontSize: '0.75rem' }}
+                      contentStyle={{ background: 'var(--tooltip-bg)', border: '1px solid var(--border-subtle)', borderRadius: '4px', padding: '4px 8px', fontSize: '0.75rem' }}
                       itemStyle={{ color: 'var(--text-primary)' }}
                       labelStyle={{ display: 'none' }}
                       formatter={(value) => [`${value} ms`, 'Latency']}
@@ -178,6 +179,7 @@ const DeviceTable = ({ onViewAll, user }) => {
         </div>
       </div>
     </div>
+  </div>
   );
 };
 
