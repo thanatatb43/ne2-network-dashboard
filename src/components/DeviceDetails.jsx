@@ -28,6 +28,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
   const [isExporting, setIsExporting] = useState(false);
   const [availabilityHistory, setAvailabilityHistory] = useState([]);
   const [fullAvailabilityHistory, setFullAvailabilityHistory] = useState([]);
+  const [downtimeHistory, setDowntimeHistory] = useState([]);
   const itemsPerPage = 10;
   const scanTimeoutRef = useRef(null);
 
@@ -61,7 +62,8 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
         const currentStats = metricsResult.data.find(d => (d.device_id || d.id) === deviceId);
         if (currentStats) {
           setRealtimeStats({
-            status: (currentStats.alive === true || currentStats.status === 'up' || currentStats.status === 'online' || currentStats.latency_ms !== null || currentStats.latency !== null) ? 'online' : 'offline',
+            status: (currentStats.alive === false || currentStats.status === 'down' || currentStats.status === 'offline') ? 'offline' :
+              (currentStats.alive === true || currentStats.status === 'up' || currentStats.status === 'online' || currentStats.latency_ms !== null || currentStats.latency !== null) ? 'online' : 'offline',
             latency: currentStats.latency_ms,
             packetLoss: currentStats.packet_loss,
             lastUpdated: currentStats.updated_at || currentStats.checked_at || new Date().toISOString()
@@ -115,7 +117,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
           if (availResult.success && availResult.data) {
             setAvailability({
               day: availResult.data.daily_ava,
-              week: availResult.data.weekly_ava,
+              week: availResult.data.weekly_ava || availResult.data.week_ava,
               month: availResult.data.monthly_ava,
               year: availResult.data.yearly_ava
             });
@@ -151,6 +153,19 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
           console.error('Error fetching availability snapshots:', err);
         }
 
+        // Fetch downtime history
+        try {
+          const downtimeRes = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/devices/${deviceId}/downtime`, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+          });
+          const downtimeResult = await downtimeRes.json();
+          if (downtimeResult.success && downtimeResult.data) {
+            setDowntimeHistory(downtimeResult.data);
+          }
+        } catch (err) {
+          console.error('Error fetching downtime history:', err);
+        }
+
         // Fetch real-time latency metrics
         await fetchRealtimeStats();
       } catch (error) {
@@ -164,6 +179,22 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
       fetchDeviceDetails();
     }
   }, [deviceId]);
+
+  const formatDuration = (durationStr) => {
+    if (!durationStr) return '-';
+    // Format is Days:Hours:Minutes:Seconds
+    const parts = durationStr.split(':').map(Number);
+    if (parts.length !== 4) return durationStr;
+    
+    const [d, h, m, s] = parts;
+    const result = [];
+    if (d > 0) result.push(`${d} วัน`);
+    if (h > 0) result.push(`${h} ชั่วโมง`);
+    if (m > 0) result.push(`${m} นาที`);
+    if (s > 0) result.push(`${s} วินาที`);
+    
+    return result.length > 0 ? result.join(' ') : '-';
+  };
 
   const startScan = async () => {
     if (!isAdmin) {
@@ -471,13 +502,13 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
               padding: '0.6rem',
               borderRadius: '0.5rem',
               background: realtimeStats.status === 'online' ? 'var(--accent-success)' :
-                          realtimeStats.status === 'offline' ? 'var(--accent-danger)' :
-                          'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+                realtimeStats.status === 'offline' ? 'var(--accent-danger)' :
+                  'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
               border: 'none',
               color: '#fff',
               boxShadow: realtimeStats.status === 'online' ? '0 4px 12px rgba(34, 197, 94, 0.3)' :
-                         realtimeStats.status === 'offline' ? '0 4px 12px rgba(239, 68, 68, 0.3)' :
-                         '0 4px 12px rgba(168, 85, 247, 0.3)',
+                realtimeStats.status === 'offline' ? '0 4px 12px rgba(239, 68, 68, 0.3)' :
+                  '0 4px 12px rgba(168, 85, 247, 0.3)',
               fontSize: '0.85rem',
               fontWeight: 600,
               display: 'flex',
@@ -724,6 +755,63 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
       </div>
 
       <AvailabilityHistoryChart history={availabilityHistory} />
+
+      {/* Downtime History Section */}
+      <div className="card glass" style={{ padding: 0, overflow: 'hidden', marginBottom: '2.5rem' }}>
+        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ background: 'var(--bg-danger-subtle)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-danger)' }}>
+            <Activity size={20} />
+          </div>
+          <h3 style={{ margin: 0 }}>ประวัติการขัดข้อง (Downtime History)</h3>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <thead>
+              <tr style={{ background: 'var(--glass-bg-subtle)' }}>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--accent-danger)', fontSize: '0.85rem', fontWeight: 600 }}>เวลาขัดข้อง</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--accent-success)', fontSize: '0.85rem', fontWeight: 600 }}>เวลากลับออนไลน์</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 500 }}>ระยะเวลาขัดข้อง</th>
+              </tr>
+            </thead>
+            <tbody>
+              {downtimeHistory.length > 0 ? (
+                downtimeHistory.map((log, index) => (
+                  <tr 
+                    key={log.id || index} 
+                    style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.2s' }} 
+                    className="table-row-hover"
+                    title={`สถานะอุปกรณ์: ${log.status.toUpperCase()}`}
+                  >
+                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', color: 'var(--accent-danger)', fontWeight: 500 }}>
+                      {new Date(log.down_at).toLocaleString('th-TH')}
+                    </td>
+                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', color: 'var(--accent-success)', fontWeight: 500 }}>
+                      {log.up_at ? new Date(log.up_at).toLocaleString('th-TH') : (
+                        <span style={{ color: 'var(--accent-danger)', fontWeight: 600 }}>ยังไม่กลับมาออนไลน์</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '1rem 1.5rem', fontSize: '1.1rem', fontWeight: 700, fontFamily: '"Krub", sans-serif', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>{formatDuration(log.duration_formatted)}</span>
+                      <span className="status-badge-hover" style={{
+                        background: log.status === 'down' ? 'var(--bg-danger-subtle)' : 'var(--bg-success-subtle)',
+                        color: log.status === 'down' ? 'var(--accent-danger)' : 'var(--accent-success)'
+                      }}>
+                        {log.status.toUpperCase()}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="3" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                    ไม่พบประวัติการขัดข้องในระบบ
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       <div className="card glass" style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

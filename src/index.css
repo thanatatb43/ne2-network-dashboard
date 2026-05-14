@@ -270,3 +270,20 @@ body {
   backdrop-filter: blur(4px);
   z-index: 998;
 }
+
+.status-badge-hover {
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s ease;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 1rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.table-row-hover:hover .status-badge-hover {
+  opacity: 1;
+}
