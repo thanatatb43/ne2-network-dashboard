@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Monitor, Network, ArrowRight, Activity, ArrowLeft, Loader2, RefreshCw, ChevronLeft, ChevronRight, Search, Wallet } from 'lucide-react';
+import { Monitor, Network, ArrowRight, Activity, ArrowLeft, Loader2, RefreshCw, ChevronLeft, ChevronRight, Search, Wallet, ClipboardList } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import NetworkDeviceManagement from './NetworkDeviceManagement';
 import BudgetManagement from './BudgetManagement';
+import JobManagement from './JobManagement';
 
 const NetworkTestHistory = ({ token, onBack }) => {
   const [history, setHistory] = useState([]);
@@ -347,6 +348,30 @@ const Management = ({ user, token }) => {
               </button>
             </motion.div>
 
+            {/* Job Management Card */}
+            <motion.div 
+              whileHover={{ y: -5 }}
+              className="card glass" 
+              style={{ padding: '2rem', cursor: 'pointer', border: '1px solid rgba(245, 158, 11, 0.2)' }}
+              onClick={() => setView('job_management')}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+                <div style={{ background: 'rgba(245, 158, 11, 0.1)', padding: '1rem', borderRadius: '1rem', color: 'var(--accent-warning)' }}>
+                  <ClipboardList size={32} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem' }} className="krub-semibold">จัดการงาน</h3>
+                  <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Job Management</p>
+                </div>
+              </div>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: '2rem' }}>
+                ตรวจสอบและจัดการงานที่ได้รับมอบหมาย, ติดตามสถานะ และรายละเอียดของงานต่างๆ
+              </p>
+              <button className="glass" style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(245, 158, 11, 0.1)', color: 'var(--accent-warning)', border: '1px solid rgba(245, 158, 11, 0.3)', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                จัดการงาน <ArrowRight size={16} />
+              </button>
+            </motion.div>
+
           </motion.div>
         )}
 
@@ -428,6 +453,10 @@ const Management = ({ user, token }) => {
 
         {view === 'budget_management' && (
           <BudgetManagement token={token} onBack={() => setView('overview')} user={user} />
+        )}
+
+        {view === 'job_management' && (
+          <JobManagement token={token} onBack={() => setView('overview')} user={user} />
         )}
       </AnimatePresence>
     </motion.div>

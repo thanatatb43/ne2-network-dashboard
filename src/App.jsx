@@ -11,6 +11,7 @@ import Management from './components/Management';
 import About from './components/About';
 import Auth from './components/Auth';
 import BudgetDashboard from './components/BudgetDashboard';
+import DowntimeHistory from './components/DowntimeHistory';
 import { useNetworkData } from './hooks/useNetworkData';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
@@ -195,6 +196,52 @@ function App() {
     setActiveTab('login');
   };
 
+  // Auto-logout after 30 minutes of inactivity
+  useEffect(() => {
+    let timeoutId;
+
+    const resetTimeout = () => {
+      clearTimeout(timeoutId);
+      // Only set the timeout if a user is currently logged in
+      if (user) {
+        // 30 minutes = 30 * 60 * 1000 = 1800000 ms
+        timeoutId = setTimeout(() => {
+          handleLogout();
+          toast('เซสชันของคุณหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกครั้งเนื่องจากไม่มีการใช้งาน', {
+            icon: '🔒',
+            duration: 8000,
+            position: 'top-center',
+            style: {
+              background: 'var(--card-bg)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--accent-warning)',
+              fontSize: '1rem',
+              fontWeight: 500,
+              fontFamily: '"Krub", sans-serif'
+            }
+          });
+        }, 1800000);
+      }
+    };
+
+    // Set initial timeout
+    resetTimeout();
+
+    // Listeners for user activity
+    const activityEvents = ['mousemove', 'keydown', 'scroll', 'click'];
+    activityEvents.forEach(event => {
+      window.addEventListener(event, resetTimeout);
+    });
+
+    return () => {
+      clearTimeout(timeoutId);
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, resetTimeout);
+      });
+    };
+  }, [user]); // Re-run effect when user logs in or out
+
+
   const handleDeviceClick = (id) => {
     setSelectedDeviceId(id);
     setActiveTab('deviceDetails');
@@ -291,6 +338,16 @@ function App() {
             </motion.div>
           ) : activeTab === 'settings' ? (
             <AdminSettings token={token} user={user} />
+          ) : activeTab === 'downtime-history' ? (
+            <motion.div
+              key="downtime-history"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.2 }}
+            >
+              <DowntimeHistory token={token} />
+            </motion.div>
           ) : activeTab === 'about' ? (
             <About />
           ) : activeTab === 'login' ? (

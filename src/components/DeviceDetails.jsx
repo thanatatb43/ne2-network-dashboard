@@ -29,6 +29,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
   const [availabilityHistory, setAvailabilityHistory] = useState([]);
   const [fullAvailabilityHistory, setFullAvailabilityHistory] = useState([]);
   const [downtimeHistory, setDowntimeHistory] = useState([]);
+  const [currentDowntimePage, setCurrentDowntimePage] = useState(1);
   const itemsPerPage = 10;
   const scanTimeoutRef = useRef(null);
 
@@ -775,7 +776,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             </thead>
             <tbody>
               {downtimeHistory.length > 0 ? (
-                downtimeHistory.map((log, index) => (
+                downtimeHistory.slice((currentDowntimePage - 1) * itemsPerPage, currentDowntimePage * itemsPerPage).map((log, index) => (
                   <tr 
                     key={log.id || index} 
                     style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.2s' }} 
@@ -811,6 +812,55 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             </tbody>
           </table>
         </div>
+
+        {Math.ceil(downtimeHistory.length / itemsPerPage) > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', padding: '1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+            <button
+              disabled={currentDowntimePage === 1}
+              onClick={() => setCurrentDowntimePage(prev => Math.max(1, prev - 1))}
+              style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentDowntimePage === 1 ? 'not-allowed' : 'pointer', color: '#0f172a', opacity: currentDowntimePage === 1 ? 0.3 : 1 }}
+            >
+              Prev
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-secondary)' }}>
+              <span style={{ fontSize: '0.9rem' }}>Go to:</span>
+              <select
+                value={currentDowntimePage}
+                onChange={(e) => setCurrentDowntimePage(Number(e.target.value))}
+                style={{
+                  background: 'var(--input-bg)',
+                  color: '#0f172a',
+                  border: '1px solid var(--input-border)',
+                  padding: '0.4rem 1.8rem 0.4rem 0.8rem',
+                  borderRadius: '0.5rem',
+                  outline: 'none',
+                  cursor: 'pointer',
+                  fontSize: '0.9rem',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%230f172a\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 0.5rem center',
+                  backgroundSize: '1rem'
+                }}
+              >
+                {[...Array(Math.ceil(downtimeHistory.length / itemsPerPage)).keys()].map(n => (
+                  <option key={n + 1} value={n + 1} style={{ background: '#ffffff', color: '#0f172a' }}>
+                    Page {n + 1}
+                  </option>
+                ))}
+              </select>
+              <span style={{ fontSize: '0.9rem' }}>of {Math.ceil(downtimeHistory.length / itemsPerPage)}</span>
+            </div>
+            <button
+              disabled={currentDowntimePage === Math.ceil(downtimeHistory.length / itemsPerPage)}
+              onClick={() => setCurrentDowntimePage(prev => Math.min(Math.ceil(downtimeHistory.length / itemsPerPage), prev + 1))}
+              style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentDowntimePage === Math.ceil(downtimeHistory.length / itemsPerPage) ? 'not-allowed' : 'pointer', color: '#0f172a', opacity: currentDowntimePage === Math.ceil(downtimeHistory.length / itemsPerPage) ? 0.3 : 1 }}
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="card glass" style={{ padding: 0, overflow: 'hidden' }}>

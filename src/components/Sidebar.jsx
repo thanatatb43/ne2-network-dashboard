@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X } from 'lucide-react';
+import { Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import peaLogo from '../assets/logo/pea_logo.png';
@@ -37,7 +37,7 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, isOpen, onClose }) =
 
   useEffect(() => {
     fetchSystemStatus();
-    const interval = setInterval(fetchSystemStatus, 600000); // 10 minutes
+    const interval = setInterval(fetchSystemStatus, 60000); // 60 seconds
     return () => clearInterval(interval);
   }, []);
 
@@ -63,6 +63,7 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, isOpen, onClose }) =
 
   // Always keep these at the bottom (All Devices above Login/About)
   items.push({ name: 'อุปกรณ์ทั้งหมด', icon: Database, id: 'devices' });
+  items.push({ name: 'ประวัติการขัดข้อง', icon: History, id: 'downtime-history' });
 
   if (!user) {
     items.push({ name: 'ลงชื่อเข้าใช้งาน', icon: LogIn, id: 'login' });
