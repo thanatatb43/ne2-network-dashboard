@@ -3,7 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 const NetworkChart = ({ history }) => {
   return (
-    <div className="card glass" style={{ height: '400px', marginBottom: '2rem', padding: '1.5rem' }}>
+    <div className="card glass network-chart-card" style={{ marginBottom: '2rem', padding: '1.5rem' }}>
       <h3 style={{ margin: '0 0 1.5rem', fontSize: '1.25rem' }}>ค่าเฉลี่ย Latency ระบบเครือข่าย กฟฉ.2</h3>
       <div style={{ width: '100%', height: 'calc(100% - 3rem)' }}>
         <ResponsiveContainer width="100%" height="100%">

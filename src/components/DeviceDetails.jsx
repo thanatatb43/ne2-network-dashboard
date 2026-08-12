@@ -1,12 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { ChevronLeft, Share2, Globe, Shield, Cpu, Users, ArrowRight, Loader2, Search, RefreshCw, Clock, CalendarDays, CalendarRange, Activity, Calendar, Download } from 'lucide-react';
+import { ChevronLeft, Share2, Globe, Shield, Cpu, Users, ArrowRight, Loader2, Search, RefreshCw, Clock, CalendarDays, CalendarRange, Activity, Calendar, Download, Boxes, X } from 'lucide-react';
 import AvailabilityHistoryChart from './AvailabilityHistoryChart';
 import html2pdf from 'html2pdf.js';
 
-const DeviceDetails = ({ deviceId, onBack, user, token }) => {
+// Matches the status badge colors used in OfficeEquipmentManagement.jsx
+const statusColorFor = (status) => {
+  const s = (status || '').trim();
+  if (s === 'ใช้งาน') return 'var(--accent-success)';
+  if (s === 'รอปรับปรุง' || s === 'รอจำหน่าย') return 'var(--accent-warning)';
+  if (s === 'เลิกใช้งาน' || s === 'จำหน่าย') return 'var(--accent-danger)';
+  return 'var(--text-secondary)';
+};
+
+const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token }) => {
   const isAdmin = user && ['computer_admin', 'network_admin', 'super_admin'].includes(user.role);
+  // Same access gate as the "การจัดการ" (Management) item in the Sidebar.
+  const canManageSites = user && ['computer_admin', 'network_admin', 'super_admin', 'manager', 'operator'].includes(user.role);
   const [deviceData, setDeviceData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [scanStatus, setScanStatus] = useState('idle'); // idle, scanning, completed
@@ -25,6 +36,10 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
     lastUpdated: null
   });
   const [refreshingStatus, setRefreshingStatus] = useState(false);
+  // Live per-IP check results for the client list table, keyed by ip_address.
+  // Kept separate from the scanned `last_online` timestamps -- this is an
+  // on-demand real-time probe (GET /api/test/check-ip/:ip), not tied to scan freshness.
+  const [ipCheckResults, setIpCheckResults] = useState({});
   const [isExporting, setIsExporting] = useState(false);
   const [availabilityHistory, setAvailabilityHistory] = useState([]);
   const [fullAvailabilityHistory, setFullAvailabilityHistory] = useState([]);
@@ -32,6 +47,9 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
   const [currentDowntimePage, setCurrentDowntimePage] = useState(1);
   const itemsPerPage = 10;
   const scanTimeoutRef = useRef(null);
+  const [equipmentDetail, setEquipmentDetail] = useState(null);
+  const [loadingEquipmentDetail, setLoadingEquipmentDetail] = useState(false);
+  const [showEquipmentModal, setShowEquipmentModal] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -53,6 +71,31 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
     }
   };
 
+  const handleEquipmentRowClick = async (client) => {
+    if (client.source !== 'equipment' || !client.equipmentId) return;
+    setShowEquipmentModal(true);
+    setLoadingEquipmentDetail(true);
+    setEquipmentDetail(null);
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${client.equipmentId}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      const result = await response.json();
+      if (result.success) {
+        setEquipmentDetail(result.data);
+      } else {
+        toast.error('ไม่สามารถโหลดรายละเอียดอุปกรณ์ได้');
+        setShowEquipmentModal(false);
+      }
+    } catch (error) {
+      console.error('Error fetching equipment detail:', error);
+      toast.error('เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์');
+      setShowEquipmentModal(false);
+    } finally {
+      setLoadingEquipmentDetail(false);
+    }
+  };
+
   const fetchRealtimeStats = async () => {
     try {
       const metricsRes = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latency/metrics`, {
@@ -60,7 +103,9 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
       });
       const metricsResult = await metricsRes.json();
       if (metricsResult.success && metricsResult.data) {
-        const currentStats = metricsResult.data.find(d => (d.device_id || d.id) === deviceId);
+        // deviceId can arrive as a number (clicked from a list) or a string
+        // (restored from the URL after browser back/forward), so compare as strings.
+        const currentStats = metricsResult.data.find(d => String(d.device_id ?? d.id) === String(deviceId));
         if (currentStats) {
           setRealtimeStats({
             status: (currentStats.alive === false || currentStats.status === 'down' || currentStats.status === 'offline') ? 'offline' :
@@ -90,6 +135,28 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
       console.error('Error checking device status:', error);
     } finally {
       setRefreshingStatus(false);
+    }
+  };
+
+  const handleCheckIp = async (ip) => {
+    if (!ip) return;
+    setIpCheckResults(prev => ({ ...prev, [ip]: { ...prev[ip], checking: true } }));
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/test/check-ip/${ip}`);
+      const result = await response.json();
+      setIpCheckResults(prev => ({
+        ...prev,
+        [ip]: {
+          checking: false,
+          alive: !!result.alive,
+          latency_ms: result.latency_ms,
+          packet_loss: result.packet_loss,
+          checked_at: result.checked_at
+        }
+      }));
+    } catch (error) {
+      console.error('Error checking IP status:', error);
+      setIpCheckResults(prev => ({ ...prev, [ip]: { ...prev[ip], checking: false } }));
     }
   };
 
@@ -298,11 +365,75 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
     });
   };
 
+  // Merge the office equipment registered under this device's pea_site with the
+  // live network scan results: if a scanned client's IP matches a piece of
+  // equipment, that scan result IS the status check for that equipment (rather
+  // than showing up as a separate "Unknown Device" row). Scanned clients whose
+  // IP doesn't match any known equipment still show up on their own.
+  const mergedDeviceList = React.useMemo(() => {
+    const equipmentList = deviceData?.pea_site?.equipment || [];
+    const usedClientKeys = new Set();
+
+    const fromEquipment = equipmentList.map(eq => {
+      const matchedScan = eq.ip_address
+        ? scannedClients.find(c => c.ip_address && c.ip_address === eq.ip_address)
+        : null;
+      if (matchedScan) usedClientKeys.add(matchedScan.id ?? matchedScan.ip_address);
+      return {
+        id: `equipment-${eq.id}`,
+        equipmentId: eq.id,
+        source: 'equipment',
+        client_name: eq.name,
+        ip_address: eq.ip_address,
+        mac_address: eq.mac_address || matchedScan?.mac_address,
+        department: eq.department,
+        equipment_type: eq.equipment_type,
+        last_online: matchedScan?.last_online || null,
+        matchedScan: !!matchedScan
+      };
+    });
+
+    const fromScanOnly = scannedClients
+      .filter(c => !usedClientKeys.has(c.id ?? c.ip_address))
+      .map((c, index) => ({
+        id: c.id ?? `scan-${c.ip_address || index}`,
+        source: 'scan',
+        client_name: c.client_name || 'Unknown Device',
+        ip_address: c.ip_address,
+        mac_address: c.mac_address,
+        department: null,
+        equipment_type: null,
+        last_online: c.last_online,
+        matchedScan: true
+      }));
+
+    // Ascending by IP (.1 up to .254). Missing/malformed addresses sort to
+    // the bottom regardless of direction.
+    const ipToNum = (ip) => {
+      const parts = (ip || '').split('.').map(Number);
+      if (parts.length !== 4 || parts.some(n => Number.isNaN(n))) return -1;
+      return parts.reduce((acc, n) => acc * 256 + n, 0);
+    };
+
+    const byIpAsc = (a, b) => {
+      const an = ipToNum(a.ip_address);
+      const bn = ipToNum(b.ip_address);
+      if (an === -1 && bn === -1) return 0;
+      if (an === -1) return 1;
+      if (bn === -1) return -1;
+      return an - bn;
+    };
+
+    // Keep registered equipment and scan-only ("Unknown Device") entries in
+    // separate blocks -- sorted by IP within each -- rather than interleaved.
+    return [...fromEquipment.sort(byIpAsc), ...fromScanOnly.sort(byIpAsc)];
+  }, [deviceData, scannedClients]);
+
   // Pagination logic
   const indexOfLastItem = currentPage * itemsPerPage;
   const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentItems = scannedClients.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(scannedClients.length / itemsPerPage);
+  const currentItems = mergedDeviceList.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(mergedDeviceList.length / itemsPerPage);
 
   const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
@@ -606,8 +737,8 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
             <h3 style={{ margin: 0, fontSize: '1.1rem' }}>จำนวนอุปกรณ์ในสำนักงาน</h3>
           </div>
           <div style={{ textAlign: 'center', padding: '0.5rem 0' }}>
-            <h2 style={{ margin: 0, fontSize: '2.5rem', color: scannedClients.length > 0 ? 'var(--accent-success)' : 'var(--text-primary)' }}>
-              {scannedClients.length}
+            <h2 style={{ margin: 0, fontSize: '2.5rem', color: mergedDeviceList.length > 0 ? 'var(--accent-success)' : 'var(--text-primary)' }}>
+              {mergedDeviceList.length}
             </h2>
             <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Discovered Devices</p>
           </div>
@@ -758,7 +889,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
       <AvailabilityHistoryChart history={availabilityHistory} />
 
       {/* Downtime History Section */}
-      <div className="card glass" style={{ padding: 0, overflow: 'hidden', marginBottom: '2.5rem' }}>
+      <div className="card glass" style={{ padding: 0, overflow: 'hidden', marginBottom: '2.5rem', borderRadius: '0.75rem' }}>
         <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <div style={{ background: 'var(--bg-danger-subtle)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-danger)' }}>
             <Activity size={20} />
@@ -863,14 +994,37 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
         )}
       </div>
 
-      <div className="card glass" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
+        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
           <h3 style={{ margin: 0 }}>รายการอุปกรณ์เชื่อมต่อระบบเครือข่ายภายในสำนักงาน</h3>
-          {scannedClients.length > 0 && (
-            <span style={{ fontSize: '0.8rem', color: 'var(--accent-success)', fontWeight: 600 }}>
-              {scannedClients.length} devices detected
-            </span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            {mergedDeviceList.length > 0 && (
+              <span style={{ fontSize: '0.8rem', color: 'var(--accent-success)', fontWeight: 600 }}>
+                {mergedDeviceList.length} รายการ
+              </span>
+            )}
+            {canManageSites && deviceData?.pea_site_id && (
+              <button
+                onClick={() => onManageSiteEquipment && onManageSiteEquipment(deviceData.pea_site_id)}
+                className="glass"
+                style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: '0.5rem',
+                  border: 'none',
+                  background: 'var(--accent-primary)',
+                  color: '#fff',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 600
+                }}
+              >
+                <Boxes size={16} /> จัดการอุปกรณ์สำนักงานนี้
+              </button>
+            )}
+          </div>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -887,9 +1041,32 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
               {currentItems.map((client, index) => {
                 const diff = new Date() - new Date(client.last_online);
                 const isOnline = client.last_online && diff >= 0 && diff < 300000; // 5 mins
+                const notScanned = client.source === 'equipment' && !client.matchedScan;
+                const isEquipment = client.source === 'equipment';
+                // A manual "เช็คสถานะ" check (GET /api/test/check-ip/:ip) is a
+                // live probe, so it takes priority over the scan-age-based isOnline guess.
+                const liveCheck = client.ip_address ? ipCheckResults[client.ip_address] : null;
+                const hasLiveCheck = liveCheck && liveCheck.alive !== undefined;
+                const displayOnline = hasLiveCheck ? liveCheck.alive : isOnline;
+                const statusLabel = hasLiveCheck
+                  ? (liveCheck.alive ? 'ONLINE' : 'OFFLINE')
+                  : (isOnline ? 'ONLINE' : notScanned ? 'ไม่พบในการสแกน' : 'OFFLINE');
                 return (
-                  <tr key={client.id || index} style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.2s' }} className="table-row-hover">
-                    <td style={{ padding: '1rem 1.5rem', fontWeight: 600 }}>{client.client_name || 'Unknown Device'}</td>
+                  <tr
+                    key={client.id || index}
+                    onClick={() => isEquipment && handleEquipmentRowClick(client)}
+                    style={{ borderBottom: '1px solid var(--border-subtle)', transition: 'background 0.2s', cursor: isEquipment ? 'pointer' : 'default' }}
+                    className="table-row-hover"
+                    title={isEquipment ? 'คลิกเพื่อดูรายละเอียดอุปกรณ์' : undefined}
+                  >
+                    <td style={{ padding: '1rem 1.5rem' }}>
+                      <div style={{ fontWeight: 600 }}>{client.client_name || 'Unknown Device'}</div>
+                      {(client.department || client.equipment_type) && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                          {[client.department, client.equipment_type].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
+                    </td>
                     <td style={{
                       padding: '1rem 1.5rem',
                       fontFamily: 'ui-monospace',
@@ -897,7 +1074,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
                       filter: !user ? 'blur(4px)' : 'none',
                       transition: 'filter 0.3s ease',
                       userSelect: !user ? 'none' : 'auto'
-                    }}>{client.ip_address}</td>
+                    }}>{client.ip_address || '-'}</td>
                     <td style={{
                       padding: '1rem 1.5rem',
                       fontFamily: 'ui-monospace',
@@ -905,18 +1082,46 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
                       filter: !user ? 'blur(4px)' : 'none',
                       transition: 'filter 0.3s ease',
                       userSelect: !user ? 'none' : 'auto'
-                    }}>{client.mac_address}</td>
+                    }}>{client.mac_address || '-'}</td>
                     <td style={{ padding: '1rem 1.5rem' }}>
-                      <span style={{
-                        fontSize: '0.75rem',
-                        padding: '0.2rem 0.6rem',
-                        borderRadius: '1rem',
-                        background: isOnline ? 'var(--bg-success-subtle)' : 'var(--bg-danger-subtle)',
-                        color: isOnline ? 'var(--accent-success)' : 'var(--accent-danger)',
-                        fontWeight: 600
-                      }}>
-                        {isOnline ? 'ONLINE' : 'OFFLINE'}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span
+                          style={{
+                            fontSize: '0.75rem',
+                            padding: '0.2rem 0.6rem',
+                            borderRadius: '1rem',
+                            background: displayOnline ? 'var(--bg-success-subtle)' : 'var(--bg-danger-subtle)',
+                            color: displayOnline ? 'var(--accent-success)' : 'var(--accent-danger)',
+                            fontWeight: 600
+                          }}
+                          title={hasLiveCheck
+                            ? `เช็คล่าสุด: ${new Date(liveCheck.checked_at).toLocaleString('th-TH')}${liveCheck.alive ? ` · ${liveCheck.latency_ms}ms` : ''}`
+                            : undefined}
+                        >
+                          {statusLabel}
+                        </span>
+                        {client.ip_address && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleCheckIp(client.ip_address); }}
+                            disabled={liveCheck?.checking}
+                            title="เช็คสถานะล่าสุด"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: '0.3rem',
+                              borderRadius: '0.4rem',
+                              border: '1px solid var(--border-subtle)',
+                              background: 'var(--glass-bg-subtle)',
+                              color: 'var(--text-secondary)',
+                              cursor: liveCheck?.checking ? 'not-allowed' : 'pointer',
+                              opacity: liveCheck?.checking ? 0.6 : 1
+                            }}
+                          >
+                            <RefreshCw size={12} className={liveCheck?.checking ? 'animate-spin' : ''} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td style={{ padding: '1rem 1.5rem' }}>
                       <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
@@ -926,9 +1131,9 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
                   </tr>
                 );
               })}
-              {scannedClients.length === 0 && scanStatus !== 'scanning' && (
+              {mergedDeviceList.length === 0 && scanStatus !== 'scanning' && (
                 <tr>
-                  <td colSpan="4" style={{ padding: '5rem', textAlign: 'center' }}>
+                  <td colSpan="5" style={{ padding: '5rem', textAlign: 'center' }}>
                     <motion.div
                       initial={{ scale: 0.9, opacity: 0 }}
                       animate={{ scale: 1, opacity: 1 }}
@@ -950,7 +1155,7 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
               )}
               {scanStatus === 'scanning' && currentItems.length === 0 && (
                 <tr>
-                  <td colSpan="4" style={{ padding: '5rem', textAlign: 'center' }}>
+                  <td colSpan="5" style={{ padding: '5rem', textAlign: 'center' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
                       <Loader2 className="animate-spin" size={32} color="var(--accent-primary)" />
                       <p style={{ color: 'var(--text-secondary)' }}>Discovering devices and syncing with backend...</p>
@@ -1011,6 +1216,98 @@ const DeviceDetails = ({ deviceId, onBack, user, token }) => {
           </div>
         )}
       </div>
+
+      {/* Equipment Detail Modal */}
+      <AnimatePresence>
+        {showEquipmentModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            data-html2canvas-ignore="true"
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              zIndex: 9999, padding: '1rem'
+            }}
+            onClick={() => setShowEquipmentModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="card glass"
+              style={{ padding: '2rem', maxWidth: '520px', width: '100%', maxHeight: '85vh', overflowY: 'auto', borderRadius: '0.75rem' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1.25rem' }}>รายละเอียดอุปกรณ์</h3>
+                <button
+                  onClick={() => setShowEquipmentModal(false)}
+                  className="glass"
+                  style={{ padding: '0.4rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {loadingEquipmentDetail ? (
+                <div style={{ padding: '3rem 0', textAlign: 'center' }}>
+                  <Loader2 className="animate-spin" size={32} color="var(--accent-primary)" style={{ margin: '0 auto' }} />
+                  <p style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>กำลังโหลดรายละเอียด...</p>
+                </div>
+              ) : equipmentDetail ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>{equipmentDetail.name || '-'}</h2>
+                    <span style={{
+                      display: 'inline-block', marginTop: '0.5rem', padding: '0.2rem 0.6rem', borderRadius: '1rem',
+                      fontSize: '0.75rem', fontWeight: 600,
+                      color: statusColorFor(equipmentDetail.status),
+                      background: `${statusColorFor(equipmentDetail.status)}15`
+                    }}>
+                      {equipmentDetail.status || '-'}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', fontSize: '0.85rem' }}>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>ประเภท:</span> {equipmentDetail.equipment_type || '-'}</div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>แผนก:</span> {equipmentDetail.department || '-'}</div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>IP Address:</span> <span style={{ fontFamily: 'monospace' }}>{equipmentDetail.ip_address || '-'}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>MAC Address:</span> <span style={{ fontFamily: 'monospace' }}>{equipmentDetail.mac_address || '-'}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>ผู้ขาย:</span> {equipmentDetail.vendor || '-'}</div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>เลขที่สัญญา:</span> {equipmentDetail.contract_no || '-'}</div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>วันเริ่มสัญญา:</span> {equipmentDetail.contract_start_date || '-'}</div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>วันหมดอายุสัญญา:</span> {equipmentDetail.contract_expiry_date || '-'}</div>
+                  </div>
+
+                  {equipmentDetail.notes && (
+                    <div style={{ fontSize: '0.85rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>หมายเหตุ:</span> {equipmentDetail.notes}
+                    </div>
+                  )}
+
+                  {equipmentDetail.pea_site && (
+                    <div style={{ fontSize: '0.85rem' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>สำนักงาน:</span> {equipmentDetail.pea_site.pea_name} ({equipmentDetail.pea_site.pea_province})
+                    </div>
+                  )}
+
+                  {equipmentDetail.created_by && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', borderTop: '1px solid var(--border-subtle)', paddingTop: '1rem' }}>
+                      บันทึกโดย {equipmentDetail.created_by.first_name} {equipmentDetail.created_by.last_name} (@{equipmentDetail.created_by.username})
+                      {equipmentDetail.updatedAt && ` · แก้ไขล่าสุด ${new Date(equipmentDetail.updatedAt).toLocaleString('th-TH')}`}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p style={{ color: 'var(--text-secondary)', textAlign: 'center', padding: '2rem 0' }}>ไม่พบข้อมูล</p>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };

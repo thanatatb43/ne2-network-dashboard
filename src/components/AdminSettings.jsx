@@ -297,7 +297,7 @@ const AdminSettings = ({ token, user: currentUser }) => {
               </div>
             </div>
 
-            <div className="card glass" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                   <thead>

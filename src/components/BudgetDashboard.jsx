@@ -1,15 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
-import { DollarSign, TrendingUp, PieChart, BarChart3, ArrowUpRight, ArrowDownRight, Wallet, Target, Loader2, Search, X, FileText, ChevronRight, RotateCcw, ArrowLeft, ChevronLeft, ArrowUpDown } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, Legend } from 'recharts';
+import { DollarSign, TrendingUp, Users, BarChart3, ArrowUpRight, ArrowDownRight, Wallet, Target, Loader2, Search, X, FileText, ChevronRight, RotateCcw, ArrowLeft, ChevronLeft, ArrowUpDown } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, Legend, ComposedChart, Line } from 'recharts';
 import { AnimatePresence } from 'framer-motion';
 
-const BudgetDashboard = ({ token }) => {
+const thaiMonthAbbr = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+const formatMonthLabel = (monthStr) => {
+  const [y, m] = monthStr.split('-');
+  const beYear = parseInt(y, 10) + 543;
+  const monthIndex = parseInt(m, 10) - 1;
+  return `${thaiMonthAbbr[monthIndex] || m} ${beYear}`;
+};
+
+const BudgetDashboard = ({ token, view = 'summary', onViewChange }) => {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
   const [summaryData, setSummaryData] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [view, setView] = useState('summary'); // 'summary' or 'search'
+  const setView = (v) => (onViewChange ? onViewChange(v) : undefined); // 'summary' or 'search', URL-controlled from App.jsx
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchSelectors, setSearchSelectors] = useState({
     year: [],
@@ -30,6 +38,8 @@ const BudgetDashboard = ({ token }) => {
     description: ''
   });
   const [searchResults, setSearchResults] = useState(null);
+  const [monthlyChartData, setMonthlyChartData] = useState([]);
+  const [grandTotal, setGrandTotal] = useState(null);
   const [searching, setSearching] = useState(false);
   const [tableSearchQuery, setTableSearchQuery] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: 'posting_date', direction: 'desc' });
@@ -133,13 +143,12 @@ const BudgetDashboard = ({ token }) => {
     }
   }, [showSearchModal]);
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
+  const runSearch = async (formValues) => {
     setSearching(true);
     try {
       const params = new URLSearchParams();
-      if (searchFormData.year) params.append('year', searchFormData.year);
-      if (searchFormData.cost_center) {
+      if (formValues.year) params.append('year', formValues.year);
+      if (formValues.cost_center) {
         // Manual mapping override for specific cost centers
         const manualMap = {
           '53032070': 'ค่าInst.Equipสื่อสาร',
@@ -147,20 +156,20 @@ const BudgetDashboard = ({ token }) => {
           '53051060': 'ค่าบำรุงฯ/ซ่อม-IT'
         };
 
-        let name = manualMap[searchFormData.cost_center];
+        let name = manualMap[formValues.cost_center];
         if (!name) {
           // If it's a known code from API, use its name. Otherwise send as is.
-          const idx = searchSelectors.cost_center.indexOf(searchFormData.cost_center);
-          name = idx !== -1 ? searchSelectors.cost_center_name[idx] : searchFormData.cost_center;
+          const idx = searchSelectors.cost_center.indexOf(formValues.cost_center);
+          name = idx !== -1 ? searchSelectors.cost_center_name[idx] : formValues.cost_center;
         }
         params.append('cost_center_name', name);
       }
-      if (searchFormData.clearing_account_name) {
-        params.append('clearing_account_name', searchFormData.clearing_account_name);
+      if (formValues.clearing_account_name) {
+        params.append('clearing_account_name', formValues.clearing_account_name);
       }
-      if (searchFormData.username) params.append('username', searchFormData.username);
-      if (searchFormData.reference_doc_no) params.append('reference_doc_no', searchFormData.reference_doc_no);
-      if (searchFormData.description) params.append('description', searchFormData.description);
+      if (formValues.username) params.append('username', formValues.username);
+      if (formValues.reference_doc_no) params.append('reference_doc_no', formValues.reference_doc_no);
+      if (formValues.description) params.append('description', formValues.description);
 
       const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/budgets/transactions/find`, {
@@ -174,10 +183,14 @@ const BudgetDashboard = ({ token }) => {
       const result = await response.json();
       if (result.success) {
         setSearchResults(result.data || []);
+        setMonthlyChartData(result.summary?.by_month || []);
+        setGrandTotal(result.summary?.grand_total || null);
         setView('search');
         setCurrentPage(1);
       } else {
         setSearchResults([]);
+        setMonthlyChartData([]);
+        setGrandTotal(null);
       }
     } catch (error) {
       console.error('Search error:', error);
@@ -185,6 +198,43 @@ const BudgetDashboard = ({ token }) => {
     } finally {
       setSearching(false);
     }
+  };
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    runSearch(searchFormData);
+  };
+
+  // Clicking a bar in a per-account "Top spenders" chart jumps straight to the
+  // search page filtered by the selected year, that account's cost center, and username.
+  const handleUserBarClick = (accountCode, username) => {
+    const newFormValues = {
+      year: selectedYear,
+      cost_center: accountCode,
+      clearing_account_name: '',
+      username,
+      reference_doc_no: '',
+      description: ''
+    };
+    setSearchFormData(newFormValues);
+    fetchSearchSelectors();
+    runSearch(newFormValues);
+  };
+
+  // Clicking a "Budget vs Actual" bar or a top stat card jumps to the search page
+  // filtered by the selected year, and by cost center when one is given.
+  const handleCategorySearch = (accountCode) => {
+    const newFormValues = {
+      year: selectedYear,
+      cost_center: accountCode || '',
+      clearing_account_name: '',
+      username: '',
+      reference_doc_no: '',
+      description: ''
+    };
+    setSearchFormData(newFormValues);
+    fetchSearchSelectors();
+    runSearch(newFormValues);
   };
 
   const handleReset = () => {
@@ -197,6 +247,8 @@ const BudgetDashboard = ({ token }) => {
       description: ''
     });
     setSearchResults(null);
+    setMonthlyChartData([]);
+    setGrandTotal(null);
     setTableSearchQuery('');
   };
 
@@ -280,12 +332,19 @@ const BudgetDashboard = ({ token }) => {
     categoryColorMap[item.account_name] = colors[index % colors.length];
   });
 
-  const categoryData = listRows.map((item) => ({
-    name: item.account_name,
-    code: item.account_code,
-    value: parseFloat(item.budget_used),
-    color: categoryColorMap[item.account_name]
-  })).filter(item => item.value > 0);
+  // Top 10 spenders (username_groups), kept separate per account code as returned by the API
+  const usersByAccountCode = React.useMemo(() => {
+    return listRows.map(row => ({
+      code: row.account_code,
+      name: row.account_name,
+      color: categoryColorMap[row.account_name],
+      users: (row.username_groups || [])
+        .map(({ username_prefix, total_spent }) => ({ name: username_prefix, value: parseFloat(total_spent || 0) }))
+        .filter(item => item.value > 0)
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 10)
+    }));
+  }, [listRows]);
 
   const comparisonData = listRows.map(item => ({
     name: item.account_name,
@@ -382,8 +441,11 @@ const BudgetDashboard = ({ token }) => {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: i * 0.1 }}
+                whileHover={{ y: -3 }}
                 className="card glass"
-                style={{ padding: '1.5rem', position: 'relative', overflow: 'hidden' }}
+                style={{ padding: '1.5rem', position: 'relative', overflow: 'hidden', cursor: 'pointer' }}
+                onClick={() => handleCategorySearch()}
+                title="คลิกเพื่อดูรายการเบิกจ่ายทั้งหมดของปีนี้"
               >
                 <div style={{
                   position: 'absolute', top: '-10%', right: '-10%',
@@ -410,7 +472,7 @@ const BudgetDashboard = ({ token }) => {
             ))}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1.5rem', marginBottom: '2rem', minWidth: 0, minHeight: 0 }}>
+          <div style={{ marginBottom: '2rem', minWidth: 0, minHeight: 0 }}>
             {/* Budget vs Actual Chart */}
             <div className="card glass" style={{ padding: '1.5rem', minWidth: 0, minHeight: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
@@ -448,6 +510,7 @@ const BudgetDashboard = ({ token }) => {
                                 <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                                   <p style={{ margin: 0, color: data.color, fontSize: '0.85rem' }}>ได้รับ: ฿{data.allocated.toLocaleString()}</p>
                                   <p style={{ margin: 0, color: 'var(--accent-warning)', fontSize: '0.85rem' }}>ใช้แล้ว: ฿{data.spent.toLocaleString()}</p>
+                                  <p style={{ margin: '0.5rem 0 0', color: 'var(--text-secondary)', fontSize: '0.7rem' }}>คลิกเพื่อดูรายการเบิกจ่าย</p>
                                 </div>
                               </div>
                             );
@@ -456,63 +519,88 @@ const BudgetDashboard = ({ token }) => {
                         }}
                       />
                       <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} />
-                      <Bar dataKey="allocated" name="งบประมาณที่ได้รับ" fill="url(#rainbowGradient)" radius={[4, 4, 0, 0]} barSize={15}>
+                      <Bar
+                        dataKey="allocated"
+                        name="งบประมาณที่ได้รับ"
+                        fill="url(#rainbowGradient)"
+                        radius={[4, 4, 0, 0]}
+                        barSize={15}
+                        cursor="pointer"
+                        onClick={(data) => handleCategorySearch(data.code)}
+                      >
                         {comparisonData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Bar>
-                      <Bar dataKey="spent" name="งบประมาณที่ใช้ไป" fill="var(--accent-warning)" radius={[4, 4, 0, 0]} barSize={15} />
+                      <Bar
+                        dataKey="spent"
+                        name="งบประมาณที่ใช้ไป"
+                        fill="var(--accent-warning)"
+                        radius={[4, 4, 0, 0]}
+                        barSize={15}
+                        cursor="pointer"
+                        onClick={(data) => handleCategorySearch(data.code)}
+                      />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
               </div>
             </div>
 
-            {/* Category Breakdown */}
-            <div className="card glass" style={{ padding: '1.5rem', minWidth: 0, minHeight: 0 }}>
-              <h3 style={{ margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <PieChart size={20} color="var(--accent-warning)" /> เปรียบเทียบค่าใช้จ่ายตามหมวดหมู่
-              </h3>
-              <div style={{ height: '300px', width: '100%', minWidth: 0, minHeight: 0 }}>
-                {loading ? (
-                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}><Loader2 className="animate-spin" size={32} color="var(--text-secondary)" /></div>
-                ) : categoryData.length === 0 ? (
-                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-secondary)' }}>No expenditure recorded</div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={categoryData} layout="vertical" margin={{ top: 0, right: 30, left: 20, bottom: 0 }}>
-                      <XAxis type="number" hide />
-                      <YAxis dataKey="name" type="category" stroke="var(--text-secondary)" fontSize={11} tickLine={false} axisLine={false} width={100} />
-                      <Tooltip
-                        cursor={{ fill: 'transparent' }}
-                        content={({ active, payload }) => {
-                          if (active && payload && payload.length) {
-                            const data = payload[0].payload;
-                            return (
-                              <div className="glass" style={{ padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: '0.75rem', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', background: 'var(--card-bg)' }}>
-                                <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)' }}>{data.name}</p>
-                                <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Code: {data.code}</p>
-                                <p style={{ margin: '0.5rem 0 0', color: data.color, fontWeight: 700 }}>฿{data.value.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                              </div>
-                            );
-                          }
-                          return null;
-                        }}
-                      />
-                      <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={20}>
-                        {categoryData.map((entry, index) => (
-                          <Cell key={`cell-cat-${index}`} fill={entry.color} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
+          </div>
+
+          {/* Top 10 Spenders by Username, one chart per account code */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+            {usersByAccountCode.map((account) => (
+              <div key={account.code} className="card glass" style={{ padding: '1.5rem', minWidth: 0, minHeight: 0 }}>
+                <h3 style={{ margin: '0 0 0.25rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1rem' }}>
+                  <Users size={18} color="var(--accent-warning)" /> {account.name} ({account.code})
+                </h3>
+                <p style={{ margin: '0 0 1rem 0', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Top ผู้ใช้เบิกจ่ายสูงสุด</p>
+                <div style={{ height: '260px', width: '100%', minWidth: 0, minHeight: 0 }}>
+                  {loading ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}><Loader2 className="animate-spin" size={32} color="var(--text-secondary)" /></div>
+                  ) : account.users.length === 0 ? (
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-secondary)' }}>No expenditure recorded</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={account.users} layout="vertical" margin={{ top: 0, right: 30, left: 20, bottom: 0 }}>
+                        <XAxis type="number" hide />
+                        <YAxis dataKey="name" type="category" stroke="var(--text-secondary)" fontSize={11} tickLine={false} axisLine={false} width={70} />
+                        <Tooltip
+                          cursor={{ fill: 'transparent' }}
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div className="glass" style={{ padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: '0.75rem', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', background: 'var(--card-bg)' }}>
+                                  <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)' }}>{data.name}</p>
+                                  <p style={{ margin: '0.5rem 0 0', color: account.color, fontWeight: 700 }}>฿{data.value.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                                  <p style={{ margin: '0.5rem 0 0', color: 'var(--text-secondary)', fontSize: '0.7rem' }}>คลิกเพื่อดูรายการเบิกจ่าย</p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Bar
+                          dataKey="value"
+                          fill={account.color}
+                          radius={[0, 4, 4, 0]}
+                          barSize={16}
+                          cursor="pointer"
+                          onClick={(data) => handleUserBarClick(account.code, data.name)}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
               </div>
-            </div>
+            ))}
           </div>
 
           {/* Detailed Table */}
-          <div className="card glass" style={{ padding: '1.5rem', overflowX: 'auto' }}>
+          <div className="card glass" style={{ padding: '1.5rem', overflowX: 'auto', borderRadius: '0.75rem' }}>
             <h3 style={{ margin: '0 0 1.5rem 0' }}>สรุปรายการใช้จ่ายตามรหัสบัญชี</h3>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead>
@@ -731,7 +819,52 @@ const BudgetDashboard = ({ token }) => {
                 </div>
               </div>
 
-              <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: '1.5rem', background: 'var(--card-bg)' }}>
+              {monthlyChartData.length > 0 && (
+                <div className="glass" style={{ padding: '1.5rem', borderRadius: '1.5rem', border: '1px solid var(--border-color)' }}>
+                  <h4 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: 700 }}>สรุปยอดเบิกจ่ายรายเดือน</h4>
+                  <div style={{ height: '280px', width: '100%' }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart
+                        data={monthlyChartData.map(m => ({ ...m, label: formatMonthLabel(m.month) }))}
+                        margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                        <XAxis dataKey="label" stroke="var(--text-secondary)" fontSize={11} tickLine={false} axisLine={false} tick={{ fill: 'var(--text-secondary)' }} />
+                        <YAxis stroke="var(--text-secondary)" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`} />
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div className="glass" style={{ padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius: '0.75rem', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', background: 'var(--card-bg)' }}>
+                                  <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)' }}>{data.label}</p>
+                                  <p style={{ margin: '0.4rem 0 0', color: 'var(--accent-danger)', fontSize: '0.85rem' }}>เบิกจ่าย: ฿{data.spent.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                                  <p style={{ margin: 0, color: 'var(--accent-success)', fontSize: '0.85rem' }}>ไม่เบิกจ่าย: ฿{data.not_spent.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                                  <p style={{ margin: '0.4rem 0 0', color: 'var(--accent-warning)', fontSize: '0.85rem', fontWeight: 700 }}>ยอดเบิกจ่ายทั้งหมด: ฿{data.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} />
+                        <Bar dataKey="spent" name="เบิกจ่าย" fill="var(--accent-danger)" radius={[4, 4, 0, 0]} barSize={24} />
+                        <Bar dataKey="not_spent" name="ไม่เบิกจ่าย" fill="var(--accent-success)" radius={[4, 4, 0, 0]} barSize={24} />
+                        <Line type="monotone" dataKey="total" name="ยอดเบิกจ่ายทั้งหมด" stroke="var(--accent-warning)" strokeWidth={2.5} dot={{ r: 4, fill: 'var(--accent-warning)' }} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {grandTotal && (
+                    <div style={{ marginTop: '1rem', display: 'flex', gap: '1.5rem', flexWrap: 'wrap', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                      <span>รวมเบิกจ่ายทั้งหมด: <strong style={{ color: 'var(--accent-danger)' }}>฿{grandTotal.spent.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></span>
+                      <span>รวมไม่เบิกจ่ายทั้งหมด: <strong style={{ color: 'var(--accent-success)' }}>฿{grandTotal.not_spent.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></span>
+                      <span>ยอดเบิกจ่ายทั้งหมด: <strong style={{ color: 'var(--accent-warning)' }}>฿{grandTotal.total.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: '0.75rem', background: 'var(--card-bg)' }}>
                 <table style={{ width: '100%', minWidth: '1000px', borderCollapse: 'collapse', fontSize: '0.95rem' }}>
                   <thead style={{ background: '#f8fafc', position: 'sticky', top: 0, zIndex: 1, borderBottom: '2px solid var(--border-color)' }}>
                     <tr>

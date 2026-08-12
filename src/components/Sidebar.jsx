@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import peaLogo from '../assets/logo/pea_logo.png';
 
-const Sidebar = ({ activeTab, setActiveTab, user, onLogout, isOpen, onClose }) => {
+const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => {
   const [systemStatus, setSystemStatus] = useState({
     total: 0,
     online: 0,
@@ -115,10 +115,9 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, isOpen, onClose }) =
                   </h2>
                 </div>
                 
-                {/* Mobile Close Button */}
-                <button 
+                {/* Collapse Button -- visible at any screen size, not just mobile */}
+                <button
                   onClick={onClose}
-                  className="mobile-only"
                   style={{
                     background: 'none',
                     border: 'none',
@@ -126,6 +125,7 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, isOpen, onClose }) =
                     cursor: 'pointer',
                     padding: '0.5rem'
                   }}
+                  title="ยุบเมนู"
                 >
                   <X size={24} />
                 </button>
@@ -136,13 +136,8 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, isOpen, onClose }) =
                   <div
                     key={item.id}
                     onClick={() => {
-                      setActiveTab(item.id);
+                      onNavigate(item.id);
                       if (window.innerWidth <= 1024) onClose();
-                      if (item.id === 'budget') {
-                        window.history.pushState({}, '', '/budget-dashboard');
-                      } else {
-                        window.history.pushState({}, '', '/');
-                      }
                     }}
                     style={{
                       display: 'flex',
@@ -208,6 +203,17 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, isOpen, onClose }) =
                       }}>
                         @{user.username}
                       </div>
+                      {(user.position || user.pea_division) && (
+                        <div style={{
+                          fontSize: '0.7rem',
+                          color: 'var(--text-secondary)',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
+                        }}>
+                          {[user.position, user.pea_division].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
                     </div>
                   </div>
                   <button
@@ -262,7 +268,14 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, isOpen, onClose }) =
                       <span>Online</span>
                     </div>
                     <div style={{ height: '15px', width: '1px', background: 'var(--border-subtle)' }} />
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <div
+                      onClick={() => {
+                        onNavigate('down-devices');
+                        if (window.innerWidth <= 1024) onClose();
+                      }}
+                      style={{ display: 'flex', flexDirection: 'column', cursor: 'pointer' }}
+                      title="คลิกเพื่อดูรายการอุปกรณ์ที่ขัดข้อง"
+                    >
                       <span style={{ color: systemStatus.offline > 0 ? 'var(--accent-danger)' : 'var(--text-secondary)', fontWeight: 700 }}>{systemStatus.offline}</span>
                       <span>Down</span>
                     </div>

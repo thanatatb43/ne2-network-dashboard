@@ -1,10 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { History, Activity, AlertCircle, Clock, Download, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { History, Activity, AlertCircle, Clock, Download, Search, ChevronLeft, ChevronRight, TrendingUp, Trophy } from 'lucide-react';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const DowntimeHistory = ({ token }) => {
+const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+
+const formatDurationMs = (ms) => {
+  if (!ms) return '-';
+  const totalSeconds = Math.floor(ms / 1000);
+  const d = Math.floor(totalSeconds / 86400);
+  const h = Math.floor((totalSeconds % 86400) / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  const result = [];
+  if (d > 0) result.push(`${d} วัน`);
+  if (h > 0) result.push(`${h} ชั่วโมง`);
+  if (m > 0) result.push(`${m} นาที`);
+  if (d === 0 && h === 0 && s > 0) result.push(`${s} วินาที`);
+  return result.length > 0 ? result.join(' ') : '-';
+};
+
+const DowntimeHistory = ({ token, onDeviceClick }) => {
   const [summary, setSummary] = useState(null);
   const [logs, setLogs] = useState([]);
+  const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -19,16 +38,19 @@ const DowntimeHistory = ({ token }) => {
         setLoading(true);
         const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
-        const [summaryRes, logsRes] = await Promise.all([
+        const [summaryRes, logsRes, dashboardRes] = await Promise.all([
           fetch(`${import.meta.env.VITE_API_BASE_URL}/api/devices/downtime/summary`, { headers }),
-          fetch(`${import.meta.env.VITE_API_BASE_URL}/api/devices/downtime/all`, { headers })
+          fetch(`${import.meta.env.VITE_API_BASE_URL}/api/devices/downtime/all`, { headers }),
+          fetch(`${import.meta.env.VITE_API_BASE_URL}/api/devices/downtime/dashboard`, { headers })
         ]);
 
         const summaryData = await summaryRes.json();
         const logsData = await logsRes.json();
+        const dashboardData = await dashboardRes.json();
 
         if (summaryData.success) setSummary(summaryData.data);
         if (logsData.success) setLogs(logsData.data || []);
+        if (dashboardData.success) setDashboard(dashboardData);
       } catch (error) {
         console.error('Error fetching downtime history:', error);
       } finally {
@@ -38,6 +60,25 @@ const DowntimeHistory = ({ token }) => {
 
     fetchData();
   }, [token]);
+
+  const monthlyChartData = React.useMemo(() => {
+    if (!dashboard?.monthly) return [];
+    return dashboard.monthly.map(m => ({
+      month: THAI_MONTHS[m.month - 1] || m.month,
+      incident_count: m.incident_count,
+      total_duration_ms: m.total_duration_ms
+    }));
+  }, [dashboard]);
+
+  const dailyChartData = React.useMemo(() => {
+    if (!dashboard?.daily) return [];
+    return dashboard.daily.map(d => ({
+      date: d.date,
+      dateLabel: d.date ? `${d.date.slice(8, 10)}/${d.date.slice(5, 7)}` : '',
+      incident_count: d.incident_count,
+      total_duration_ms: d.total_duration_ms
+    }));
+  }, [dashboard]);
 
   const provinces = React.useMemo(() => {
     const pSet = new Set();
@@ -169,8 +210,154 @@ const DowntimeHistory = ({ token }) => {
         </div>
       </div>
 
+      {/* Yearly Downtime Dashboard */}
+      {dashboard && (
+        <div style={{ marginBottom: '2.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <TrendingUp size={20} color="var(--accent-primary)" />
+              <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 700 }}>แนวโน้มการขัดข้อง ปี {dashboard.year}</h2>
+            </div>
+            <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              <span>เหตุการณ์ทั้งปี: <strong style={{ color: 'var(--text-primary)' }}>{dashboard.yearly?.incident_count ?? 0}</strong></span>
+              <span>เวลารวม: <strong style={{ color: 'var(--text-primary)' }}>{formatDuration(dashboard.yearly?.total_duration_formatted)}</strong></span>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
+            {/* Top 10 Problem Devices */}
+            <div className="card glass" style={{ padding: '1.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                <Trophy size={18} color="var(--accent-warning)" />
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>10 อันดับอุปกรณ์ขัดข้องบ่อยที่สุด</h3>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                {(dashboard.top_devices || []).map((d, i) => (
+                  <div
+                    key={d.device_id}
+                    onClick={() => onDeviceClick && onDeviceClick(d.device_id)}
+                    className="table-row-hover"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.85rem',
+                      padding: '0.6rem 0.75rem',
+                      borderRadius: '0.5rem',
+                      cursor: onDeviceClick ? 'pointer' : 'default'
+                    }}
+                  >
+                    <span style={{
+                      width: '1.75rem',
+                      height: '1.75rem',
+                      flexShrink: 0,
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      background: i < 3 ? 'var(--bg-danger-subtle)' : 'var(--glass-bg-subtle)',
+                      color: i < 3 ? 'var(--accent-danger)' : 'var(--text-secondary)'
+                    }}>
+                      {i + 1}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {d.pea_name}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                        {d.province || '-'} · {formatDuration(d.total_duration_formatted)}
+                      </div>
+                    </div>
+                    <span style={{
+                      fontSize: '0.75rem',
+                      padding: '0.2rem 0.6rem',
+                      borderRadius: '1rem',
+                      background: 'var(--bg-danger-subtle)',
+                      color: 'var(--accent-danger)',
+                      fontWeight: 700,
+                      flexShrink: 0
+                    }}>
+                      {d.incident_count} ครั้ง
+                    </span>
+                  </div>
+                ))}
+                {(!dashboard.top_devices || dashboard.top_devices.length === 0) && (
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', textAlign: 'center', padding: '1.5rem 0' }}>ไม่มีข้อมูล</p>
+                )}
+              </div>
+            </div>
+
+            {/* Monthly Incident Chart */}
+            <div className="card glass" style={{ padding: '1.5rem' }}>
+              <h3 style={{ margin: '0 0 1.25rem', fontSize: '1.05rem', fontWeight: 700 }}>จำนวนเหตุการณ์รายเดือน</h3>
+              <div style={{ width: '100%', height: '280px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={monthlyChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--grid-stroke)" vertical={false} />
+                    <XAxis dataKey="month" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                    <Tooltip
+                      contentStyle={{
+                        background: 'var(--tooltip-bg)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px',
+                        backdropFilter: 'blur(4px)',
+                        color: 'var(--text-primary)'
+                      }}
+                      formatter={(value, name, props) => {
+                        if (name === 'incident_count') return [`${value} ครั้ง`, 'เหตุการณ์'];
+                        return [value, name];
+                      }}
+                      labelFormatter={(label, payload) => {
+                        const dur = payload?.[0]?.payload?.total_duration_ms;
+                        return dur ? `${label} · รวม ${formatDurationMs(dur)}` : label;
+                      }}
+                    />
+                    <Bar dataKey="incident_count" fill="var(--accent-primary)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* Daily Incident Trend */}
+          <div className="card glass" style={{ padding: '1.5rem' }}>
+            <h3 style={{ margin: '0 0 1.25rem', fontSize: '1.05rem', fontWeight: 700 }}>แนวโน้มเหตุการณ์รายวัน</h3>
+            <div style={{ width: '100%', height: '260px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={dailyChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--grid-stroke)" vertical={false} />
+                  <XAxis
+                    dataKey="dateLabel"
+                    stroke="var(--text-secondary)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    interval={Math.max(0, Math.floor(dailyChartData.length / 12) - 1)}
+                  />
+                  <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'var(--tooltip-bg)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '8px',
+                      backdropFilter: 'blur(4px)',
+                      color: 'var(--text-primary)'
+                    }}
+                    formatter={(value) => [`${value} ครั้ง`, 'เหตุการณ์']}
+                    labelFormatter={(_, payload) => payload?.[0]?.payload?.date || ''}
+                  />
+                  <Line type="monotone" dataKey="incident_count" stroke="var(--accent-secondary)" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Table Card */}
-      <div className="card glass" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
         <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flex: 1 }}>
             <div style={{ position: 'relative', width: '300px' }}>

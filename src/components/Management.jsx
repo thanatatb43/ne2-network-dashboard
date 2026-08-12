@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Monitor, Network, ArrowRight, Activity, ArrowLeft, Loader2, RefreshCw, ChevronLeft, ChevronRight, Search, Wallet, ClipboardList } from 'lucide-react';
+import { Monitor, Network, ArrowRight, Activity, ArrowLeft, Loader2, RefreshCw, ChevronLeft, ChevronRight, Search, Wallet, ClipboardList, Boxes } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import NetworkDeviceManagement from './NetworkDeviceManagement';
 import BudgetManagement from './BudgetManagement';
 import JobManagement from './JobManagement';
+import OfficeEquipmentManagement from './OfficeEquipmentManagement';
+import StockManagement from './StockManagement';
 
 const NetworkTestHistory = ({ token, onBack }) => {
   const [history, setHistory] = useState([]);
@@ -166,7 +168,7 @@ const NetworkTestHistory = ({ token, onBack }) => {
         </div>
       </div>
 
-      <div className="card glass" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
@@ -253,8 +255,9 @@ const NetworkTestHistory = ({ token, onBack }) => {
   );
 };
 
-const Management = ({ user, token }) => {
-  const [view, setView] = useState('overview');
+const Management = ({ user, token, onDeviceClick, onEquipmentClick, onAddStock, onRequireLogin, view = 'overview', siteId = null, onViewChange }) => {
+  // URL-controlled from App.jsx (setView keeps the many existing call sites unchanged)
+  const setView = (v) => (onViewChange ? onViewChange(v) : undefined);
 
   return (
     <motion.div
@@ -279,9 +282,9 @@ const Management = ({ user, token }) => {
             {/* Computer Management Card */}
             <motion.div 
               whileHover={{ y: -5 }}
-              className="card glass" 
+              className="card glass"
               style={{ padding: '2rem', cursor: 'pointer', border: '1px solid rgba(59, 130, 246, 0.2)' }}
-              onClick={() => {}}
+              onClick={() => setView('computer_management')}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
                 <div style={{ background: 'rgba(59, 130, 246, 0.1)', padding: '1rem', borderRadius: '1rem', color: '#3b82f6' }}>
@@ -372,6 +375,30 @@ const Management = ({ user, token }) => {
               </button>
             </motion.div>
 
+            {/* Stock Management Card */}
+            <motion.div
+              whileHover={{ y: -5 }}
+              className="card glass"
+              style={{ padding: '2rem', cursor: 'pointer', border: '1px solid rgba(20, 184, 166, 0.2)' }}
+              onClick={() => setView('stock_management')}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
+                <div style={{ background: 'rgba(20, 184, 166, 0.1)', padding: '1rem', borderRadius: '1rem', color: '#14b8a6' }}>
+                  <Boxes size={32} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem' }} className="krub-semibold">Stock Management</h3>
+                  <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>ทะเบียนอุปกรณ์สำนักงานทั้งหมด</p>
+                </div>
+              </div>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: '2rem' }}>
+                ดูรายการอุปกรณ์สำนักงานทั้งหมดในทุกสำนักงาน ค้นหาและตรวจสอบรายละเอียดอุปกรณ์แต่ละชิ้นได้
+              </p>
+              <button className="glass" style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(20, 184, 166, 0.1)', color: '#14b8a6', border: '1px solid rgba(20, 184, 166, 0.3)', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                Access Stock <ArrowRight size={16} />
+              </button>
+            </motion.div>
+
           </motion.div>
         )}
 
@@ -448,7 +475,7 @@ const Management = ({ user, token }) => {
         )}
 
         {view === 'network_devices' && (
-          <NetworkDeviceManagement token={token} onBack={() => setView('network')} user={user} />
+          <NetworkDeviceManagement token={token} onBack={() => setView('network')} user={user} onDeviceClick={onDeviceClick} />
         )}
 
         {view === 'budget_management' && (
@@ -457,6 +484,27 @@ const Management = ({ user, token }) => {
 
         {view === 'job_management' && (
           <JobManagement token={token} onBack={() => setView('overview')} user={user} />
+        )}
+
+        {view === 'computer_management' && (
+          <OfficeEquipmentManagement
+            token={token}
+            onBack={() => setView('overview')}
+            user={user}
+            selectedSiteId={siteId}
+            onSelectSite={(id) => onViewChange && onViewChange('computer_management', id)}
+          />
+        )}
+
+        {view === 'stock_management' && (
+          <StockManagement
+            token={token}
+            user={user}
+            onBack={() => setView('overview')}
+            onEquipmentClick={onEquipmentClick}
+            onAddStock={onAddStock}
+            onRequireLogin={onRequireLogin}
+          />
         )}
       </AnimatePresence>
     </motion.div>

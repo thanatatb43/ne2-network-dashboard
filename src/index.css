@@ -123,8 +123,16 @@ body {
 
 .main-content {
   flex: 1;
+  min-width: 0;
   padding: 2rem;
   overflow-y: auto;
+}
+
+/* When the sidebar is collapsed (mobile or desktop), the floating toggle
+   button is fixed top-left -- reserve space so it doesn't sit on top of
+   page headers. */
+.sidebar-closed .main-content {
+  padding-top: 5rem;
 }
 
 .stats-grid {
@@ -248,6 +256,85 @@ body {
 
   .desktop-only {
     display: none !important;
+  }
+}
+
+/* Network Devices Dashboard: header, chart and device table responsiveness */
+.dashboard-header-title {
+  font-size: clamp(1.35rem, 4vw, 2rem);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.dashboard-header-title-wrap {
+  min-width: 0;
+}
+
+.dashboard-header-title-wrap > div {
+  min-width: 0;
+}
+
+.network-chart-card {
+  height: 400px;
+}
+
+.device-table-header {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1fr 3.5fr;
+  padding: 0 1rem 1rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.device-row {
+  display: grid;
+  grid-template-columns: 2fr 1.5fr 1fr 3.5fr;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  gap: 1rem;
+}
+
+.device-field-label {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .dashboard-header-title-wrap {
+    flex-wrap: wrap;
+  }
+
+  .network-chart-card {
+    height: 280px;
+  }
+
+  .device-table-scroll {
+    min-width: 0 !important;
+  }
+
+  .device-table-header {
+    display: none;
+  }
+
+  .device-row {
+    grid-template-columns: 1fr;
+    gap: 0.6rem;
+    padding: 1.25rem 1rem;
+  }
+
+  .device-row-chart {
+    height: 60px !important;
+  }
+
+  .device-field-label {
+    display: inline-block;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-right: 0.4rem;
   }
 }
 

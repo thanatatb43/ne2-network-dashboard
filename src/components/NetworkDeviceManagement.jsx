@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import html2pdf from 'html2pdf.js';
-import { ArrowLeft, Loader2, Edit2, Trash2, Plus, Save, AlertTriangle, ChevronLeft, ChevronRight, Search, ArrowUpDown, ArrowUp, ArrowDown, Download } from 'lucide-react';
+import { ArrowLeft, Loader2, Edit2, Trash2, Plus, Save, AlertTriangle, ChevronLeft, ChevronRight, Search, ArrowUpDown, ArrowUp, ArrowDown, Download, Terminal, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const NetworkDeviceManagement = ({ token, onBack, user }) => {
+// Some records may already have a protocol prefix saved in the field (e.g. "ssh://172.x.x.x"),
+// which would double up to "ssh://ssh://172.x.x.x" if not stripped before building the link.
+const cleanHost = (value) => (value || '').toString().trim().replace(/^[a-z]+:\/\//i, '');
+
+const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingDevice, setEditingDevice] = useState(null);
@@ -56,6 +60,16 @@ const NetworkDeviceManagement = ({ token, onBack, user }) => {
     if (!canEdit) return;
     setEditingDevice(device);
     setFormData(device);
+  };
+
+  const handleCopyIp = async (ip) => {
+    try {
+      await navigator.clipboard.writeText(ip);
+      toast.success(`คัดลอก ${ip} แล้ว`);
+    } catch (err) {
+      console.error('Copy failed:', err);
+      toast.error('คัดลอกไม่สำเร็จ');
+    }
   };
 
   const handleAddClick = () => {
@@ -301,7 +315,7 @@ const NetworkDeviceManagement = ({ token, onBack, user }) => {
           {!editingDevice && (
             <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
               <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Type:</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>
                 <select
                   value={selectedType}
                   onChange={(e) => {
@@ -459,7 +473,7 @@ const NetworkDeviceManagement = ({ token, onBack, user }) => {
           </form>
         </div>
       ) : (
-        <div id="management-table-container" className="card glass" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div id="management-table-container" className="card glass" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', borderRadius: '0.75rem' }}>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead>
@@ -522,12 +536,64 @@ const NetworkDeviceManagement = ({ token, onBack, user }) => {
                       <td style={{ padding: '1rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                         {indexOfFirstDevice + index + 1}
                       </td>
-                      <td style={{ padding: '1rem', fontSize: '0.85rem', fontWeight: 600 }}>{device.pea_name || '-'}</td>
+                      <td
+                        onClick={() => onDeviceClick && onDeviceClick(device.id)}
+                        style={{
+                          padding: '1rem',
+                          fontSize: '0.85rem',
+                          fontWeight: 600,
+                          cursor: onDeviceClick ? 'pointer' : 'default',
+                          color: onDeviceClick ? 'var(--accent-primary)' : 'inherit'
+                        }}
+                        title={onDeviceClick ? 'คลิกเพื่อดูรายละเอียดอุปกรณ์นี้' : undefined}
+                      >
+                        {device.pea_name || '-'}
+                      </td>
                       <td style={{ padding: '1rem', fontSize: '0.85rem' }}>{device.pea_type || '-'}</td>
                       <td style={{ padding: '1rem', fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--accent-primary)' }}>{device.gateway || '-'}</td>
                       <td style={{ padding: '1rem', fontSize: '0.85rem' }}>{device.province || '-'}</td>
                       <td style={{ padding: '1rem', textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                          {device.gateway && (
+                            <>
+                              <a
+                                href={`ssh://${cleanHost(device.gateway)}`}
+                                className="glass"
+                                style={{ padding: '0.5rem', border: '1px solid rgba(34, 197, 94, 0.3)', color: '#22c55e', borderRadius: '0.25rem', display: 'inline-flex', textDecoration: 'none' }}
+                                title={`SSH ไปยัง Gateway (${cleanHost(device.gateway)})`}
+                              >
+                                <Terminal size={16} />
+                              </a>
+                              <button
+                                onClick={() => handleCopyIp(cleanHost(device.gateway))}
+                                className="glass"
+                                style={{ padding: '0.5rem', border: '1px solid rgba(34, 197, 94, 0.3)', color: '#22c55e', borderRadius: '0.25rem', cursor: 'pointer' }}
+                                title={`คัดลอก Gateway IP (${cleanHost(device.gateway)})`}
+                              >
+                                <Copy size={16} />
+                              </button>
+                            </>
+                          )}
+                          {device.wan_ip_fgt && cleanHost(device.wan_ip_fgt) !== cleanHost(device.gateway) && (
+                            <>
+                              <a
+                                href={`ssh://${cleanHost(device.wan_ip_fgt)}`}
+                                className="glass"
+                                style={{ padding: '0.5rem', border: '1px solid rgba(20, 184, 166, 0.3)', color: '#14b8a6', borderRadius: '0.25rem', display: 'inline-flex', textDecoration: 'none' }}
+                                title={`SSH ไปยัง WAN IP FGT (${cleanHost(device.wan_ip_fgt)})`}
+                              >
+                                <Terminal size={16} />
+                              </a>
+                              <button
+                                onClick={() => handleCopyIp(cleanHost(device.wan_ip_fgt))}
+                                className="glass"
+                                style={{ padding: '0.5rem', border: '1px solid rgba(20, 184, 166, 0.3)', color: '#14b8a6', borderRadius: '0.25rem', cursor: 'pointer' }}
+                                title={`คัดลอก WAN IP FGT (${cleanHost(device.wan_ip_fgt)})`}
+                              >
+                                <Copy size={16} />
+                              </button>
+                            </>
+                          )}
                           <button
                             onClick={() => handleEditClick(device)}
                             className="glass"

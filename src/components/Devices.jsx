@@ -61,7 +61,16 @@ const Devices = ({ onDeviceClick, user }) => {
   };
 
   const sortedDevices = React.useMemo(() => {
-    if (!sortConfig.key) return filteredDevices;
+    if (!sortConfig.key) {
+      // Default order: same order the API sent (by id), but devices that are
+      // currently down bubble up to the top so they're easy to spot first.
+      return [...filteredDevices].sort((a, b) => {
+        const aDown = a.status === 'down' ? 0 : 1;
+        const bDown = b.status === 'down' ? 0 : 1;
+        if (aDown !== bDown) return aDown - bDown;
+        return (a.id ?? 0) - (b.id ?? 0);
+      });
+    }
 
     return [...filteredDevices].sort((a, b) => {
       let aValue, bValue;
@@ -163,7 +172,7 @@ const Devices = ({ onDeviceClick, user }) => {
             <Download size={18} /> Export PDF
           </button>
           <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Type:</span>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>
             <select
               value={selectedType}
               onChange={(e) => {
@@ -237,7 +246,7 @@ const Devices = ({ onDeviceClick, user }) => {
         </div>
       </header>
 
-      <div id="devices-table-container" className="card glass" style={{ padding: '0', overflow: 'hidden', marginBottom: '1.5rem' }}>
+      <div id="devices-table-container" className="card glass" style={{ padding: '0', overflow: 'hidden', marginBottom: '1.5rem', borderRadius: '0.75rem' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
           <thead>
             <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>

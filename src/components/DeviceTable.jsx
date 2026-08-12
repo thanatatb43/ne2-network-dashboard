@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { CheckCircle, AlertCircle } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, YAxis, Tooltip } from 'recharts';
 
-const DeviceTable = ({ onViewAll, user }) => {
+const DeviceTable = ({ onViewAll, onDeviceClick, user }) => {
   const [devices, setDevices] = useState([]);
 
   const fetchRecentDevices = async () => {
@@ -62,8 +62,8 @@ const DeviceTable = ({ onViewAll, user }) => {
   }, []);
 
   return (
-    <div className="card glass" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+    <div className="card glass" style={{ padding: '1.5rem', marginBottom: '2rem', borderRadius: '0.75rem' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
         <h3 style={{ margin: 0, fontSize: '1.25rem' }}>Top 10 Latency ต่ำที่สุด</h3>
         <button
           onClick={onViewAll}
@@ -79,107 +79,104 @@ const DeviceTable = ({ onViewAll, user }) => {
       </div>
 
       <div style={{ width: '100%', overflowX: 'auto' }}>
-        <div style={{ minWidth: '800px' }}>
-        {/* Header */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '2fr 1.5fr 1fr 3.5fr',
-          padding: '0 1rem 1rem 1rem',
-          borderBottom: '1px solid var(--border-subtle)',
-          color: 'var(--text-secondary)',
-          fontSize: '0.875rem',
-          gap: '1rem',
-          marginBottom: '0.5rem'
-        }}>
-          <div>ข้อมูลอุปกรณ์</div>
-          <div>สถานะ</div>
-          <div>Latency ปัจจุบัน</div>
-          <div>ค่าย้อนหลัง</div>
-        </div>
+        <div className="device-table-scroll" style={{ minWidth: '800px' }}>
+          {/* Header (desktop only) */}
+          <div className="device-table-header">
+            <div>ข้อมูลอุปกรณ์</div>
+            <div>สถานะ</div>
+            <div>Latency ปัจจุบัน</div>
+            <div>ค่าย้อนหลัง</div>
+          </div>
 
-        {/* Body Rows */}
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {devices.map((device) => (
-            <div key={device.id} style={{
-              display: 'grid',
-              gridTemplateColumns: '2fr 1.5fr 1fr 3.5fr',
-              alignItems: 'center',
-              padding: '1rem',
-              borderBottom: '1px solid var(--border-subtle)',
-              gap: '1rem'
-            }}>
-              <div>
-                <div style={{ fontWeight: 500 }}>{device.name}</div>
-                <div style={{ 
-                  color: 'var(--text-secondary)', 
-                  fontSize: '0.875rem', 
-                  fontFamily: 'ui-monospace',
-                  filter: !user ? 'blur(4px)' : 'none',
-                  transition: 'filter 0.3s ease',
-                  userSelect: !user ? 'none' : 'auto'
-                }}>
-                  {device.ip}
+          {/* Body Rows */}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {devices.map((device) => (
+              <div key={device.id} className="device-row">
+                <div>
+                  <div
+                    onClick={() => onDeviceClick && onDeviceClick(device.id)}
+                    style={{
+                      fontWeight: 500,
+                      cursor: onDeviceClick ? 'pointer' : 'default',
+                      color: onDeviceClick ? 'var(--accent-primary)' : 'inherit',
+                      width: 'fit-content'
+                    }}
+                    title="คลิกเพื่อดูรายละเอียดอุปกรณ์นี้"
+                  >
+                    {device.name}
+                  </div>
+                  <div style={{
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.875rem',
+                    fontFamily: 'ui-monospace',
+                    filter: !user ? 'blur(4px)' : 'none',
+                    transition: 'filter 0.3s ease',
+                    userSelect: !user ? 'none' : 'auto'
+                  }}>
+                    {device.ip}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="device-field-label">สถานะ:</span>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    color: device.status === 'Online' ? 'var(--accent-success)' : 'var(--accent-danger)'
+                  }}>
+                    {device.status === 'Online' ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
+                    <span style={{ fontSize: '0.875rem' }}>{device.status}</span>
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Last seen: {device.lastSeen}</div>
+                </div>
+
+                <div>
+                  <span className="device-field-label">Latency:</span>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 600, color: device.status === 'Online' ? 'var(--text-primary)' : 'var(--accent-danger)' }}>
+                    {device.history.length > 0 ? device.history[device.history.length - 1].latency : 0} <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>ms</span>
+                  </div>
+                </div>
+
+                <div className="device-row-chart" style={{ height: '40px', width: '100%' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={device.history}>
+                      <defs>
+                        <linearGradient id={`colorLat-${device.id}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={device.status === 'Online' ? "var(--accent-primary)" : "var(--accent-danger)"} stopOpacity={0.6} />
+                          <stop offset="95%" stopColor={device.status === 'Online' ? "var(--accent-primary)" : "var(--accent-danger)"} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <Tooltip
+                        contentStyle={{ background: 'var(--tooltip-bg)', border: '1px solid var(--border-subtle)', borderRadius: '4px', padding: '4px 8px', fontSize: '0.75rem' }}
+                        itemStyle={{ color: 'var(--text-primary)' }}
+                        labelStyle={{ display: 'none' }}
+                        formatter={(value) => [`${value} ms`, 'Latency']}
+                      />
+                      <YAxis domain={['auto', 'auto']} hide />
+                      <Area
+                        type="monotone"
+                        dataKey="latency"
+                        stroke={device.status === 'Online' ? "var(--accent-primary)" : "var(--accent-danger)"}
+                        fill={`url(#colorLat-${device.id})`}
+                        strokeWidth={2}
+                        isAnimationActive={false}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
+            ))}
 
-              <div>
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  color: device.status === 'Online' ? 'var(--accent-success)' : 'var(--accent-danger)'
-                }}>
-                  {device.status === 'Online' ? <CheckCircle size={14} /> : <AlertCircle size={14} />}
-                  <span style={{ fontSize: '0.875rem' }}>{device.status}</span>
-                </div>
-                <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: '0.25rem' }}>Last seen: {device.lastSeen}</div>
+            {devices.length === 0 && (
+              <div style={{ padding: '3rem 0', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                Loading devices...
               </div>
-
-              <div>
-                <div style={{ fontSize: '1.25rem', fontWeight: 600, color: device.status === 'Online' ? 'var(--text-primary)' : 'var(--accent-danger)' }}>
-                  {device.history.length > 0 ? device.history[device.history.length - 1].latency : 0} <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 400 }}>ms</span>
-                </div>
-              </div>
-
-              <div style={{ height: '40px', width: '100%' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={device.history}>
-                    <defs>
-                      <linearGradient id={`colorLat-${device.id}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={device.status === 'Online' ? "var(--accent-primary)" : "var(--accent-danger)"} stopOpacity={0.6} />
-                        <stop offset="95%" stopColor={device.status === 'Online' ? "var(--accent-primary)" : "var(--accent-danger)"} stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <Tooltip
-                      contentStyle={{ background: 'var(--tooltip-bg)', border: '1px solid var(--border-subtle)', borderRadius: '4px', padding: '4px 8px', fontSize: '0.75rem' }}
-                      itemStyle={{ color: 'var(--text-primary)' }}
-                      labelStyle={{ display: 'none' }}
-                      formatter={(value) => [`${value} ms`, 'Latency']}
-                    />
-                    <YAxis domain={['auto', 'auto']} hide />
-                    <Area
-                      type="monotone"
-                      dataKey="latency"
-                      stroke={device.status === 'Online' ? "var(--accent-primary)" : "var(--accent-danger)"}
-                      fill={`url(#colorLat-${device.id})`}
-                      strokeWidth={2}
-                      isAnimationActive={false}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          ))}
-
-          {devices.length === 0 && (
-            <div style={{ padding: '3rem 0', textAlign: 'center', color: 'var(--text-secondary)' }}>
-              Loading devices...
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>
-  </div>
   );
 };
 
