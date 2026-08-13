@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X, History } from 'lucide-react';
+import { Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X, History, Map, ChevronDown, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import peaLogo from '../assets/logo/pea_logo.png';
 
 const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => {
+  // Explicit user overrides for group open/closed state; a group with no
+  // override defaults to open when it contains the active tab.
+  const [expandedGroups, setExpandedGroups] = useState({});
   const [systemStatus, setSystemStatus] = useState({
     total: 0,
     online: 0,
@@ -42,34 +45,49 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => 
   }, []);
 
   const items = [
-    { name: 'Network Devices', icon: Network, id: 'dashboard' },
-    { name: 'ภาพรวมการใช้งบประมาณ', icon: BadgeDollarSign, id: 'budget' },
+    { type: 'item', name: 'แผนที่', icon: Map, id: 'dashboard' },
+    { type: 'item', name: 'ภาพรวมการใช้งบประมาณ', icon: BadgeDollarSign, id: 'budget' },
   ];
 
+  // "ระบบเครือข่าย" bundles the network-related pages into one collapsible
+  // group -- ตรวจสอบการเชื่อมต่อ stays login-gated like before, the rest
+  // (ภาพรวมเครือข่าย/ประวัติการขัดข้อง/อุปกรณ์ทั้งหมด) stay public.
+  const networkChildren = [];
   if (user) {
-    items.push({ name: 'ตรวจสอบการเชื่อมต่อ', icon: Globe, id: 'analytics' });
+    networkChildren.push({ name: 'ตรวจสอบการเชื่อมต่อ', icon: Globe, id: 'analytics' });
+  }
+  networkChildren.push({ name: 'ภาพรวมเครือข่าย', icon: Network, id: 'network-devices' });
+  networkChildren.push({ name: 'ประวัติการขัดข้อง', icon: History, id: 'downtime-history' });
+  networkChildren.push({ name: 'อุปกรณ์ทั้งหมด', icon: Database, id: 'devices' });
+  items.push({ type: 'group', name: 'ระบบเครือข่าย', icon: Network, id: 'group-network', children: networkChildren });
 
+  if (user) {
     // Role-based access for administrative menus
     const adminRoles = ['computer_admin', 'network_admin', 'super_admin', 'manager', 'operator'];
     if (adminRoles.includes(user.role)) {
-      items.push({ name: 'การจัดการ', icon: Boxes, id: 'security' });
+      const managementChildren = [{ name: 'จัดการงานและอุปกรณ์', icon: Boxes, id: 'management' }];
 
       // Admin Settings restricted to super_admin and manager (Operator excluded)
       if (user.role === 'super_admin' || user.role === 'manager') {
-        items.push({ name: 'Admin Settings', icon: Settings, id: 'settings' });
+        managementChildren.push({ name: 'การตั้งค่าระบบ', icon: Settings, id: 'settings' });
       }
+      items.push({ type: 'group', name: 'การจัดการ', icon: Boxes, id: 'group-management', children: managementChildren });
     }
   }
 
-  // Always keep these at the bottom (All Devices above Login/About)
-  items.push({ name: 'อุปกรณ์ทั้งหมด', icon: Database, id: 'devices' });
-  items.push({ name: 'ประวัติการขัดข้อง', icon: History, id: 'downtime-history' });
-
   if (!user) {
-    items.push({ name: 'ลงชื่อเข้าใช้งาน', icon: LogIn, id: 'login' });
+    items.push({ type: 'item', name: 'ลงชื่อเข้าใช้งาน', icon: LogIn, id: 'login' });
   }
 
-  items.push({ name: 'About', icon: Info, id: 'about' });
+  items.push({ type: 'item', name: 'About', icon: Info, id: 'about' });
+
+  const isGroupExpanded = (group) => {
+    const hasActiveChild = group.children.some(c => c.id === activeTab);
+    return group.id in expandedGroups ? expandedGroups[group.id] : hasActiveChild;
+  };
+  const toggleGroup = (group) => {
+    setExpandedGroups(prev => ({ ...prev, [group.id]: !isGroupExpanded(group) }));
+  };
 
   return (
     <>
@@ -132,7 +150,61 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => 
               </div>
 
               <nav style={{ flex: 1, overflowY: 'auto' }}>
-                {items.map((item) => (
+                {items.map((item) => item.type === 'group' ? (
+                  <div key={item.id} style={{ marginBottom: '0.5rem' }}>
+                    <div
+                      onClick={() => toggleGroup(item)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '1rem',
+                        padding: '0.875rem 1rem',
+                        borderRadius: '0.75rem',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        color: 'var(--text-secondary)'
+                      }}>
+                      <item.icon size={20} />
+                      <span style={{ fontSize: '0.95rem', fontWeight: 600, flex: 1 }}>{item.name}</span>
+                      {isGroupExpanded(item) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    </div>
+                    <AnimatePresence initial={false}>
+                      {isGroupExpanded(item) && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          style={{ overflow: 'hidden' }}
+                        >
+                          {item.children.map((child) => (
+                            <div
+                              key={child.id}
+                              onClick={() => {
+                                onNavigate(child.id);
+                                if (window.innerWidth <= 1024) onClose();
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '1rem',
+                                padding: '0.75rem 1rem 0.75rem 2.25rem',
+                                borderRadius: '0.75rem',
+                                marginBottom: '0.25rem',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                                background: activeTab === child.id ? 'var(--sidebar-item-active)' : 'transparent',
+                                color: activeTab === child.id ? 'var(--accent-primary)' : 'var(--text-secondary)'
+                              }}>
+                              <child.icon size={17} />
+                              <span style={{ fontSize: '0.9rem', fontWeight: activeTab === child.id ? 600 : 400 }}>{child.name}</span>
+                            </div>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                ) : (
                   <div
                     key={item.id}
                     onClick={() => {

@@ -80,7 +80,7 @@ const NETWORK_FIELDS = [
 ];
 const ASSET_FIELDS = [
   { name: 'serial_number', label: 'Serial Number', type: 'text' },
-  { name: 'asset_number', label: 'เลขครุภัณฑ์', type: 'text' },
+  { name: 'asset_number', label: 'รหัสทรัพย์สิน', type: 'text' },
   { name: 'asset_owner', label: 'ผู้ถือครอง', type: 'text' },
   { name: 'asset_owner_emp_id', label: 'รหัสพนักงานผู้ถือครอง', type: 'text' }
 ];

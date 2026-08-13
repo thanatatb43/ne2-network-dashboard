@@ -8,6 +8,7 @@ import Analytics from './components/Analytics';
 import DeviceDetails from './components/DeviceDetails';
 import EquipmentDetails from './components/EquipmentDetails';
 import EquipmentEdit from './components/EquipmentEdit';
+import SitesMap from './components/SitesMap';
 import AdminSettings from './components/AdminSettings';
 import Management from './components/Management';
 import About from './components/About';
@@ -36,6 +37,7 @@ const POST_LOGIN_REDIRECT_KEY = 'post_login_redirect';
 // can move between pages the user has actually visited.
 const TAB_PATHS = {
   dashboard: '/',
+  'network-devices': '/network-devices',
   devices: '/devices',
   analytics: '/analytics',
   settings: '/settings',
@@ -55,14 +57,14 @@ const BUDGET_VIEW_PATHS = {
 // Sub-views inside the Management page (and the site drill-down one level
 // further inside "computer_management").
 const MGMT_VIEW_PATHS = {
-  overview: '/security',
-  network: '/security/network',
-  network_history: '/security/network/history',
-  network_devices: '/security/network/devices',
-  budget_management: '/security/budget',
-  job_management: '/security/jobs',
-  computer_management: '/security/computers',
-  stock_management: '/security/stock'
+  overview: '/management',
+  network: '/management/network',
+  network_history: '/management/network/history',
+  network_devices: '/management/network/devices',
+  budget_management: '/management/budget',
+  job_management: '/management/jobs',
+  computer_management: '/management/computers',
+  stock_management: '/management/stock'
 };
 
 const pathToRoute = (pathname) => {
@@ -78,11 +80,11 @@ const pathToRoute = (pathname) => {
   const budgetEntry = Object.entries(BUDGET_VIEW_PATHS).find(([, path]) => path === pathname);
   if (budgetEntry) return { tab: 'budget', budgetView: budgetEntry[0] };
 
-  const siteMatch = pathname.match(/^\/security\/computers\/([^/]+)$/);
-  if (siteMatch) return { tab: 'security', mgmtView: 'computer_management', mgmtSiteId: siteMatch[1] };
+  const siteMatch = pathname.match(/^\/management\/computers\/([^/]+)$/);
+  if (siteMatch) return { tab: 'management', mgmtView: 'computer_management', mgmtSiteId: siteMatch[1] };
 
   const mgmtEntry = Object.entries(MGMT_VIEW_PATHS).find(([, path]) => path === pathname);
-  if (mgmtEntry) return { tab: 'security', mgmtView: mgmtEntry[0], mgmtSiteId: null };
+  if (mgmtEntry) return { tab: 'management', mgmtView: mgmtEntry[0], mgmtSiteId: null };
 
   const entry = Object.entries(TAB_PATHS).find(([, path]) => path === pathname);
   return entry ? { tab: entry[0] } : { tab: 'dashboard' };
@@ -109,8 +111,8 @@ function App() {
     setSelectedDeviceId(route.tab === 'deviceDetails' ? route.deviceId : null);
     setSelectedEquipmentId(route.tab === 'equipmentDetails' || route.tab === 'equipmentEdit' ? route.equipmentId : null);
     setBudgetView(route.tab === 'budget' ? (route.budgetView || 'summary') : 'summary');
-    setMgmtView(route.tab === 'security' ? (route.mgmtView || 'overview') : 'overview');
-    setMgmtSiteId(route.tab === 'security' ? (route.mgmtSiteId || null) : null);
+    setMgmtView(route.tab === 'management' ? (route.mgmtView || 'overview') : 'overview');
+    setMgmtSiteId(route.tab === 'management' ? (route.mgmtSiteId || null) : null);
   };
 
   // Central navigation helper: updates state AND pushes a URL so the browser's
@@ -125,7 +127,7 @@ function App() {
       path = `/equipment/${opts.equipmentId}/edit`;
     } else if (tab === 'budget') {
       path = BUDGET_VIEW_PATHS[opts.budgetView || 'summary'];
-    } else if (tab === 'security') {
+    } else if (tab === 'management') {
       const view = opts.mgmtView || 'overview';
       path = view === 'computer_management' && opts.mgmtSiteId
         ? `${MGMT_VIEW_PATHS.computer_management}/${opts.mgmtSiteId}`
@@ -172,7 +174,7 @@ function App() {
   // Called by BudgetDashboard/Management when the user switches sub-view
   // WITHOUT leaving the page (e.g. clicking "search" or a site card).
   const navigateBudgetView = (view) => navigate('budget', { budgetView: view });
-  const navigateMgmtView = (view, siteId = null) => navigate('security', { mgmtView: view, mgmtSiteId: siteId });
+  const navigateMgmtView = (view, siteId = null) => navigate('management', { mgmtView: view, mgmtSiteId: siteId });
 
   // Generic login gate for actions that need auth but don't change route on
   // their own (e.g. borrow/return, which just opens a modal on whatever
@@ -604,8 +606,10 @@ function App() {
       <main className="main-content">
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' ? (
+            <SitesMap onDeviceClick={handleDeviceClick} />
+          ) : activeTab === 'network-devices' ? (
             <motion.div
-              key="dashboard"
+              key="network-devices"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
@@ -640,7 +644,7 @@ function App() {
             <DeviceDetails
               deviceId={selectedDeviceId}
               onBack={() => navigate('devices')}
-              onManageSiteEquipment={(siteId) => navigate('security', { mgmtView: 'computer_management', mgmtSiteId: siteId })}
+              onManageSiteEquipment={(siteId) => navigate('management', { mgmtView: 'computer_management', mgmtSiteId: siteId })}
               user={user}
               token={token}
             />
@@ -724,9 +728,9 @@ function App() {
             <Auth onAuthSuccess={handleAuthSuccess} />
           ) : activeTab === 'sso-callback' ? (
             <SsoCallback onAuthSuccess={handleAuthSuccess} onBackToLogin={() => navigate('login')} />
-          ) : activeTab === 'security' ? (
+          ) : activeTab === 'management' ? (
             <motion.div
-              key="security"
+              key="management"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
@@ -741,7 +745,7 @@ function App() {
                   setNewEquipmentDefaultSiteId(siteId);
                   navigate('equipmentEdit', { equipmentId: 'new' });
                 }}
-                onRequireLogin={() => requireLoginFor('/security/stock')}
+                onRequireLogin={() => requireLoginFor('/management/stock')}
                 view={mgmtView}
                 siteId={mgmtSiteId}
                 onViewChange={navigateMgmtView}

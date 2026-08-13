@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
-import html2pdf from 'html2pdf.js';
-import { ArrowLeft, Loader2, Edit2, Trash2, Plus, Save, AlertTriangle, ChevronLeft, ChevronRight, Search, ArrowUpDown, ArrowUp, ArrowDown, Download, Terminal, Copy } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { ArrowLeft, Loader2, Edit2, Trash2, Plus, Save, AlertTriangle, ChevronLeft, ChevronRight, Search, ArrowUpDown, ArrowUp, ArrowDown, FileSpreadsheet, Terminal, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Some records may already have a protocol prefix saved in the field (e.g. "ssh://172.x.x.x"),
@@ -257,24 +257,6 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
     if (currentPage > 1) setCurrentPage(currentPage - 1);
   };
 
-  const exportToPDF = () => {
-    const element = document.getElementById('management-table-container');
-    const opt = {
-      margin: [10, 10, 10, 10],
-      filename: `Device_Management_${new Date().toISOString().split('T')[0]}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#0f172a' },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-    };
-
-    html2pdf().from(element).set(opt).save().then(() => {
-      toast.success('PDF Exported Successfully');
-    }).catch(err => {
-      console.error('PDF Export Error:', err);
-      toast.error('Failed to export PDF');
-    });
-  };
-
   // Fields to display in the form
   const formFields = [
     { name: 'pea_type', label: 'PEA Type', type: 'text' },
@@ -295,6 +277,26 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
     { name: 'vpn_backup', label: 'VPN Backup', type: 'text' },
     { name: 'gateway_backup', label: 'Gateway Backup', type: 'text' }
   ];
+
+  // Exports every device fetched for this page (all fields, not just the
+  // columns shown in the table), regardless of the current search/type
+  // filter or page.
+  const exportToExcel = () => {
+    if (devices.length === 0) {
+      toast.error('ไม่มีข้อมูลอุปกรณ์สำหรับส่งออก');
+      return;
+    }
+    const rows = devices.map(device => {
+      const row = {};
+      formFields.forEach(field => { row[field.label] = device[field.name] || '-'; });
+      return row;
+    });
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Devices');
+    XLSX.writeFile(workbook, `Device_Management_${new Date().toISOString().split('T')[0]}.xlsx`);
+    toast.success(`ส่งออก Excel สำเร็จ (${rows.length} รายการ)`);
+  };
 
   return (
     <motion.div
@@ -395,13 +397,13 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
               </div>
 
               <button
-                onClick={exportToPDF}
+                onClick={exportToExcel}
                 className="glass"
-                style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  padding: '0.5rem 1rem', 
-                  gap: '0.5rem', 
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '0.5rem 1rem',
+                  gap: '0.5rem',
                   borderRadius: '0.5rem',
                   color: 'var(--accent-primary)',
                   border: 'none',
@@ -409,7 +411,7 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
                   fontWeight: 600
                 }}
               >
-                <Download size={18} /> Export PDF
+                <FileSpreadsheet size={18} /> Export Excel
               </button>
             </div>
           )}

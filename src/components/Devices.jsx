@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { CheckCircle, AlertCircle, Search, RefreshCw, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, Download } from 'lucide-react';
-import html2pdf from 'html2pdf.js';
+import { CheckCircle, AlertCircle, Search, RefreshCw, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import toast from 'react-hot-toast';
 
 const Devices = ({ onDeviceClick, user }) => {
   const [devices, setDevices] = useState([]);
@@ -118,26 +119,28 @@ const Devices = ({ onDeviceClick, user }) => {
 
   const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
-  const exportToPDF = () => {
-    const element = document.getElementById('devices-table-container');
-    const opt = {
-      margin: [10, 10, 10, 10],
-      filename: `Network_Devices_${new Date().toISOString().split('T')[0]}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, backgroundColor: '#0f172a' },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-    };
-
-    const originalStyle = element.style.height;
-    element.style.height = 'auto'; // Ensure all rows are captured if scrollable
-    
-    html2pdf().from(element).set(opt).save().then(() => {
-      element.style.height = originalStyle;
-      toast.success('PDF Exported Successfully');
-    }).catch(err => {
-      console.error('PDF Export Error:', err);
-      toast.error('Failed to export PDF');
-    });
+  // Exports every device fetched for this page, not just whatever the
+  // current search/type filter or page happens to show on screen.
+  const exportToExcel = () => {
+    if (devices.length === 0) {
+      toast.error('ไม่มีข้อมูลอุปกรณ์สำหรับส่งออก');
+      return;
+    }
+    const rows = devices.map(d => ({
+      'PEA Name': d.device?.pea_name || '-',
+      'Province': d.device?.province || '-',
+      // Same protection as the blurred on-screen column -- IP only goes into
+      // the export for logged-in users.
+      'Gateway IP': user ? (d.device?.gateway || '-') : 'เข้าสู่ระบบเพื่อดู',
+      'Latency (ms)': d.latency_ms != null ? d.latency_ms.toFixed(2) : '-',
+      'Packet Loss (%)': d.packet_loss ?? '-',
+      'Status': d.status || '-'
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Devices');
+    XLSX.writeFile(workbook, `Network_Devices_${new Date().toISOString().split('T')[0]}.xlsx`);
+    toast.success(`ส่งออก Excel สำเร็จ (${rows.length} รายการ)`);
   };
 
   return (
@@ -153,13 +156,13 @@ const Devices = ({ onDeviceClick, user }) => {
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           <button
-            onClick={exportToPDF}
+            onClick={exportToExcel}
             className="glass"
-            style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              padding: '0.6rem 1.2rem', 
-              gap: '0.5rem', 
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0.6rem 1.2rem',
+              gap: '0.5rem',
               borderRadius: '0.75rem',
               background: 'var(--accent-primary)',
               color: '#fff',
@@ -169,7 +172,7 @@ const Devices = ({ onDeviceClick, user }) => {
               boxShadow: '0 4px 12px rgba(168, 85, 247, 0.2)'
             }}
           >
-            <Download size={18} /> Export PDF
+            <FileSpreadsheet size={18} /> Export Excel
           </button>
           <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)' }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>

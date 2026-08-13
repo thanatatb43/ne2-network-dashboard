@@ -3,9 +3,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft, Loader2, AlertTriangle, Cpu, Building2, Wifi, Hash,
   Briefcase, Calendar, StickyNote, MapPin, UserCircle, PackageSearch, Pencil,
-  Fingerprint, Tag, User, IdCard, Archive, Router, Repeat, ArrowLeftRight
+  Fingerprint, Tag, User, IdCard, Archive, Router, Repeat, ArrowLeftRight, UserCog
 } from 'lucide-react';
 import BorrowReturnModal from './BorrowReturnModal';
+import OwnerHistoryModal from './OwnerHistoryModal';
 
 // Matches the status badge colors used in OfficeEquipmentManagement.jsx / DeviceDetails.jsx
 const statusColorFor = (status) => {
@@ -80,6 +81,7 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
   const [openLoan, setOpenLoan] = useState(null);
   const [loadingLoan, setLoadingLoan] = useState(true);
   const [showBorrowModal, setShowBorrowModal] = useState(false);
+  const [showOwnerHistory, setShowOwnerHistory] = useState(false);
 
   const fetchEquipment = async () => {
     setLoading(true);
@@ -216,7 +218,7 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
 
           <Section title="ครุภัณฑ์">
             <InfoRow icon={Fingerprint} label="Serial Number" value={equipment.serial_number} mono />
-            <InfoRow icon={Tag} label="เลขครุภัณฑ์" value={equipment.asset_number} />
+            <InfoRow icon={Tag} label="รหัสทรัพย์สิน" value={equipment.asset_number} />
             <InfoRow icon={User} label="ผู้ถือครอง" value={equipment.asset_owner} />
             <InfoRow icon={IdCard} label="รหัสพนักงานผู้ถือครอง" value={equipment.asset_owner_emp_id} />
           </Section>
@@ -328,6 +330,29 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
           </button>
 
           <button
+            onClick={() => setShowOwnerHistory(true)}
+            className="glass"
+            style={{
+              width: '100%',
+              padding: '1rem',
+              borderRadius: '0.75rem',
+              background: 'var(--bg-accent-subtle)',
+              color: 'var(--accent-primary)',
+              border: '1px solid var(--accent-primary)',
+              fontWeight: 700,
+              fontSize: '1rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.6rem',
+              marginBottom: '0.75rem'
+            }}
+          >
+            <UserCog size={18} /> ดูประวัติผู้ถือครอง
+          </button>
+
+          <button
             onClick={() => onEditClick && onEditClick(equipment)}
             className="glass"
             style={{
@@ -362,6 +387,14 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
                   fetchEquipment();
                   fetchLoanStatus();
                 }}
+              />
+            )}
+            {showOwnerHistory && (
+              <OwnerHistoryModal
+                equipmentId={equipmentId}
+                equipmentName={equipment.name}
+                token={token}
+                onClose={() => setShowOwnerHistory(false)}
               />
             )}
           </AnimatePresence>

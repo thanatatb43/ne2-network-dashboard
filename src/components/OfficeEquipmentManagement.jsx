@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
-import { ArrowLeft, Loader2, Search, Building2, ChevronRight, ChevronLeft, Monitor as MonitorIcon, Plus, Edit2, Trash2, Save, AlertTriangle, CheckCircle2, XCircle, Info, ChevronDown, ChevronUp, X } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { ArrowLeft, Loader2, Search, Building2, ChevronRight, ChevronLeft, Monitor as MonitorIcon, Plus, Edit2, Trash2, Save, AlertTriangle, CheckCircle2, XCircle, Info, ChevronDown, ChevronUp, X, QrCode, UserCog, FileSpreadsheet } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import QrCodeModal from './QrCodeModal';
+import OwnerHistoryModal from './OwnerHistoryModal';
 
 const statusColor = (status) => {
   const s = (status || '').trim();
@@ -88,8 +91,19 @@ const formFields = [
   { name: 'contract_no', label: 'เลขที่สัญญา', type: 'text' },
   { name: 'contract_start_date', label: 'วันเริ่มสัญญา', type: 'date' },
   { name: 'contract_expiry_date', label: 'วันหมดอายุสัญญา', type: 'date' },
+  { name: 'serial_number', label: 'Serial Number', type: 'text' },
+  { name: 'asset_number', label: 'รหัสทรัพย์สิน', type: 'text' },
+  { name: 'asset_owner', label: 'ผู้ถือครอง', type: 'text' },
+  { name: 'asset_owner_emp_id', label: 'รหัสพนักงานผู้ถือครอง', type: 'text' },
+  { name: 'storage_location', label: 'สถานที่จัดเก็บ', type: 'text' },
   { name: 'notes', label: 'หมายเหตุ', type: 'text', placeholder: 'รายละเอียด ที่ตั้ง หรือข้อมูลอื่นๆ' }
 ];
+
+const isValidIpAddress = (ip) => {
+  if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return false;
+  return ip.split('.').every(part => Number(part) <= 255);
+};
+const isValidMacAddress = (mac) => /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac);
 
 const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null, onSelectSite }) => {
   // URL-controlled from Management.jsx / App.jsx: a site is "selected" purely
@@ -113,6 +127,8 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
   const [actionLoading, setActionLoading] = useState(false);
   const [itemToDelete, setItemToDelete] = useState(null);
   const [viewingItem, setViewingItem] = useState(null);
+  const [qrItem, setQrItem] = useState(null);
+  const [showOwnerHistory, setShowOwnerHistory] = useState(false);
   const [responseModal, setResponseModal] = useState(null); // { type: 'success' | 'error', message: string }
   const [showIpReference, setShowIpReference] = useState(false);
 
@@ -259,6 +275,46 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
   const totalPages = Math.ceil(filteredEquipment.length / itemsPerPage);
   const paginatedEquipment = filteredEquipment.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
+  // Exports always cover every device on this site -- not just whatever the
+  // on-screen search/type filter or current page happens to show -- so they
+  // build from the full `equipment` list rather than filteredEquipment/paginatedEquipment.
+  const buildExportRows = () => equipment.map(item => ({
+    'ชื่ออุปกรณ์': item.name || '-',
+    'ประเภท': item.equipment_type || '-',
+    'แผนก': item.department || '-',
+    'IP Address': item.ip_address || '-',
+    'MAC Address': item.mac_address || '-',
+    'สถานะ': item.status || '-',
+    'ผู้ขาย': item.vendor || '-',
+    'เลขที่สัญญา': item.contract_no || '-',
+    'วันเริ่มสัญญา': item.contract_start_date || '-',
+    'วันหมดอายุสัญญา': item.contract_expiry_date || '-',
+    'Serial Number': item.serial_number || '-',
+    'รหัสทรัพย์สิน': item.asset_number || '-',
+    'ผู้ถือครอง': item.asset_owner || '-',
+    'รหัสพนักงานผู้ถือครอง': item.asset_owner_emp_id || '-',
+    'สถานที่จัดเก็บ': item.storage_location || '-',
+    'หมายเหตุ': item.notes || '-'
+  }));
+
+  const exportFileBaseName = () => {
+    const siteName = (selectedSite?.pea_name || 'site').replace(/[\\/:*?"<>|]/g, '_');
+    return `Computer_Management_${siteName}_${new Date().toISOString().split('T')[0]}`;
+  };
+
+  const exportToExcel = () => {
+    if (equipment.length === 0) {
+      toast.error('ไม่มีข้อมูลอุปกรณ์สำหรับส่งออก');
+      return;
+    }
+    const rows = buildExportRows();
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'อุปกรณ์');
+    XLSX.writeFile(workbook, `${exportFileBaseName()}.xlsx`);
+    toast.success(`ส่งออก Excel สำเร็จ (${rows.length} รายการ)`);
+  };
+
   const handleAddClick = () => {
     if (!canEdit) return;
     setEditingItem({ isNew: true });
@@ -292,6 +348,17 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
   const handleSave = async (e) => {
     e.preventDefault();
     if (!canEdit || !selectedSiteId) return;
+
+    const ipValue = (formData.ip_address || '').trim();
+    if (ipValue && !isValidIpAddress(ipValue)) {
+      toast.error('IP Address ไม่ถูกต้อง กรุณากรอกรูปแบบ เช่น 172.21.5.10');
+      return;
+    }
+    const macValue = (formData.mac_address || '').trim();
+    if (macValue && !isValidMacAddress(macValue)) {
+      toast.error('MAC Address ไม่ถูกต้อง ต้องเป็นรูปแบบ AA:BB:CC:DD:EE:FF (ตัวพิมพ์ใหญ่) เท่านั้น');
+      return;
+    }
 
     setActionLoading(true);
     const isNew = editingItem.isNew;
@@ -466,7 +533,7 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
             <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <button
-                  onClick={handleBackToSites}
+                  onClick={editingItem ? handleCancelEdit : handleBackToSites}
                   className="glass"
                   style={{ padding: '0.5rem 1rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                 >
@@ -520,6 +587,13 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
                       }}
                     />
                   </div>
+                  <button
+                    onClick={exportToExcel}
+                    className="glass"
+                    style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', color: 'var(--accent-success)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}
+                  >
+                    <FileSpreadsheet size={16} /> Export Excel
+                  </button>
                   {canEdit && (
                     <button
                       onClick={handleAddClick}
@@ -874,6 +948,23 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
                   </span>
                 </div>
 
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => setQrItem(viewingItem)}
+                    className="glass"
+                    style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--input-border)', color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 600 }}
+                  >
+                    <QrCode size={16} /> QR Code
+                  </button>
+                  <button
+                    onClick={() => setShowOwnerHistory(true)}
+                    className="glass"
+                    style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--input-border)', color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 600 }}
+                  >
+                    <UserCog size={16} /> ประวัติผู้ถือครอง
+                  </button>
+                </div>
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', fontSize: '0.85rem' }}>
                   <div><span style={{ color: 'var(--text-secondary)' }}>ประเภท:</span> {viewingItem.equipment_type || '-'}</div>
                   <div><span style={{ color: 'var(--text-secondary)' }}>แผนก:</span> {viewingItem.department || '-'}</div>
@@ -883,6 +974,11 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
                   <div><span style={{ color: 'var(--text-secondary)' }}>เลขที่สัญญา:</span> {viewingItem.contract_no || '-'}</div>
                   <div><span style={{ color: 'var(--text-secondary)' }}>วันเริ่มสัญญา:</span> {viewingItem.contract_start_date || '-'}</div>
                   <div><span style={{ color: 'var(--text-secondary)' }}>วันหมดอายุสัญญา:</span> {viewingItem.contract_expiry_date || '-'}</div>
+                  <div><span style={{ color: 'var(--text-secondary)' }}>Serial Number:</span> <span style={{ fontFamily: 'monospace' }}>{viewingItem.serial_number || '-'}</span></div>
+                  <div><span style={{ color: 'var(--text-secondary)' }}>รหัสทรัพย์สิน:</span> {viewingItem.asset_number || '-'}</div>
+                  <div><span style={{ color: 'var(--text-secondary)' }}>ผู้ถือครอง:</span> {viewingItem.asset_owner || '-'}</div>
+                  <div><span style={{ color: 'var(--text-secondary)' }}>รหัสพนักงานผู้ถือครอง:</span> {viewingItem.asset_owner_emp_id || '-'}</div>
+                  <div><span style={{ color: 'var(--text-secondary)' }}>สถานที่จัดเก็บ:</span> {viewingItem.storage_location || '-'}</div>
                 </div>
 
                 {viewingItem.notes && (
@@ -900,6 +996,25 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {qrItem && (
+          <QrCodeModal
+            equipmentId={qrItem.id}
+            equipmentName={qrItem.name}
+            updatedAt={qrItem.updatedAt}
+            onClose={() => setQrItem(null)}
+          />
+        )}
+        {showOwnerHistory && viewingItem && (
+          <OwnerHistoryModal
+            equipmentId={viewingItem.id}
+            equipmentName={viewingItem.name}
+            token={token}
+            onClose={() => setShowOwnerHistory(false)}
+          />
         )}
       </AnimatePresence>
 

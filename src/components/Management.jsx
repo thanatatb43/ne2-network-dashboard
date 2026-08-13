@@ -266,8 +266,8 @@ const Management = ({ user, token, onDeviceClick, onEquipmentClick, onAddStock, 
       className="management-page"
     >
       <header style={{ marginBottom: '2.5rem' }}>
-        <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 700 }} className="krub-bold">Management</h1>
-        <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }} className="krub-regular">System resources and devices management</p>
+        <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 700 }} className="krub-bold">การจัดการ</h1>
+        <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }} className="krub-regular">เพิ่ม ลบ แก้ไข จัดการงานและอุปกรณ์</p>
       </header>
 
       <AnimatePresence mode="wait">
@@ -291,15 +291,15 @@ const Management = ({ user, token, onDeviceClick, onEquipmentClick, onAddStock, 
                   <Monitor size={32} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.25rem' }} className="krub-semibold">Computer Management</h3>
-                  <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Manage workstation devices</p>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem' }} className="krub-semibold">การจัดการอุปกรณ์คอมพิวเตอร์</h3>
+                  <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>อุปกรณ์คอมพิวเตอร์ในสำนักงาน</p>
                 </div>
               </div>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: '2rem' }}>
-                View and manage computer assets, workstations, and endpoint configurations within the network.
+                ตรวจสอบ เพิ่ม ลบ แก้ไข อุปกรณ์คอมพิวเตอร์ และอุปกรณ์ต่อพ่วงระบบเครือข่าย ภายในสำนักงาน
               </p>
               <button className="glass" style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', border: '1px solid rgba(59, 130, 246, 0.3)', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                Access Computers <ArrowRight size={16} />
+                ไปที่หน้าจัดการคอมพิวเตอร์ <ArrowRight size={16} />
               </button>
             </motion.div>
 
@@ -315,15 +315,15 @@ const Management = ({ user, token, onDeviceClick, onEquipmentClick, onAddStock, 
                   <Network size={32} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.25rem' }} className="krub-semibold">Network Management</h3>
-                  <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Manage network infrastructure</p>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem' }} className="krub-semibold">การจัดการอุปกรณ์เครือข่าย</h3>
+                  <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>อุปกรณ์เครือข่ายภายในสำนักงาน</p>
                 </div>
               </div>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: '2rem' }}>
-                Configure and monitor network switches, routers, access points, and connectivity equipment.
+                ตรวจสอบ เพิ่ม ลบ แก้ไข อุปกรณ์เครือข่ายภายในสำนักงาน (Network Devices)
               </p>
               <button className="glass" style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(20, 184, 166, 0.1)', color: '#14b8a6', border: '1px solid rgba(20, 184, 166, 0.3)', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                Access Network <ArrowRight size={16} />
+                ไปที่หน้าจัดการอุปกรณ์เครือข่าย <ArrowRight size={16} />
               </button>
             </motion.div>
 
@@ -379,23 +379,23 @@ const Management = ({ user, token, onDeviceClick, onEquipmentClick, onAddStock, 
             <motion.div
               whileHover={{ y: -5 }}
               className="card glass"
-              style={{ padding: '2rem', cursor: 'pointer', border: '1px solid rgba(20, 184, 166, 0.2)' }}
+              style={{ padding: '2rem', cursor: 'pointer', border: '1px solid rgba(236, 72, 153, 0.2)' }}
               onClick={() => setView('stock_management')}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.5rem' }}>
-                <div style={{ background: 'rgba(20, 184, 166, 0.1)', padding: '1rem', borderRadius: '1rem', color: '#14b8a6' }}>
+                <div style={{ background: 'rgba(236, 72, 153, 0.1)', padding: '1rem', borderRadius: '1rem', color: '#ec4899' }}>
                   <Boxes size={32} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.25rem' }} className="krub-semibold">Stock Management</h3>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem' }} className="krub-semibold">จัดการคลังอุปกรณ์ (Stock)</h3>
                   <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>ทะเบียนอุปกรณ์สำนักงานทั้งหมด</p>
                 </div>
               </div>
               <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: '2rem' }}>
                 ดูรายการอุปกรณ์สำนักงานทั้งหมดในทุกสำนักงาน ค้นหาและตรวจสอบรายละเอียดอุปกรณ์แต่ละชิ้นได้
               </p>
-              <button className="glass" style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(20, 184, 166, 0.1)', color: '#14b8a6', border: '1px solid rgba(20, 184, 166, 0.3)', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                Access Stock <ArrowRight size={16} />
+              <button className="glass" style={{ width: '100%', padding: '0.75rem', borderRadius: '0.5rem', background: 'rgba(236, 72, 153, 0.1)', color: '#ec4899', border: '1px solid rgba(236, 72, 153, 0.3)', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                ไปที่หน้าจัดการคลังอุปกรณ์ <ArrowRight size={16} />
               </button>
             </motion.div>
 

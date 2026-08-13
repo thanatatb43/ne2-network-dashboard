@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Loader2, Search, ChevronLeft, ChevronRight, Boxes, QrCode, X, Download, Plus, Printer, Trash2, AlertTriangle, Repeat, History } from 'lucide-react';
+import { ArrowLeft, Loader2, Search, ChevronLeft, ChevronRight, Boxes, QrCode, X, Plus, Printer, Trash2, AlertTriangle, Repeat, History } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import BorrowReturnModal from './BorrowReturnModal';
 import LoanHistoryModal from './LoanHistoryModal';
+import QrCodeModal from './QrCodeModal';
 
 // Fits neatly on one A4 page at a readable size (2 columns x 3 rows).
 const QR_PER_PAGE = 6;
@@ -27,12 +28,25 @@ const STOCK_SITE_IDS = STOCK_SITES.map(s => s.id);
 
 const getSiteId = (item) => item.pea_site_id ?? item.pea_site?.id ?? null;
 
+// Which storage-location tab was active, kept outside React state so it
+// survives StockManagement unmounting -- clicking into an equipment's
+// details and back navigates through a different top-level tab in App.jsx,
+// which unmounts this component entirely and would otherwise reset the tab
+// back to the default every time.
+const ACTIVE_SITE_TAB_KEY = 'stock_active_site_tab';
+const readSavedSiteTab = () => {
+  const saved = sessionStorage.getItem(ACTIVE_SITE_TAB_KEY);
+  if (saved === 'other') return 'other';
+  const n = Number(saved);
+  return STOCK_SITE_IDS.includes(n) ? n : 198;
+};
+
 const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, onRequireLogin }) => {
   const canEdit = ['super_admin', 'computer_admin', 'network_admin', 'operator'].includes(user?.role);
   const canDelete = ['super_admin', 'computer_admin', 'network_admin'].includes(user?.role);
   const [equipment, setEquipment] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeSiteTab, setActiveSiteTab] = useState(198);
+  const [activeSiteTab, setActiveSiteTab] = useState(readSavedSiteTab);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -121,6 +135,10 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
   useEffect(() => {
     setTypeFilter('All');
     setStatusFilter('All');
+  }, [activeSiteTab]);
+
+  useEffect(() => {
+    sessionStorage.setItem(ACTIVE_SITE_TAB_KEY, String(activeSiteTab));
   }, [activeSiteTab]);
 
   const totalPages = Math.ceil(filteredEquipment.length / itemsPerPage);
@@ -430,6 +448,7 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
           <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
             <thead>
               <tr style={{ background: 'var(--glass-bg-subtle)' }}>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ID</th>
                 <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ชื่ออุปกรณ์</th>
                 <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ประเภท</th>
                 <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>แผนก</th>
@@ -440,14 +459,14 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="5" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-primary)' }}>
+                  <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-primary)' }}>
                     <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto' }} />
                     <p style={{ marginTop: '1rem' }}>กำลังโหลดรายการอุปกรณ์...</p>
                   </td>
                 </tr>
               ) : currentItems.length === 0 ? (
                 <tr>
-                  <td colSpan="5" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                  <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
                     <Boxes size={40} style={{ opacity: 0.2, margin: '0 auto 1rem' }} />
                     <p>ไม่พบรายการอุปกรณ์</p>
                   </td>
@@ -461,6 +480,7 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
                     className="table-row-hover"
                     title="คลิกเพื่อดูรายละเอียดอุปกรณ์"
                   >
+                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{item.id}</td>
                     <td style={{ padding: '1rem 1.5rem', fontWeight: 600 }}>{item.name || '-'}</td>
                     <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem' }}>{item.equipment_type || '-'}</td>
                     <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem' }}>{item.department || '-'}</td>
@@ -567,60 +587,12 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
 
       <AnimatePresence>
         {qrItem && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem'
-            }}
-            onClick={() => setQrItem(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              onClick={(e) => e.stopPropagation()}
-              className="card glass"
-              style={{ padding: '1.5rem', maxWidth: '340px', width: '100%', borderRadius: '0.75rem', textAlign: 'center' }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h3 style={{ margin: 0, fontSize: '1.05rem' }}>QR Code อุปกรณ์</h3>
-                <button
-                  onClick={() => setQrItem(null)}
-                  className="glass"
-                  style={{ padding: '0.4rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' }}
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              <img
-                src={`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${qrItem.id}/qrcode`}
-                alt={`QR Code - ${qrItem.name}`}
-                style={{ width: '100%', maxWidth: '260px', borderRadius: '0.5rem', background: '#fff', padding: '0.75rem' }}
-              />
-
-              <p style={{ margin: '1rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)', wordBreak: 'break-word' }}>
-                {qrItem.name}
-              </p>
-
-              <a
-                href={`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${qrItem.id}/qrcode`}
-                download={`equipment-${qrItem.id}-qrcode.png`}
-                className="glass"
-                style={{
-                  marginTop: '1.25rem', padding: '0.65rem 1.5rem', borderRadius: '0.5rem',
-                  background: 'var(--accent-primary)', color: '#fff', border: 'none', fontWeight: 600,
-                  fontSize: '0.85rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center',
-                  justifyContent: 'center', gap: '0.5rem', textDecoration: 'none'
-                }}
-              >
-                <Download size={16} /> ดาวน์โหลด
-              </a>
-            </motion.div>
-          </motion.div>
+          <QrCodeModal
+            equipmentId={qrItem.id}
+            equipmentName={qrItem.name}
+            updatedAt={qrItem.updatedAt}
+            onClose={() => setQrItem(null)}
+          />
         )}
       </AnimatePresence>
 

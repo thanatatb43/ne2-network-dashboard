@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { ChevronLeft, Share2, Globe, Shield, Cpu, Users, ArrowRight, Loader2, Search, RefreshCw, Clock, CalendarDays, CalendarRange, Activity, Calendar, Download, Boxes, X } from 'lucide-react';
+import { ChevronLeft, Share2, Globe, Shield, Cpu, Users, ArrowRight, Loader2, Search, RefreshCw, Clock, CalendarDays, CalendarRange, Activity, Calendar, FileSpreadsheet, Boxes, X } from 'lucide-react';
 import AvailabilityHistoryChart from './AvailabilityHistoryChart';
-import html2pdf from 'html2pdf.js';
+import * as XLSX from 'xlsx';
 
 // Matches the status badge colors used in OfficeEquipmentManagement.jsx
 const statusColorFor = (status) => {
@@ -302,67 +302,38 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
     }
   };
 
-  const handleExportPDF = () => {
+  // Exports the full availability history for this device, not just
+  // whatever range/page the chart happens to be showing on screen.
+  const handleExportExcel = () => {
+    if (fullAvailabilityHistory.length === 0) {
+      toast.error('ไม่มีข้อมูลประวัติความพร้อมใช้งานสำหรับส่งออก');
+      return;
+    }
     setIsExporting(true);
-
-    // Create a standalone wrapper for the PDF table
-    const wrapper = document.createElement('div');
-    wrapper.style.padding = '20px';
-    wrapper.style.background = '#ffffff'; // White background for printing
-    wrapper.style.color = '#000000';
-    wrapper.style.fontFamily = 'sans-serif';
-
-    let tableRows = fullAvailabilityHistory.map(item => {
-      const dateString = item.date || item.createdAt;
-      const dateObj = new Date(dateString);
-      const displayDate = isNaN(dateObj.getTime()) ? 'Invalid Date' : dateObj.toLocaleDateString('th-TH', {
-        day: 'numeric', month: 'short', year: 'numeric'
+    try {
+      const rows = fullAvailabilityHistory.map(item => {
+        const dateString = item.date || item.createdAt;
+        const dateObj = new Date(dateString);
+        const displayDate = isNaN(dateObj.getTime()) ? 'Invalid Date' : dateObj.toLocaleDateString('th-TH', {
+          day: 'numeric', month: 'short', year: 'numeric'
+        });
+        return {
+          'วันที่ (date)': displayDate,
+          'Uptime Percent (uptime_pct)': item.uptime_pct != null ? parseFloat(item.uptime_pct).toFixed(2) : '-',
+          'Average Latency (avg_latency_ms)': item.avg_latency_ms != null ? parseFloat(item.avg_latency_ms).toFixed(2) : '-'
+        };
       });
-      const uptime = item.uptime_pct != null ? parseFloat(item.uptime_pct).toFixed(2) : '-';
-      const latency = item.avg_latency_ms != null ? parseFloat(item.avg_latency_ms).toFixed(2) : '-';
-
-      return `
-      <tr style="border-bottom: 1px solid #e2e8f0">
-        <td style="padding: 10px; border: 1px solid #e2e8f0;">${displayDate}</td>
-        <td style="padding: 10px; border: 1px solid #e2e8f0; font-weight: bold; color: ${uptime >= 99 ? '#059669' : '#dc2626'};">${uptime}%</td>
-        <td style="padding: 10px; border: 1px solid #e2e8f0;">${latency} ms</td>
-      </tr>
-    `}).join('');
-
-    wrapper.innerHTML = `
-      <h2 style="margin-top: 0; margin-bottom: 5px; font-size: 1.5rem; color: #0f172a;">รายงานประวัติความพร้อมใช้งาน</h2>
-      <p style="color: #475569; margin-top: 0; margin-bottom: 20px;">อุปกรณ์: ${deviceData?.pea_name || 'N/A'} (IP: ${deviceData?.gateway || 'N/A'})</p>
-      <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem;">
-        <thead>
-          <tr style="background: #f1f5f9; color: #0f172a;">
-            <th style="padding: 10px; border: 1px solid #e2e8f0;">วันที่ (date)</th>
-            <th style="padding: 10px; border: 1px solid #e2e8f0;">Uptime Percent (uptime_pct)</th>
-            <th style="padding: 10px; border: 1px solid #e2e8f0;">Average Latency (avg_latency_ms)</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tableRows}
-        </tbody>
-      </table>
-    `;
-
-    // Configure html2pdf options
-    const opt = {
-      margin: 0.5,
-      filename: `Device_Report_${deviceData?.pea_name || 'Network'}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-    };
-
-    html2pdf().set(opt).from(wrapper).save().then(() => {
-      setIsExporting(false);
-      toast.success('Report exported successfully!', { icon: '📄' });
-    }).catch(err => {
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Availability');
+      XLSX.writeFile(workbook, `Device_Report_${deviceData?.pea_name || 'Network'}.xlsx`);
+      toast.success(`ส่งออก Excel สำเร็จ (${rows.length} รายการ)`, { icon: '📊' });
+    } catch (err) {
       console.error('Export error:', err);
+      toast.error('ส่งออก Excel ไม่สำเร็จ');
+    } finally {
       setIsExporting(false);
-      toast.error('Failed to export report');
-    });
+    }
   };
 
   // Merge the office equipment registered under this device's pea_site with the
@@ -492,7 +463,7 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
 
         <div style={{ display: 'flex', gap: '1rem' }} data-html2canvas-ignore="true">
           <button
-            onClick={handleExportPDF}
+            onClick={handleExportExcel}
             disabled={isExporting}
             className="glass"
             style={{
@@ -508,10 +479,10 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
               opacity: isExporting ? 0.7 : 1,
               fontWeight: 600
             }}
-            title="Export Report to PDF"
+            title="Export Report to Excel"
           >
-            {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
-            {isExporting ? 'Exporting...' : 'Export PDF'}
+            {isExporting ? <Loader2 size={18} className="animate-spin" /> : <FileSpreadsheet size={18} />}
+            {isExporting ? 'Exporting...' : 'Export Excel'}
           </button>
           <button
             onClick={fetchResults}
