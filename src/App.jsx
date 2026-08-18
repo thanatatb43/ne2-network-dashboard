@@ -17,6 +17,8 @@ import SsoCallback from './components/SsoCallback';
 import BudgetDashboard from './components/BudgetDashboard';
 import DowntimeHistory from './components/DowntimeHistory';
 import DownDevices from './components/DownDevices';
+import EquipmentBorrow from './components/EquipmentBorrow';
+import EquipmentLoanHistory from './components/EquipmentLoanHistory';
 import { useNetworkData } from './hooks/useNetworkData';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
@@ -43,6 +45,8 @@ const TAB_PATHS = {
   settings: '/settings',
   'downtime-history': '/downtime-history',
   'down-devices': '/down-devices',
+  'equipment-borrow': '/equipment-borrow',
+  'equipment-loans': '/equipment-loans',
   about: '/about',
   login: '/login',
   'sso-callback': '/sso-callback'
@@ -722,6 +726,18 @@ function App() {
             >
               <DownDevices onDeviceClick={handleDeviceClick} />
             </motion.div>
+          ) : activeTab === 'equipment-borrow' ? (
+            <EquipmentBorrow
+              token={token}
+              user={user}
+              onRequireLogin={() => requireLoginFor('/equipment-borrow')}
+            />
+          ) : activeTab === 'equipment-loans' ? (
+            <EquipmentLoanHistory
+              token={token}
+              user={user}
+              onRequireLogin={() => requireLoginFor('/equipment-loans')}
+            />
           ) : activeTab === 'about' ? (
             <About />
           ) : activeTab === 'login' ? (

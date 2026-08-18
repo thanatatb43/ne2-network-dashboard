@@ -371,15 +371,19 @@ const DowntimeHistory = ({ token, onDeviceClick }) => {
                   width: '100%',
                   padding: '0.6rem 0.6rem 0.6rem 2.5rem',
                   borderRadius: '0.5rem',
-                  border: '1px solid var(--border-subtle)',
-                  background: 'var(--input-bg)',
+                  border: searchTerm ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                  background: searchTerm ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
                   color: 'var(--text-primary)',
                   fontSize: '0.9rem'
                 }}
               />
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem',
+              background: selectedProvince !== 'All' ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
+              border: selectedProvince !== 'All' ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)'
+            }}>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>จังหวัด:</span>
               <select
                 value={selectedProvince}

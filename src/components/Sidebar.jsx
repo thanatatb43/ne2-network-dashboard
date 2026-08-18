@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X, History, Map, ChevronDown, ChevronRight } from 'lucide-react';
+import { Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X, History, Map, ChevronDown, ChevronRight, Cpu, ShoppingCart } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import peaLogo from '../assets/logo/pea_logo.png';
@@ -60,6 +60,16 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => 
   networkChildren.push({ name: 'ประวัติการขัดข้อง', icon: History, id: 'downtime-history' });
   networkChildren.push({ name: 'อุปกรณ์ทั้งหมด', icon: Database, id: 'devices' });
   items.push({ type: 'group', name: 'ระบบเครือข่าย', icon: Network, id: 'group-network', children: networkChildren });
+
+  // "ระบบคอมพิวเตอร์" bundles equipment borrow/return -- both pages are
+  // viewable without login (browsing/history are public), the borrow/return
+  // ACTIONS within them are what actually gate on being logged in.
+  items.push({
+    type: 'group', name: 'ระบบคอมพิวเตอร์', icon: Cpu, id: 'group-computer', children: [
+      { name: 'ยืมอุปกรณ์', icon: ShoppingCart, id: 'equipment-borrow' },
+      { name: 'ประวัติการยืม', icon: History, id: 'equipment-loans' }
+    ]
+  });
 
   if (user) {
     // Role-based access for administrative menus

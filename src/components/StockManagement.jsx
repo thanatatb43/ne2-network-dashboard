@@ -478,8 +478,8 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
                 width: '100%',
                 padding: '0.6rem 0.6rem 0.6rem 2.5rem',
                 borderRadius: '0.5rem',
-                border: '1px solid var(--border-subtle)',
-                background: 'var(--input-bg)',
+                border: searchInput ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+                background: searchInput ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
                 color: 'var(--text-primary)',
                 fontSize: '0.9rem'
               }}
@@ -487,7 +487,11 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
           </div>
 
           {activeSiteTab === 'other' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--border-subtle)' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem',
+              background: otherSiteFilter !== 'all' ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
+              border: otherSiteFilter !== 'all' ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)'
+            }}>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สำนักงาน:</span>
               <select
                 value={otherSiteFilter}
@@ -500,7 +504,11 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
             </div>
           )}
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--border-subtle)' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem',
+            background: statusFilter !== 'All' ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
+            border: statusFilter !== 'All' ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)'
+          }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สถานะ:</span>
             <select
               value={statusFilter}

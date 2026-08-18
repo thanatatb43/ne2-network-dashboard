@@ -316,7 +316,11 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
           
           {!editingDevice && (
             <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-              <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
+              <div className="glass" style={{
+                display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
+                border: selectedType !== 'All' ? '1px solid var(--accent-primary)' : undefined,
+                background: selectedType !== 'All' ? 'var(--bg-accent-subtle)' : undefined
+              }}>
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>
                 <select
                   value={selectedType}
@@ -387,8 +391,8 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
                   style={{
                     padding: '0.5rem 1rem 0.5rem 2.5rem',
                     borderRadius: '0.5rem',
-                    border: '1px solid var(--input-border)',
-                    background: 'var(--input-bg)',
+                    border: searchTerm ? '1px solid var(--accent-primary)' : '1px solid var(--input-border)',
+                    background: searchTerm ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
                     color: 'var(--text-primary)',
                     outline: 'none',
                     width: '200px'

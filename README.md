@@ -46,7 +46,7 @@ VITE_API_BASE_URL=http://<backend-host>:<port>
 | `Management.jsx`, `OfficeEquipmentManagement.jsx` | หน้ารวมเมนูจัดการ + จัดการอุปกรณ์สำนักงาน (คอมพิวเตอร์/ปริ้นเตอร์ ฯลฯ แยกจากอุปกรณ์เครือข่าย) |
 | `AdminSettings.jsx` | จัดการผู้ใช้ระบบ |
 | `Auth.jsx`, `SsoCallback.jsx` | login/register ปกติ + PEA SSO (ดู [SSO.md](SSO.md)) |
-| `About.jsx` | สถิติการเข้าใช้งานเว็บ |
+| `About.jsx` | สถิติการเข้าใช้งานเว็บ + คู่มือการใช้งานระบบแบบละเอียด (ดู [USER_GUIDE.md](USER_GUIDE.md)) |
 
 ## Routing (ทำเองทั้งหมด ไม่ใช้ react-router)
 
@@ -109,3 +109,4 @@ VITE_API_BASE_URL=http://<backend-host>:<port>
 - **เปรียบเทียบ id ต้องแปลงเป็น string ก่อน**: `deviceId` ที่มาจาก URL (ผ่าน regex) เป็น string เสมอ แต่ตอน id มาจาก object ที่ click (`device.id`) มักเป็น number — เทียบด้วย `===` ตรงๆ จะพลาด ต้อง `String(a) === String(b)`
 - **ทดสอบ mobile ด้วย headless Chrome**: flag `--window-size` ไม่ได้ emulate viewport จริง ต้องใช้ CDP `Emulation.setDeviceMetricsOverride` ถึงจะได้ผลลัพธ์ตรงกับที่ผู้ใช้จะเห็นจริง
 - **Logout/auto-logout ต้องเคลียร์ state ฝั่ง client ก่อนเสมอ**: อย่า `await` server call ก่อน clear session — ถ้าเน็ตช้า/หลุดตอนนั้นพอดี user จะค้าง ต้อง clear local state + redirect ทันที แล้วค่อยยิง API แจ้ง server แบบ fire-and-forget
+- **เพิ่ม/แก้ feature ที่ผู้ใช้ทั่วไปมองเห็น ต้องอัปเดตคู่มือด้วยเสมอ**: แก้ทั้ง `GUIDE_SECTIONS` ใน `About.jsx` และ [USER_GUIDE.md](USER_GUIDE.md) ให้ตรงกัน — สองที่นี้ต้องเป็นเนื้อหาเดียวกัน (คู่มือในแอป vs. ไฟล์นอกแอปไว้อ่าน/รีวิว) ห้ามแก้แค่ที่เดียว

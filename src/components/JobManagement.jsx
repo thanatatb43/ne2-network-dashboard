@@ -17,6 +17,10 @@ const JobManagement = ({ token, onBack, user }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
   const [siteFilter, setSiteFilter] = useState('');
+  // searchInput is the raw, immediate textbox value; searchTerm is the
+  // debounced value actually sent as ?search= (see the debounce effect below).
+  const [searchInput, setSearchInput] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, totalPages: 1 });
   const [sortConfig, setSortConfig] = useState({ key: 'id', direction: 'desc' });
 
@@ -68,6 +72,7 @@ const JobManagement = ({ token, onBack, user }) => {
     try {
       const params = new URLSearchParams();
       if (siteFilter) params.append('pea_site_id', siteFilter);
+      if (searchTerm.trim()) params.append('search', searchTerm.trim());
       params.append('page', String(currentPage));
       params.append('limit', String(itemsPerPage));
 
@@ -92,7 +97,18 @@ const JobManagement = ({ token, onBack, user }) => {
   useEffect(() => {
     fetchJobs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, itemsPerPage, siteFilter]);
+  }, [currentPage, itemsPerPage, siteFilter, searchTerm]);
+
+  // Debounces free-text search into a single request instead of firing one
+  // per keystroke; lands together with the page-1 reset so they batch into
+  // one re-render instead of racing across two separate effects.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearchTerm(searchInput);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   // Fetch PEA sites from pea-jobs/sites endpoint -- needed both for the main
   // list's site filter and the create-job form's site dropdown, so it's
@@ -836,7 +852,11 @@ const JobManagement = ({ token, onBack, user }) => {
                       {[10, 20, 50, 100].map(v => <option key={v} value={v} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{v}</option>)}
                     </select>
                   </div>
-                  <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
+                  <div className="glass" style={{
+                    display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
+                    border: siteFilter ? '1px solid var(--accent-primary)' : undefined,
+                    background: siteFilter ? 'var(--bg-accent-subtle)' : undefined
+                  }}>
                     <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>สำนักงาน:</span>
                     <select value={siteFilter} onChange={(e) => handleSiteFilterChange(e.target.value)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
                       <option value="" style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>ทั้งหมด</option>
@@ -847,6 +867,20 @@ const JobManagement = ({ token, onBack, user }) => {
                       ))}
                     </select>
                   </div>
+                </div>
+                <div style={{ position: 'relative', width: '300px' }}>
+                  <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+                  <input
+                    type="text"
+                    placeholder="ค้นหาชื่องาน หรือรายละเอียดงาน..."
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    style={{
+                      width: '100%', padding: '0.6rem 1rem 0.6rem 2.5rem', borderRadius: '0.5rem', color: 'var(--text-primary)', outline: 'none',
+                      border: searchInput ? '1px solid var(--accent-primary)' : '1px solid var(--input-border)',
+                      background: searchInput ? 'var(--bg-accent-subtle)' : 'var(--input-bg)'
+                    }}
+                  />
                 </div>
               </div>
 

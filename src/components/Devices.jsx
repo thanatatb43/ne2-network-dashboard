@@ -174,7 +174,11 @@ const Devices = ({ onDeviceClick, user }) => {
           >
             <FileSpreadsheet size={18} /> Export Excel
           </button>
-          <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)' }}>
+          <div className="glass" style={{
+            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
+            background: selectedType !== 'All' ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
+            border: selectedType !== 'All' ? '1px solid var(--accent-primary)' : '1px solid var(--input-border)'
+          }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>
             <select
               value={selectedType}
@@ -233,7 +237,11 @@ const Devices = ({ onDeviceClick, user }) => {
               <option value="100" style={{ background: '#ffffff', color: '#0f172a' }}>100</option>
             </select>
           </div>
-          <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.5rem 1rem', gap: '0.5rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)' }}>
+          <div className="glass" style={{
+            display: 'flex', alignItems: 'center', padding: '0.5rem 1rem', gap: '0.5rem', borderRadius: '0.5rem',
+            background: searchTerm ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
+            border: searchTerm ? '1px solid var(--accent-primary)' : '1px solid var(--input-border)'
+          }}>
             <Search size={18} color="var(--text-secondary)" />
             <input
               type="text"
