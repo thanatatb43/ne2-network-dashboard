@@ -95,7 +95,7 @@ const formFields = [
   { name: 'asset_number', label: 'รหัสทรัพย์สิน', type: 'text' },
   { name: 'asset_owner', label: 'ผู้ถือครอง', type: 'text' },
   { name: 'asset_owner_emp_id', label: 'รหัสพนักงานผู้ถือครอง', type: 'text' },
-  { name: 'storage_location', label: 'สถานที่จัดเก็บ', type: 'text' },
+  { name: 'storage_location', label: 'สถานที่ติดตั้งหรือจัดเก็บ', type: 'text' },
   { name: 'notes', label: 'หมายเหตุ', type: 'text', placeholder: 'รายละเอียด ที่ตั้ง หรือข้อมูลอื่นๆ' }
 ];
 
@@ -105,10 +105,22 @@ const isValidIpAddress = (ip) => {
 };
 const isValidMacAddress = (mac) => /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac);
 
+// Same fixed pea_site_id StockManagement.jsx pins as the department's own
+// storage/equipment location -- shown as its own tab instead of buried in
+// the alphabetical list of every PEA branch office.
+const DEPT_SITE_ID = 200;
+
 const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null, onSelectSite }) => {
-  // URL-controlled from Management.jsx / App.jsx: a site is "selected" purely
-  // based on whether selectedSiteId is set, no separate local view state needed.
-  const view = selectedSiteId ? 'detail' : 'sites';
+  // Which top-level tab is active. Defaults to the department tab, unless we
+  // land here already deep-linked to a specific other site (e.g. browser
+  // back/forward), in which case the "other" tab should show as active.
+  const [activeMainTab, setActiveMainTab] = useState(() =>
+    selectedSiteId && String(selectedSiteId) !== String(DEPT_SITE_ID) ? 'other' : 'main'
+  );
+  // The department tab always shows DEPT_SITE_ID's equipment regardless of
+  // the URL-controlled selectedSiteId; the "other" tab defers to it as before.
+  const effectiveSiteId = activeMainTab === 'main' ? DEPT_SITE_ID : selectedSiteId;
+  const view = (activeMainTab === 'main' || selectedSiteId) ? 'detail' : 'sites';
   const [loadingSites, setLoadingSites] = useState(true);
   const [peaSites, setPeaSites] = useState([]);
   const [allEquipment, setAllEquipment] = useState([]);
@@ -190,10 +202,13 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
       .map(s => ({ id: s.id, pea_name: s.pea_name, pea_province: s.pea_province, count: countMap.get(s.id) || 0 }));
   }, [peaSites, allEquipment]);
 
+  // The department itself gets its own tab, so it's excluded from the
+  // "other sites" list to avoid showing it twice.
   const filteredSites = React.useMemo(() => {
-    if (!siteSearch) return sites;
+    const base = sites.filter(s => s.id !== DEPT_SITE_ID);
+    if (!siteSearch) return base;
     const q = siteSearch.toLowerCase();
-    return sites.filter(s =>
+    return base.filter(s =>
       (s.pea_name && s.pea_name.toLowerCase().includes(q)) ||
       (s.pea_province && s.pea_province.toLowerCase().includes(q))
     );
@@ -202,9 +217,16 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
   // Resolved once the site list has loaded; may briefly be null right after a
   // deep-link / back-navigation lands on a site's URL before sites finish fetching.
   const selectedSite = React.useMemo(
-    () => sites.find(s => String(s.id) === String(selectedSiteId)) || null,
-    [sites, selectedSiteId]
+    () => sites.find(s => String(s.id) === String(effectiveSiteId)) || null,
+    [sites, effectiveSiteId]
   );
+
+  // Equipment counts for the two tab badges.
+  const deptEquipmentCount = React.useMemo(
+    () => allEquipment.filter(item => (item.pea_site_id ?? item.pea_site?.id) === DEPT_SITE_ID).length,
+    [allEquipment]
+  );
+  const otherEquipmentCount = allEquipment.length - deptEquipmentCount;
 
   const fetchSiteEquipment = async (siteId) => {
     setLoadingEquipment(true);
@@ -227,20 +249,21 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
     }
   };
 
-  // Fetches automatically whenever selectedSiteId changes -- by click OR by
-  // the browser back/forward buttons restoring a previously visited site.
+  // Fetches automatically whenever the effective site changes -- by tab
+  // switch, by site click, or by the browser back/forward buttons restoring
+  // a previously visited site.
   useEffect(() => {
     setEquipmentSearch('');
     setSelectedType('All');
     setCurrentPage(1);
     setEditingItem(null);
-    if (selectedSiteId) {
-      fetchSiteEquipment(selectedSiteId);
+    if (effectiveSiteId) {
+      fetchSiteEquipment(effectiveSiteId);
     } else {
       setEquipment([]);
       setSiteNetworkIp(null);
     }
-  }, [selectedSiteId]);
+  }, [effectiveSiteId]);
 
   const handleSiteClick = (site) => {
     onSelectSite && onSelectSite(site.id);
@@ -248,6 +271,11 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
 
   const handleBackToSites = () => {
     onSelectSite && onSelectSite(null);
+  };
+
+  const handleTabClick = (tab) => {
+    setActiveMainTab(tab);
+    if (selectedSiteId) onSelectSite && onSelectSite(null);
   };
 
   const equipmentTypes = React.useMemo(() => {
@@ -293,12 +321,13 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
     'รหัสทรัพย์สิน': item.asset_number || '-',
     'ผู้ถือครอง': item.asset_owner || '-',
     'รหัสพนักงานผู้ถือครอง': item.asset_owner_emp_id || '-',
-    'สถานที่จัดเก็บ': item.storage_location || '-',
+    'สถานที่ติดตั้งหรือจัดเก็บ': item.storage_location || '-',
     'หมายเหตุ': item.notes || '-'
   }));
 
   const exportFileBaseName = () => {
-    const siteName = (selectedSite?.pea_name || 'site').replace(/[\\/:*?"<>|]/g, '_');
+    const rawName = activeMainTab === 'main' ? 'แผนกคอมพิวเตอร์และเครือข่าย' : (selectedSite?.pea_name || 'site');
+    const siteName = rawName.replace(/[\\/:*?"<>|]/g, '_');
     return `Computer_Management_${siteName}_${new Date().toISOString().split('T')[0]}`;
   };
 
@@ -341,13 +370,13 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
   };
 
   const refreshAfterMutation = async () => {
-    await fetchSiteEquipment(selectedSiteId);
+    await fetchSiteEquipment(effectiveSiteId);
     fetchAllEquipment();
   };
 
   const handleSave = async (e) => {
     e.preventDefault();
-    if (!canEdit || !selectedSiteId) return;
+    if (!canEdit || !effectiveSiteId) return;
 
     const ipValue = (formData.ip_address || '').trim();
     if (ipValue && !isValidIpAddress(ipValue)) {
@@ -368,7 +397,7 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
 
     try {
       const params = new URLSearchParams();
-      const payload = { ...formData, pea_site_id: String(selectedSiteId) };
+      const payload = { ...formData, pea_site_id: String(effectiveSiteId) };
       formFields.forEach(field => {
         params.append(field.name, payload[field.name] || '');
       });
@@ -437,6 +466,61 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 20 }}
     >
+      <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+        <button
+          onClick={() => handleTabClick('main')}
+          className="glass"
+          style={{
+            padding: '0.6rem 1.1rem',
+            borderRadius: '0.6rem',
+            border: activeMainTab === 'main' ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+            background: activeMainTab === 'main' ? 'var(--bg-accent-subtle)' : 'var(--card-bg)',
+            color: activeMainTab === 'main' ? 'var(--accent-primary)' : 'var(--text-primary)',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}
+        >
+          แผนกคอมพิวเตอร์และเครือข่าย
+          <span style={{
+            fontSize: '0.75rem', padding: '0.1rem 0.5rem', borderRadius: '1rem',
+            background: activeMainTab === 'main' ? 'var(--accent-primary)' : 'var(--glass-bg-subtle)',
+            color: activeMainTab === 'main' ? '#fff' : 'var(--text-secondary)'
+          }}>
+            {deptEquipmentCount}
+          </span>
+        </button>
+        <button
+          onClick={() => handleTabClick('other')}
+          className="glass"
+          style={{
+            padding: '0.6rem 1.1rem',
+            borderRadius: '0.6rem',
+            border: activeMainTab === 'other' ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
+            background: activeMainTab === 'other' ? 'var(--bg-accent-subtle)' : 'var(--card-bg)',
+            color: activeMainTab === 'other' ? 'var(--accent-primary)' : 'var(--text-primary)',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}
+        >
+          อื่นๆ
+          <span style={{
+            fontSize: '0.75rem', padding: '0.1rem 0.5rem', borderRadius: '1rem',
+            background: activeMainTab === 'other' ? 'var(--accent-primary)' : 'var(--glass-bg-subtle)',
+            color: activeMainTab === 'other' ? '#fff' : 'var(--text-secondary)'
+          }}>
+            {otherEquipmentCount}
+          </span>
+        </button>
+      </div>
+
       <AnimatePresence mode="wait">
         {view === 'sites' ? (
           <motion.div key="sites" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -533,15 +617,19 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
             <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <button
-                  onClick={editingItem ? handleCancelEdit : handleBackToSites}
+                  onClick={editingItem ? handleCancelEdit : (activeMainTab === 'main' ? onBack : handleBackToSites)}
                   className="glass"
                   style={{ padding: '0.5rem 1rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                 >
-                  <ArrowLeft size={16} /> กลับ
+                  <ArrowLeft size={16} /> {activeMainTab === 'main' && !editingItem ? 'กลับไปยัง Overview' : 'กลับ'}
                 </button>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 700 }}>{selectedSite?.pea_name}</h2>
-                  <p style={{ margin: '0.15rem 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>{selectedSite?.pea_province}</p>
+                  <h2 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 700 }}>
+                    {activeMainTab === 'main' ? 'แผนกคอมพิวเตอร์และเครือข่าย' : selectedSite?.pea_name}
+                  </h2>
+                  <p style={{ margin: '0.15rem 0 0', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                    {activeMainTab === 'main' ? 'อุปกรณ์ของแผนก' : selectedSite?.pea_province}
+                  </p>
                 </div>
               </div>
 
@@ -978,7 +1066,7 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
                   <div><span style={{ color: 'var(--text-secondary)' }}>รหัสทรัพย์สิน:</span> {viewingItem.asset_number || '-'}</div>
                   <div><span style={{ color: 'var(--text-secondary)' }}>ผู้ถือครอง:</span> {viewingItem.asset_owner || '-'}</div>
                   <div><span style={{ color: 'var(--text-secondary)' }}>รหัสพนักงานผู้ถือครอง:</span> {viewingItem.asset_owner_emp_id || '-'}</div>
-                  <div><span style={{ color: 'var(--text-secondary)' }}>สถานที่จัดเก็บ:</span> {viewingItem.storage_location || '-'}</div>
+                  <div><span style={{ color: 'var(--text-secondary)' }}>สถานที่ติดตั้งหรือจัดเก็บ:</span> {viewingItem.storage_location || '-'}</div>
                 </div>
 
                 {viewingItem.notes && (

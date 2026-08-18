@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import { ChevronLeft, Loader2, AlertTriangle, Save, ShieldAlert, ImagePlus, Upload, ImageOff, X, Trash2 } from 'lucide-react';
+import { ChevronLeft, Loader2, AlertTriangle, Save, ShieldAlert, ImagePlus, Upload, ImageOff, X, Trash2, Search } from 'lucide-react';
 
 const MAX_PHOTOS = 5;
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -85,7 +86,7 @@ const ASSET_FIELDS = [
   { name: 'asset_owner_emp_id', label: 'รหัสพนักงานผู้ถือครอง', type: 'text' }
 ];
 const STORAGE_FIELDS = [
-  { name: 'storage_location', label: 'สถานที่จัดเก็บ', type: 'text' }
+  { name: 'storage_location', label: 'สถานที่ติดตั้งหรือจัดเก็บ', type: 'text' }
 ];
 const VENDOR_FIELDS = [
   { name: 'vendor', label: 'ผู้ขาย (Vendor)', type: 'text' },
@@ -169,6 +170,139 @@ const FormField = ({ field, value, onChange, disabled, disabledHint }) => {
   );
 };
 
+// Type-to-search site picker -- a plain <select> becomes unwieldy once the
+// PEA site list gets long, so this filters the list as you type instead of
+// making you scroll through every site to find the right one.
+//
+// The dropdown panel is rendered through a portal into document.body rather
+// than as a normal descendant: every FormSection card uses .glass, which
+// sets backdrop-filter and therefore creates its own CSS stacking context,
+// so a dropdown positioned absolutely *inside* one card can never paint over
+// a sibling card later in the DOM no matter how high its z-index is set.
+// Portaling escapes that stacking context entirely.
+const SiteSearchSelect = ({ sites, value, onChange }) => {
+  const [query, setQuery] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const [hoveredId, setHoveredId] = useState(null);
+  const [dropdownRect, setDropdownRect] = useState(null);
+  const containerRef = useRef(null);
+  const inputRef = useRef(null);
+  const dropdownRef = useRef(null);
+
+  const selectedSite = sites.find(s => String(s.id) === String(value));
+  const siteLabel = (s) => `${s.pea_name}${s.pea_province ? ` (${s.pea_province})` : ''}`;
+
+  const updateDropdownRect = () => {
+    if (!inputRef.current) return;
+    const r = inputRef.current.getBoundingClientRect();
+    setDropdownRect({ top: r.bottom + 4, left: r.left, width: r.width });
+  };
+
+  const openDropdown = () => {
+    updateDropdownRect();
+    setIsOpen(true);
+    setQuery('');
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      const insideInput = containerRef.current && containerRef.current.contains(e.target);
+      const insideDropdown = dropdownRef.current && dropdownRef.current.contains(e.target);
+      if (!insideInput && !insideDropdown) {
+        setIsOpen(false);
+        setQuery('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // The portaled panel is no longer positioned by normal document flow, so
+  // it needs to be repositioned by hand whenever the page scrolls or resizes
+  // while it's open (capture: true also catches scrolling inside a nested
+  // scrollable container, not just the window itself).
+  useEffect(() => {
+    if (!isOpen) return;
+    window.addEventListener('scroll', updateDropdownRect, true);
+    window.addEventListener('resize', updateDropdownRect);
+    return () => {
+      window.removeEventListener('scroll', updateDropdownRect, true);
+      window.removeEventListener('resize', updateDropdownRect);
+    };
+  }, [isOpen]);
+
+  const filteredSites = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return sites;
+    return sites.filter(s =>
+      (s.pea_name || '').toLowerCase().includes(q) ||
+      (s.pea_province || '').toLowerCase().includes(q)
+    );
+  }, [sites, query]);
+
+  const selectSite = (site) => {
+    onChange(String(site.id));
+    setQuery('');
+    setIsOpen(false);
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative' }}>
+      <div style={{ position: 'relative' }}>
+        <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }} />
+        <input
+          ref={inputRef}
+          type="text"
+          value={isOpen ? query : (selectedSite ? siteLabel(selectedSite) : '')}
+          onChange={(e) => { setQuery(e.target.value); if (!isOpen) openDropdown(); }}
+          onFocus={openDropdown}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') { setIsOpen(false); setQuery(''); e.target.blur(); }
+            if (e.key === 'Enter' && filteredSites.length === 1) { e.preventDefault(); selectSite(filteredSites[0]); }
+          }}
+          placeholder="พิมพ์ชื่อสำนักงานหรือจังหวัดเพื่อค้นหา..."
+          autoComplete="off"
+          style={{ ...fieldInputStyle, paddingLeft: '2.25rem' }}
+        />
+      </div>
+      {isOpen && dropdownRect && createPortal(
+        <div
+          ref={dropdownRef}
+          style={{
+            position: 'fixed', top: dropdownRect.top, left: dropdownRect.left, width: dropdownRect.width,
+            maxHeight: '240px', overflowY: 'auto', background: 'var(--card-bg)',
+            border: '1px solid var(--border-subtle)', borderRadius: '0.5rem',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.3)', zIndex: 10000
+          }}
+        >
+          {filteredSites.length === 0 ? (
+            <div style={{ padding: '0.75rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>ไม่พบสำนักงานที่ตรงกับคำค้นหา</div>
+          ) : (
+            filteredSites.map(s => (
+              <div
+                key={s.id}
+                onClick={() => selectSite(s)}
+                onMouseEnter={() => setHoveredId(s.id)}
+                onMouseLeave={() => setHoveredId(null)}
+                style={{
+                  padding: '0.6rem 0.75rem', cursor: 'pointer', fontSize: '0.9rem',
+                  color: 'var(--text-primary)',
+                  background: String(s.id) === String(value)
+                    ? 'var(--bg-accent-subtle)'
+                    : (hoveredId === s.id ? 'var(--glass-bg-subtle)' : 'transparent')
+                }}
+              >
+                {siteLabel(s)}
+              </div>
+            ))
+          )}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+};
+
 const FormSection = ({ title, children }) => (
   <div className="card glass" style={{ padding: '0.5rem 1.25rem', marginBottom: '1rem' }}>
     <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', padding: '0.85rem 0 0.25rem' }}>{title}</div>
@@ -188,6 +322,7 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
   const [uploadingStoragePhoto, setUploadingStoragePhoto] = useState(false);
   const [photoToDelete, setPhotoToDelete] = useState(null);
   const [deletingPhoto, setDeletingPhoto] = useState(false);
+  const [showUploadPendingConfirm, setShowUploadPendingConfirm] = useState(false);
   const [openLoan, setOpenLoan] = useState(null);
   // Set right after a successful create so the load effect below (which
   // re-runs because equipmentId just flipped from 'new' to a real id) skips
@@ -373,7 +508,7 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
       });
       const result = await response.json();
       if (response.ok) {
-        toast.success(result.message || 'อัปโหลดรูปสถานที่จัดเก็บสำเร็จ');
+        toast.success(result.message || 'อัปโหลดรูปสถานที่ติดตั้งหรือจัดเก็บสำเร็จ');
       } else {
         toast.error(result.message || result.error || 'อัปโหลดรูปไม่สำเร็จ');
       }
@@ -411,7 +546,23 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
       toast.error('MAC Address ไม่ถูกต้อง ต้องเป็นรูปแบบ AA:BB:CC:DD:EE:FF (ตัวพิมพ์ใหญ่) เท่านั้น');
       return;
     }
+    if (!formData.pea_site_id) {
+      toast.error('กรุณาเลือกสำนักงานการไฟฟ้า');
+      return;
+    }
 
+    // A photo/storage-photo upload is still in flight -- ask before saving,
+    // since the record would be saved without whatever image hasn't finished
+    // uploading yet.
+    if (uploadingPhotos || uploadingStoragePhoto) {
+      setShowUploadPendingConfirm(true);
+      return;
+    }
+
+    await saveEquipment();
+  };
+
+  const saveEquipment = async () => {
     setSaving(true);
     try {
       const params = new URLSearchParams();
@@ -456,6 +607,11 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleConfirmSaveAnyway = () => {
+    setShowUploadPendingConfirm(false);
+    saveEquipment();
   };
 
   return (
@@ -511,20 +667,14 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
 
           <FormSection title="สำนักงาน">
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.75rem 0' }}>
-              <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>สำนักงานการไฟฟ้า</label>
-              <select
-                name="pea_site_id"
-                value={formData.pea_site_id ?? ''}
-                onChange={handleChange}
-                style={fieldInputStyle}
-              >
-                <option value="">-- ไม่ระบุ --</option>
-                {sites.map(s => (
-                  <option key={s.id} value={s.id}>
-                    {s.pea_name}{s.pea_province ? ` (${s.pea_province})` : ''}
-                  </option>
-                ))}
-              </select>
+              <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                สำนักงานการไฟฟ้า<span style={{ color: 'var(--accent-danger)' }}> *</span>
+              </label>
+              <SiteSearchSelect
+                sites={sites}
+                value={formData.pea_site_id}
+                onChange={(id) => setFormData(prev => ({ ...prev, pea_site_id: id }))}
+              />
             </div>
           </FormSection>
 
@@ -612,16 +762,16 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
             ))}
             {isNew ? (
               <p style={{ padding: '0.75rem 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                บันทึกข้อมูลอุปกรณ์ก่อน จึงจะสามารถอัปโหลดรูปสถานที่จัดเก็บได้
+                บันทึกข้อมูลอุปกรณ์ก่อน จึงจะสามารถอัปโหลดรูปสถานที่ติดตั้งหรือจัดเก็บได้
               </p>
             ) : (
             <div style={{ padding: '0.75rem 0' }}>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>รูปสถานที่จัดเก็บ</label>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>รูปสถานที่ติดตั้งหรือจัดเก็บ</label>
               {formData.storage_photo ? (
                 <a href={buildImageUrl(formData.storage_photo, formData.updatedAt)} target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginBottom: '0.75rem' }}>
                   <img
                     src={buildImageUrl(formData.storage_photo, formData.updatedAt)}
-                    alt="รูปสถานที่จัดเก็บ"
+                    alt="รูปสถานที่ติดตั้งหรือจัดเก็บ"
                     style={{ width: '100px', height: '100px', objectFit: 'cover', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)' }}
                   />
                 </a>
@@ -750,6 +900,61 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
                 >
                   {deletingPhoto ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                   ลบรูป
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showUploadPendingConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem'
+            }}
+            onClick={() => setShowUploadPendingConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="card glass"
+              style={{ padding: '1.5rem', maxWidth: '320px', width: '100%', borderRadius: '0.75rem', textAlign: 'center' }}
+            >
+              <AlertTriangle size={36} color="var(--accent-warning)" style={{ margin: '0 auto 1rem' }} />
+              <p style={{ margin: '0 0 0.5rem', fontWeight: 700, fontSize: '0.95rem' }}>
+                ยังอัพโหลดรูปภาพไม่สำเร็จ
+              </p>
+              <p style={{ margin: '0 0 1.25rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                รูปภาพที่กำลังอัพโหลดอยู่จะไม่ถูกบันทึกหากยืนยันตอนนี้ ต้องการรอให้อัพโหลดเสร็จก่อน หรือบันทึกโดยไม่รอ?
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button
+                  onClick={() => setShowUploadPendingConfirm(false)}
+                  className="glass"
+                  style={{
+                    flex: 1, padding: '0.65rem', borderRadius: '0.5rem',
+                    border: '1px solid var(--border-subtle)', background: 'var(--card-bg)',
+                    color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer'
+                  }}
+                >
+                  รอ
+                </button>
+                <button
+                  onClick={handleConfirmSaveAnyway}
+                  className="glass"
+                  style={{
+                    flex: 1, padding: '0.65rem', borderRadius: '0.5rem', border: 'none',
+                    background: 'var(--accent-warning)', color: '#fff', fontWeight: 700, fontSize: '0.85rem', cursor: 'pointer'
+                  }}
+                >
+                  ยืนยัน
                 </button>
               </div>
             </motion.div>

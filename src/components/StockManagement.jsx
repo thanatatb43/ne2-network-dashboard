@@ -25,32 +25,47 @@ const STOCK_SITES = [
   { id: 200, name: 'แผนกคอมพิวเตอร์และเครือข่าย' }
 ];
 const STOCK_SITE_IDS = STOCK_SITES.map(s => s.id);
+const EXCLUDE_STOCK_SITES_PARAM = STOCK_SITE_IDS.join(',');
 
-const getSiteId = (item) => item.pea_site_id ?? item.pea_site?.id ?? null;
+// Fixed status list, matching the options office-equipment records are
+// created with (see OfficeEquipmentManagement's formFields) -- can't be
+// derived from the current page anymore since equipment is server-paginated.
+const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย'];
 
-// Which storage-location tab was active, kept outside React state so it
-// survives StockManagement unmounting -- clicking into an equipment's
+// Which storage-location tab/filters were active, kept outside React state so
+// they survive StockManagement unmounting -- clicking into an equipment's
 // details and back navigates through a different top-level tab in App.jsx,
 // which unmounts this component entirely and would otherwise reset the tab
-// back to the default every time.
+// and every filter back to their defaults on each visit.
 const ACTIVE_SITE_TAB_KEY = 'stock_active_site_tab';
+const SEARCH_TERM_KEY = 'stock_search_term';
+const STATUS_FILTER_KEY = 'stock_status_filter';
+const OTHER_SITE_FILTER_KEY = 'stock_other_site_filter';
+
 const readSavedSiteTab = () => {
   const saved = sessionStorage.getItem(ACTIVE_SITE_TAB_KEY);
   if (saved === 'other') return 'other';
   const n = Number(saved);
   return STOCK_SITE_IDS.includes(n) ? n : 198;
 };
+const readSaved = (key, fallback) => sessionStorage.getItem(key) ?? fallback;
 
 const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, onRequireLogin }) => {
   const canEdit = ['super_admin', 'computer_admin', 'network_admin', 'operator'].includes(user?.role);
   const canDelete = ['super_admin', 'computer_admin', 'network_admin'].includes(user?.role);
   const [equipment, setEquipment] = useState([]);
+  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 15, totalPages: 1 });
   const [loading, setLoading] = useState(true);
   const [activeSiteTab, setActiveSiteTab] = useState(readSavedSiteTab);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState('All');
-  const [statusFilter, setStatusFilter] = useState('All');
+  // searchInput is the raw, immediate textbox value; searchTerm is the
+  // debounced value actually sent to the API (see the debounce effect below).
+  const [searchInput, setSearchInput] = useState(() => readSaved(SEARCH_TERM_KEY, ''));
+  const [searchTerm, setSearchTerm] = useState(() => readSaved(SEARCH_TERM_KEY, ''));
+  const [statusFilter, setStatusFilter] = useState(() => readSaved(STATUS_FILTER_KEY, 'All'));
+  const [otherSiteFilter, setOtherSiteFilter] = useState(() => readSaved(OTHER_SITE_FILTER_KEY, 'all'));
   const [currentPage, setCurrentPage] = useState(1);
+  const [peaSites, setPeaSites] = useState([]);
+  const [tabCounts, setTabCounts] = useState({ 198: 0, 199: 0, 200: 0, other: 0 });
   const [qrItem, setQrItem] = useState(null);
   const [showPrintModal, setShowPrintModal] = useState(false);
   const [printQuantity, setPrintQuantity] = useState(1);
@@ -61,14 +76,54 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
   const [historyItem, setHistoryItem] = useState(null);
   const itemsPerPage = 15;
 
-  const fetchEquipment = async () => {
-    setLoading(true);
+  // Full PEA site directory -- used only to populate the "other" tab's site
+  // filter dropdown, since equipment is server-paginated now and can no
+  // longer be scanned locally for the distinct sites it contains.
+  const fetchPeaSites = async () => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/`, {
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/sites`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
       const result = await response.json();
-      if (result.success) setEquipment(result.data || []);
+      const list = result.data || result || [];
+      setPeaSites(Array.isArray(list) ? list : []);
+    } catch (error) {
+      console.error('Error fetching PEA sites:', error);
+    }
+  };
+
+  // The "other" tab has no single site id -- it means "not in any of the
+  // three storage-location sites" -- so it uses exclude_pea_site_id instead
+  // of pea_site_id, unless the user narrowed it down to one specific site.
+  const buildEquipmentQuery = (extra = {}) => {
+    const params = new URLSearchParams();
+    if (activeSiteTab === 'other') {
+      if (otherSiteFilter === 'all') {
+        params.append('exclude_pea_site_id', EXCLUDE_STOCK_SITES_PARAM);
+      } else {
+        params.append('pea_site_id', otherSiteFilter);
+      }
+    } else {
+      params.append('pea_site_id', String(activeSiteTab));
+    }
+    if (statusFilter !== 'All') params.append('status', statusFilter);
+    if (searchTerm.trim()) params.append('search', searchTerm.trim());
+    Object.entries(extra).forEach(([k, v]) => params.set(k, v));
+    return params;
+  };
+
+  const fetchEquipment = async () => {
+    setLoading(true);
+    try {
+      const params = buildEquipmentQuery({ page: String(currentPage), limit: String(itemsPerPage) });
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/?${params.toString()}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      const result = await response.json();
+      if (result.success) {
+        setEquipment(result.data || []);
+        if (result.pagination) setPagination(result.pagination);
+      }
     } catch (error) {
       console.error('Error fetching office equipment stock:', error);
     } finally {
@@ -76,73 +131,85 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
     }
   };
 
+  // Lightweight limit=1 requests -- only pagination.total is read from each
+  // -- used purely to populate the tab badge counts, independent of
+  // whichever filters/page are currently active on the visible tab.
+  const fetchTabCounts = async () => {
+    try {
+      const countFor = async (siteParams) => {
+        const params = new URLSearchParams({ ...siteParams, limit: '1' });
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/?${params.toString()}`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        const result = await res.json();
+        return result?.pagination?.total ?? 0;
+      };
+      const [c198, c199, c200, cOther] = await Promise.all([
+        countFor({ pea_site_id: '198' }),
+        countFor({ pea_site_id: '199' }),
+        countFor({ pea_site_id: '200' }),
+        countFor({ exclude_pea_site_id: EXCLUDE_STOCK_SITES_PARAM })
+      ]);
+      setTabCounts({ 198: c198, 199: c199, 200: c200, other: cOther });
+    } catch (error) {
+      console.error('Error fetching stock tab counts:', error);
+    }
+  };
+
   useEffect(() => {
-    fetchEquipment();
+    fetchPeaSites();
+    fetchTabCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // Equipment scoped to whichever storage-location tab is active.
-  const siteScopedEquipment = React.useMemo(() => {
-    return equipment.filter(item => {
-      const siteId = getSiteId(item);
-      return activeSiteTab === 'other'
-        ? !STOCK_SITE_IDS.includes(siteId)
-        : siteId === activeSiteTab;
-    });
-  }, [equipment, activeSiteTab]);
-
-  const siteTabCounts = React.useMemo(() => {
-    const counts = { other: 0 };
-    STOCK_SITE_IDS.forEach(id => { counts[id] = 0; });
-    equipment.forEach(item => {
-      const siteId = getSiteId(item);
-      if (STOCK_SITE_IDS.includes(siteId)) counts[siteId] += 1;
-      else counts.other += 1;
-    });
-    return counts;
-  }, [equipment]);
-
-  const equipmentTypes = React.useMemo(() => {
-    const types = new Set();
-    siteScopedEquipment.forEach(item => { if (item.equipment_type) types.add(item.equipment_type); });
-    return ['All', ...Array.from(types).sort()];
-  }, [siteScopedEquipment]);
-
-  const statuses = React.useMemo(() => {
-    const s = new Set();
-    siteScopedEquipment.forEach(item => { if (item.status) s.add(item.status); });
-    return ['All', ...Array.from(s).sort()];
-  }, [siteScopedEquipment]);
-
-  const filteredEquipment = React.useMemo(() => {
-    const q = searchTerm.trim().toLowerCase();
-    return siteScopedEquipment.filter(item => {
-      const matchesSearch = !q ||
-        (item.name || '').toLowerCase().includes(q) ||
-        (item.department || '').toLowerCase().includes(q) ||
-        (item.pea_site?.pea_name || '').toLowerCase().includes(q) ||
-        (item.ip_address || '').toLowerCase().includes(q);
-      const matchesType = typeFilter === 'All' || item.equipment_type === typeFilter;
-      const matchesStatus = statusFilter === 'All' || item.status === statusFilter;
-      return matchesSearch && matchesType && matchesStatus;
-    });
-  }, [siteScopedEquipment, searchTerm, typeFilter, statusFilter]);
-
-  useEffect(() => { setCurrentPage(1); }, [activeSiteTab, searchTerm, typeFilter, statusFilter]);
-
-  // A previously selected type/status may not exist in the newly active tab
-  // (the dropdown options are scoped per-tab), so reset them on tab switch.
   useEffect(() => {
-    setTypeFilter('All');
-    setStatusFilter('All');
-  }, [activeSiteTab]);
+    fetchEquipment();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, currentPage, activeSiteTab, otherSiteFilter, statusFilter, searchTerm]);
+
+  // Debounces free-text search into a single request instead of firing one
+  // per keystroke; lands together with the page-1 reset so they batch into
+  // one re-render instead of racing across two separate effects.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearchTerm(searchInput);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  const otherSites = React.useMemo(() => {
+    return peaSites
+      .filter(s => !STOCK_SITE_IDS.includes(s.id))
+      .map(s => ({ id: s.id, name: s.pea_name + (s.pea_province ? ` (${s.pea_province})` : '') }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  }, [peaSites]);
+
+  const handleSiteTabChange = (tab) => {
+    setActiveSiteTab(tab);
+    setCurrentPage(1);
+  };
+  const handleOtherSiteFilterChange = (value) => {
+    setOtherSiteFilter(value);
+    setCurrentPage(1);
+  };
+  const handleStatusFilterChange = (value) => {
+    setStatusFilter(value);
+    setCurrentPage(1);
+  };
 
   useEffect(() => {
     sessionStorage.setItem(ACTIVE_SITE_TAB_KEY, String(activeSiteTab));
   }, [activeSiteTab]);
-
-  const totalPages = Math.ceil(filteredEquipment.length / itemsPerPage);
-  const currentItems = filteredEquipment.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  useEffect(() => {
+    sessionStorage.setItem(SEARCH_TERM_KEY, searchInput);
+  }, [searchInput]);
+  useEffect(() => {
+    sessionStorage.setItem(STATUS_FILTER_KEY, statusFilter);
+  }, [statusFilter]);
+  useEffect(() => {
+    sessionStorage.setItem(OTHER_SITE_FILTER_KEY, otherSiteFilter);
+  }, [otherSiteFilter]);
 
   // Creates N blank equipment records (so each gets a real id), then opens a
   // dedicated print window with their QR codes laid out on A4 pages -- QR
@@ -191,6 +258,7 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
       setShowPrintModal(false);
       setPrintQuantity(1);
       await fetchEquipment();
+      fetchTabCounts();
     } catch (error) {
       console.error('Error creating blank equipment for QR printing:', error);
       toast.error('เกิดข้อผิดพลาดในการสร้างรายการสำหรับพิมพ์ QR');
@@ -281,7 +349,8 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
       const result = await response.json();
       if (response.ok) {
         toast.success(result.message || 'ลบอุปกรณ์สำเร็จ');
-        setEquipment(prev => prev.filter(item => item.id !== itemToDelete.id));
+        await fetchEquipment();
+        fetchTabCounts();
       } else {
         toast.error(result.message || result.error || 'ลบอุปกรณ์ไม่สำเร็จ');
       }
@@ -342,7 +411,7 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
         {STOCK_SITES.map(site => (
           <button
             key={site.id}
-            onClick={() => setActiveSiteTab(site.id)}
+            onClick={() => handleSiteTabChange(site.id)}
             className="glass"
             style={{
               padding: '0.6rem 1.1rem',
@@ -364,12 +433,12 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
               background: activeSiteTab === site.id ? 'var(--accent-primary)' : 'var(--glass-bg-subtle)',
               color: activeSiteTab === site.id ? '#fff' : 'var(--text-secondary)'
             }}>
-              {siteTabCounts[site.id] || 0}
+              {tabCounts[site.id] || 0}
             </span>
           </button>
         ))}
         <button
-          onClick={() => setActiveSiteTab('other')}
+          onClick={() => handleSiteTabChange('other')}
           className="glass"
           style={{
             padding: '0.6rem 1.1rem',
@@ -391,7 +460,7 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
             background: activeSiteTab === 'other' ? 'var(--accent-primary)' : 'var(--glass-bg-subtle)',
             color: activeSiteTab === 'other' ? '#fff' : 'var(--text-secondary)'
           }}>
-            {siteTabCounts.other || 0}
+            {tabCounts.other || 0}
           </span>
         </button>
       </div>
@@ -403,8 +472,8 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
             <input
               type="text"
               placeholder="ค้นหาชื่ออุปกรณ์ / แผนก / สำนักงาน / IP..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
               style={{
                 width: '100%',
                 padding: '0.6rem 0.6rem 0.6rem 2.5rem',
@@ -417,30 +486,34 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
             />
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--border-subtle)' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>
-            <select
-              value={typeFilter}
-              onChange={(e) => setTypeFilter(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
-            >
-              {equipmentTypes.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
+          {activeSiteTab === 'other' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--border-subtle)' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สำนักงาน:</span>
+              <select
+                value={otherSiteFilter}
+                onChange={(e) => handleOtherSiteFilterChange(e.target.value)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
+              >
+                <option value="all">ทั้งหมด</option>
+                {otherSites.map(s => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
+              </select>
+            </div>
+          )}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--border-subtle)' }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สถานะ:</span>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => handleStatusFilterChange(e.target.value)}
               style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
             >
-              {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+              <option value="All">All</option>
+              {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
 
           <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
-            แสดง <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{currentItems.length}</span> จาก <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{filteredEquipment.length}</span> รายการ
+            แสดง <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{equipment.length}</span> จาก <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.total}</span> รายการ
           </div>
         </div>
 
@@ -464,7 +537,7 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
                     <p style={{ marginTop: '1rem' }}>กำลังโหลดรายการอุปกรณ์...</p>
                   </td>
                 </tr>
-              ) : currentItems.length === 0 ? (
+              ) : equipment.length === 0 ? (
                 <tr>
                   <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
                     <Boxes size={40} style={{ opacity: 0.2, margin: '0 auto 1rem' }} />
@@ -472,7 +545,7 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
                   </td>
                 </tr>
               ) : (
-                currentItems.map((item) => (
+                equipment.map((item) => (
                   <tr
                     key={item.id}
                     onClick={() => onEquipmentClick && onEquipmentClick(item.id)}
@@ -562,7 +635,7 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
           </table>
         </div>
 
-        {!loading && totalPages > 1 && (
+        {!loading && pagination.totalPages > 1 && (
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', padding: '1.5rem', borderTop: '1px solid var(--border-subtle)' }}>
             <button
               disabled={currentPage === 1}
@@ -572,12 +645,12 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
               <ChevronLeft size={20} />
             </button>
             <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-              หน้า <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{currentPage}</span> จาก <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{totalPages}</span>
+              หน้า <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{currentPage}</span> จาก <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.totalPages}</span>
             </span>
             <button
-              disabled={currentPage === totalPages}
+              disabled={currentPage === pagination.totalPages}
               onClick={() => setCurrentPage(prev => prev + 1)}
-              style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.3 : 1 }}
+              style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === pagination.totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === pagination.totalPages ? 0.3 : 1 }}
             >
               <ChevronRight size={20} />
             </button>

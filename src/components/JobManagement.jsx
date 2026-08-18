@@ -3,19 +3,21 @@ import { toast } from 'react-hot-toast';
 import {
   ArrowLeft, Loader2, ChevronLeft, ChevronRight, Search,
   ArrowUpDown, ArrowUp, ArrowDown, ClipboardList, Wallet, FileText, Activity,
-  Plus, X, CheckSquare, Square, Check
+  Plus, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const JobManagement = ({ token, onBack, user }) => {
   // ----------------------------------------------------
-  // STATE 1: Global Jobs List
+  // STATE 1: Global Jobs List -- server-side paginated via
+  // GET /api/pea-jobs?pea_site_id=&page=&limit=
   // ----------------------------------------------------
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+  const [siteFilter, setSiteFilter] = useState('');
+  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, totalPages: 1 });
   const [sortConfig, setSortConfig] = useState({ key: 'id', direction: 'desc' });
 
   // ----------------------------------------------------
@@ -44,51 +46,38 @@ const JobManagement = ({ token, onBack, user }) => {
 
   // ----------------------------------------------------
   // STATE 4: Create Job Modal
+  // Budget-transaction search/selection is intentionally left out of the
+  // create form for now -- jobs are just created bare (name/site/description).
   // ----------------------------------------------------
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [sites, setSites] = useState([]);
   const [loadingSites, setLoadingSites] = useState(false);
   const [createSubmitting, setCreateSubmitting] = useState(false);
-  
+
   // Create Job Form fields
   const [newJobName, setNewJobName] = useState('');
   const [newJobDesc, setNewJobDesc] = useState('');
   const [selectedSite, setSelectedSite] = useState('');
-  const [selectedTxIds, setSelectedTxIds] = useState([]);
-
-  // Transaction Lookup in Modal
-  const [txYear, setTxYear] = useState(new Date().getFullYear().toString());
-  const [txCostCenterName, setTxCostCenterName] = useState('');
-  const [txClearingAccount, setTxClearingAccount] = useState('');
-  const [txClearingAccountName, setTxClearingAccountName] = useState('');
-  const [txUsername, setTxUsername] = useState('');
-  const [txReferenceDocNo, setTxReferenceDocNo] = useState('');
-  const [txDescription, setTxDescription] = useState('');
-  const [loadingTxSearch, setLoadingTxSearch] = useState(false);
-  const [searchedTransactions, setSearchedTransactions] = useState([]);
-  const [searchSelectors, setSearchSelectors] = useState({
-    year: [],
-    cost_center: [],
-    cost_center_name: [],
-    clearing_account: [],
-    clearing_account_name: [],
-    username: [],
-    reference_doc_no: [],
-    description: []
-  });
 
   // ----------------------------------------------------
-  // API FETCH: All Jobs
+  // API FETCH: All Jobs -- server-side paginated, optionally scoped to one
+  // PEA site via pea_site_id.
   // ----------------------------------------------------
   const fetchJobs = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs`, {
+      const params = new URLSearchParams();
+      if (siteFilter) params.append('pea_site_id', siteFilter);
+      params.append('page', String(currentPage));
+      params.append('limit', String(itemsPerPage));
+
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs?${params.toString()}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const result = await response.json();
       if (result.success) {
         setJobs(result.data || []);
+        if (result.pagination) setPagination(result.pagination);
       } else {
         setJobs(Array.isArray(result) ? result : []);
       }
@@ -102,9 +91,12 @@ const JobManagement = ({ token, onBack, user }) => {
 
   useEffect(() => {
     fetchJobs();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, itemsPerPage, siteFilter]);
 
-  // Fetch PEA sites from pea-jobs/sites endpoint
+  // Fetch PEA sites from pea-jobs/sites endpoint -- needed both for the main
+  // list's site filter and the create-job form's site dropdown, so it's
+  // loaded once up front rather than only when the create modal opens.
   const fetchSites = async () => {
     setLoadingSites(true);
     try {
@@ -113,7 +105,6 @@ const JobManagement = ({ token, onBack, user }) => {
       });
       const result = await response.json();
       const list = result.data || result || [];
-      // Deduplicate or map unique sites by pea_name
       setSites(list);
       if (list.length > 0 && !selectedSite) {
         setSelectedSite(list[0].id.toString());
@@ -126,95 +117,27 @@ const JobManagement = ({ token, onBack, user }) => {
     }
   };
 
-  const fetchSearchSelectors = async () => {
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/budgets/transactions/selectors`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await response.json();
-      if (result.success) {
-        setSearchSelectors({
-          year: [],
-          cost_center: [],
-          cost_center_name: result.data?.cost_center_name || [],
-          clearing_account: [],
-          clearing_account_name: [],
-          username: [],
-          reference_doc_no: [],
-          description: []
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching search selectors:', error);
-    }
+  useEffect(() => {
+    fetchSites();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSiteFilterChange = (value) => {
+    setSiteFilter(value);
+    setCurrentPage(1);
+  };
+
+  const handleLimitChange = (value) => {
+    setItemsPerPage(value);
+    setCurrentPage(1);
   };
 
   useEffect(() => {
     if (showCreateModal) {
-      fetchSites();
-      fetchSearchSelectors();
-      // Reset form on open
       setNewJobName('');
       setNewJobDesc('');
-      setSelectedTxIds([]);
-      setSearchedTransactions([]);
-      setTxYear(new Date().getFullYear().toString());
-      setTxCostCenterName('');
-      setTxClearingAccount('');
-      setTxClearingAccountName('');
-      setTxUsername('');
-      setTxReferenceDocNo('');
-      setTxDescription('');
     }
   }, [showCreateModal]);
-
-  // Lookup Transactions from /api/budgets/transactions/find
-  const handleLookupTransactions = async () => {
-    setLoadingTxSearch(true);
-    try {
-      const params = new URLSearchParams();
-      if (txYear) params.append('year', txYear);
-      if (txCostCenterName) params.append('cost_center_name', txCostCenterName);
-      if (txClearingAccount) params.append('clearing_account', txClearingAccount);
-      if (txClearingAccountName) params.append('clearing_account_name', txClearingAccountName);
-      if (txUsername) params.append('username', txUsername);
-      if (txReferenceDocNo) params.append('reference_doc_no', txReferenceDocNo);
-      if (txDescription) params.append('description', txDescription);
-
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/budgets/transactions/find`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: params.toString()
-      });
-      const result = await response.json();
-      if (result.success) {
-        setSearchedTransactions(result.data || []);
-        if ((result.data || []).length === 0) {
-          toast.error('ไม่พบรายการธุรกรรมที่ค้นหา');
-        }
-      } else {
-        setSearchedTransactions([]);
-        toast.error('ไม่พบรายการธุรกรรมที่ค้นหา');
-      }
-    } catch (error) {
-      console.error('Error finding transactions:', error);
-      toast.error('เกิดข้อผิดพลาดในการค้นหาธุรกรรม');
-    } finally {
-      setLoadingTxSearch(false);
-    }
-  };
-
-  // Toggle transaction selection
-  const handleToggleTx = (id) => {
-    if (selectedTxIds.includes(id)) {
-      setSelectedTxIds(prev => prev.filter(item => item !== id));
-    } else {
-      setSelectedTxIds(prev => [...prev, id]);
-    }
-  };
 
   // Submit Create PEA Job
   const handleCreateJobSubmit = async (e) => {
@@ -234,9 +157,6 @@ const JobManagement = ({ token, onBack, user }) => {
       params.append('pea_site_id', selectedSite);
       params.append('job_name', newJobName);
       params.append('job_description', newJobDesc);
-      selectedTxIds.forEach(id => {
-        params.append('budget_transaction_ids[]', id.toString());
-      });
 
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs`, {
         method: 'POST',
@@ -249,7 +169,7 @@ const JobManagement = ({ token, onBack, user }) => {
       
       const result = await response.json();
       if (response.ok || result.success) {
-        toast.success(result.message || 'สร้างงานและเชื่อมโยงธุรกรรมสำเร็จ');
+        toast.success(result.message || 'สร้างงานสำเร็จ');
         setShowCreateModal(false);
         fetchJobs();
       } else {
@@ -334,20 +254,12 @@ const JobManagement = ({ token, onBack, user }) => {
     setJobSortConfig({ key, direction });
   };
 
-  const filteredJobsList = jobs.filter(item => {
-    const search = searchTerm.toLowerCase();
-    return (
-      item.job_name?.toLowerCase().includes(search) ||
-      item.job_description?.toLowerCase().includes(search) ||
-      item.pea_site?.pea_name?.toLowerCase().includes(search) ||
-      item.pea_site?.pea_province?.toLowerCase().includes(search) ||
-      item.id?.toString().includes(search)
-    );
-  });
-
-  const sortedJobsList = [...filteredJobsList].sort((a, b) => {
+  // Jobs are already the current server-side page (and already scoped to
+  // siteFilter), so this only sorts what's visible -- no client-side
+  // filtering or slicing, that's all handled by the API now.
+  const sortedJobsList = [...jobs].sort((a, b) => {
     if (!sortConfig.key) return 0;
-    
+
     let aVal, bVal;
     if (sortConfig.key === 'pea_name') {
       aVal = a.pea_site?.pea_name || '';
@@ -367,9 +279,6 @@ const JobManagement = ({ token, onBack, user }) => {
     if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
     return 0;
   });
-
-  const currentItemsList = sortedJobsList.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-  const totalPagesList = Math.ceil(sortedJobsList.length / itemsPerPage);
 
   // ----------------------------------------------------
   // HANDLERS & FILTERS: Site Specific View
@@ -920,17 +829,24 @@ const JobManagement = ({ token, onBack, user }) => {
 
               {/* Controls Bar */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
                   <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
                     <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Show:</span>
-                    <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-                      {[10, 25, 50, 100].map(v => <option key={v} value={v} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{v}</option>)}
+                    <select value={itemsPerPage} onChange={(e) => handleLimitChange(Number(e.target.value))} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
+                      {[10, 20, 50, 100].map(v => <option key={v} value={v} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{v}</option>)}
                     </select>
                   </div>
-                </div>
-                <div style={{ position: 'relative', width: '300px' }}>
-                  <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-                  <input type="text" placeholder="ค้นหาชื่องาน รายละเอียด หรือสาขา..." value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }} style={{ width: '100%', padding: '0.6rem 1rem 0.6rem 2.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem', outline: 'none' }} />
+                  <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>สำนักงาน:</span>
+                    <select value={siteFilter} onChange={(e) => handleSiteFilterChange(e.target.value)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
+                      <option value="" style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>ทั้งหมด</option>
+                      {sites.map(s => (
+                        <option key={s.id} value={s.id} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>
+                          {s.pea_name}{s.province ? ` (${s.province})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -970,14 +886,14 @@ const JobManagement = ({ token, onBack, user }) => {
                           <p style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>กำลังโหลดข้อมูลงาน...</p>
                         </td>
                       </tr>
-                    ) : currentItemsList.length === 0 ? (
+                    ) : sortedJobsList.length === 0 ? (
                       <tr>
                         <td colSpan="7" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
                           ไม่พบข้อมูลงานในระบบ
                         </td>
                       </tr>
                     ) : (
-                      currentItemsList.map((item) => (
+                      sortedJobsList.map((item) => (
                         <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }} className="table-row-hover">
                           <td style={{ padding: '1rem 1.5rem', fontWeight: 600 }}>{item.id}</td>
                           <td style={{ padding: '1rem 1.5rem', fontWeight: 500 }}>{item.job_name}</td>
@@ -1035,11 +951,11 @@ const JobManagement = ({ token, onBack, user }) => {
                 </table>
               </div>
 
-              {/* Pagination */}
-              {!loading && totalPagesList > 1 && (
+              {/* Pagination -- driven by the API's own pagination object */}
+              {!loading && pagination.totalPages > 1 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)', marginTop: '1rem' }}>
                   <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    แสดง {((currentPage - 1) * itemsPerPage) + 1} ถึง {Math.min(currentPage * itemsPerPage, sortedJobsList.length)} จาก {sortedJobsList.length} รายการ
+                    แสดง {((pagination.page - 1) * pagination.limit) + 1} ถึง {Math.min(pagination.page * pagination.limit, pagination.total)} จาก {pagination.total} รายการ
                   </span>
                   <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                     <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="glass" style={{ padding: '0.4rem', border: 'none', cursor: 'pointer', opacity: currentPage === 1 ? 0.3 : 1 }}><ChevronLeft size={16} /></button>
@@ -1050,12 +966,12 @@ const JobManagement = ({ token, onBack, user }) => {
                       className="glass"
                       style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', padding: '0.2rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', outline: 'none' }}
                     >
-                      {Array.from({ length: totalPagesList }, (_, i) => i + 1).map(p => (
-                        <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>หน้า {p} จาก {totalPagesList}</option>
+                      {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map(p => (
+                        <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>หน้า {p} จาก {pagination.totalPages}</option>
                       ))}
                     </select>
 
-                    <button onClick={() => setCurrentPage(p => Math.min(totalPagesList, p + 1))} disabled={currentPage === totalPagesList} className="glass" style={{ padding: '0.4rem', border: 'none', cursor: 'pointer', opacity: currentPage === totalPagesList ? 0.3 : 1 }}><ChevronRight size={16} /></button>
+                    <button onClick={() => setCurrentPage(p => Math.min(pagination.totalPages, p + 1))} disabled={currentPage === pagination.totalPages} className="glass" style={{ padding: '0.4rem', border: 'none', cursor: 'pointer', opacity: currentPage === pagination.totalPages ? 0.3 : 1 }}><ChevronRight size={16} /></button>
                   </div>
                 </div>
               )}
@@ -1134,161 +1050,6 @@ const JobManagement = ({ token, onBack, user }) => {
                     placeholder="เช่น MA Printer" 
                     style={{ width: '100%', padding: '0.6rem 1rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem', outline: 'none' }}
                   />
-                </div>
-
-                {/* SEARCH TRANSACTIONS SECTION */}
-                <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '1.5rem', marginTop: '1.5rem', marginBottom: '1.5rem' }}>
-                  <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem' }} className="krub-semibold">เลือกรายการธุรกรรมงบประมาณ</h3>
-                  
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem', fontWeight: 600 }}>ปีงบประมาณ</label>
-                      <input 
-                        type="text" 
-                        value={txYear} 
-                        onChange={(e) => setTxYear(e.target.value)} 
-                        placeholder="เช่น 2026"
-                        style={{ width: '100%', padding: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.4rem', outline: 'none', fontSize: '0.85rem' }} 
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem', fontWeight: 600 }}>เลขที่เอกสาร</label>
-                      <input 
-                        type="text" 
-                        placeholder="เช่น 2000000522" 
-                        value={txReferenceDocNo} 
-                        onChange={(e) => setTxReferenceDocNo(e.target.value)} 
-                        style={{ width: '100%', padding: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.4rem', outline: 'none', fontSize: '0.85rem' }} 
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem', fontWeight: 600 }}>ผู้บันทึก</label>
-                      <input 
-                        type="text" 
-                        placeholder="เช่น E2DUDSSL02" 
-                        value={txUsername} 
-                        onChange={(e) => setTxUsername(e.target.value)} 
-                        style={{ width: '100%', padding: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.4rem', outline: 'none', fontSize: '0.85rem' }} 
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem', fontWeight: 600 }}>ชื่อศูนย์ต้นทุน</label>
-                      <input 
-                        type="text" 
-                        placeholder="เช่น บำรุง/ค-IT" 
-                        value={txCostCenterName} 
-                        onChange={(e) => setTxCostCenterName(e.target.value)} 
-                        list="modal-tx-cost-center-names"
-                        style={{ width: '100%', padding: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.4rem', outline: 'none', fontSize: '0.85rem' }} 
-                      />
-                      <datalist id="modal-tx-cost-center-names">
-                        {searchSelectors.cost_center_name?.map((n, i) => (
-                          <option key={i} value={String(n)}>{n}</option>
-                        ))}
-                      </datalist>
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem', fontWeight: 600 }}>บัญชีหักล้าง</label>
-                      <input 
-                        type="text" 
-                        placeholder="เช่น 833065" 
-                        value={txClearingAccount} 
-                        onChange={(e) => setTxClearingAccount(e.target.value)} 
-                        style={{ width: '100%', padding: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.4rem', outline: 'none', fontSize: '0.85rem' }} 
-                      />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem', fontWeight: 600 }}>ชื่อบัญชีหักล้าง</label>
-                      <input 
-                        type="text" 
-                        placeholder="เช่น เทค" 
-                        value={txClearingAccountName} 
-                        onChange={(e) => setTxClearingAccountName(e.target.value)} 
-                        style={{ width: '100%', padding: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.4rem', outline: 'none', fontSize: '0.85rem' }} 
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', marginBottom: '1.5rem' }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.3rem', fontWeight: 600 }}>คำอธิบาย / รายละเอียด</label>
-                      <input 
-                        type="text" 
-                        placeholder="เช่น บำรุงกล้อง..." 
-                        value={txDescription} 
-                        onChange={(e) => setTxDescription(e.target.value)} 
-                        style={{ width: '100%', padding: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.4rem', outline: 'none', fontSize: '0.85rem' }} 
-                      />
-                    </div>
-                    <button 
-                      type="button"
-                      onClick={handleLookupTransactions}
-                      disabled={loadingTxSearch}
-                      className="glass font-bold"
-                      style={{
-                        padding: '0.55rem 1.5rem', background: 'rgba(245, 158, 11, 0.1)',
-                        border: '1px solid rgba(245, 158, 11, 0.3)', color: 'var(--accent-warning)',
-                        borderRadius: '0.4rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem', height: '35px'
-                      }}
-                    >
-                      {loadingTxSearch ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />} ค้นหาธุรกรรม
-                    </button>
-                  </div>
-
-                  {/* Transactions selection box */}
-                  <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: '0.5rem', background: 'rgba(0,0,0,0.2)' }}>
-                    {searchedTransactions.length === 0 ? (
-                      <p style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)', margin: 0, fontSize: '0.85rem' }}>
-                        ใช้เครื่องมือค้นหาธุรกรรมงบประมาณข้างต้นเพื่อทำการเลือกรายการ
-                      </p>
-                    ) : (
-                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8rem' }}>
-                        <thead>
-                          <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                            <th style={{ padding: '0.5rem 1rem', width: '50px', textAlign: 'center' }}>เลือก</th>
-                            <th style={{ padding: '0.5rem 1rem' }}>เลขเอกสารอ้างอิง</th>
-                            <th style={{ padding: '0.5rem 1rem' }}>รายละเอียด</th>
-                            <th style={{ padding: '0.5rem 1rem' }}>ผู้ใช้</th>
-                            <th style={{ padding: '0.5rem 1rem', textAlign: 'right' }}>จำนวนเงิน</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {searchedTransactions.map(t => {
-                            const isChecked = selectedTxIds.includes(t.id);
-                            return (
-                              <tr 
-                                key={t.id} 
-                                onClick={() => handleToggleTx(t.id)}
-                                style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', cursor: 'pointer', background: isChecked ? 'rgba(245,158,11,0.05)' : 'none' }}
-                                className="table-row-hover"
-                              >
-                                <td style={{ padding: '0.5rem 1rem', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleToggleTx(t.id)}
-                                    style={{ background: 'none', border: 'none', color: isChecked ? 'var(--accent-warning)' : 'var(--text-secondary)', cursor: 'pointer', padding: 0 }}
-                                  >
-                                    {isChecked ? <CheckSquare size={18} /> : <Square size={18} />}
-                                  </button>
-                                </td>
-                                <td style={{ padding: '0.5rem 1rem', fontFamily: 'monospace' }}>{t.reference_doc_no}</td>
-                                <td style={{ padding: '0.5rem 1rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.description}>{t.description}</td>
-                                <td style={{ padding: '0.5rem 1rem' }}>{t.username || '-'}</td>
-                                <td style={{ padding: '0.5rem 1rem', textAlign: 'right', fontWeight: 600, color: parseFloat(t.value_co_curr || 0) < 0 ? 'var(--accent-success)' : 'var(--accent-warning)' }}>
-                                  ฿{parseFloat(t.value_co_curr || 0).toLocaleString()}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                  {selectedTxIds.length > 0 && (
-                    <div style={{ marginTop: '0.5rem', fontSize: '0.85rem', color: 'var(--accent-warning)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <Check size={16} /> เลือกแล้ว {selectedTxIds.length} รายการธุรกรรมที่จะนำเข้า
-                    </div>
-                  )}
                 </div>
 
                 {/* MODAL ACTIONS */}

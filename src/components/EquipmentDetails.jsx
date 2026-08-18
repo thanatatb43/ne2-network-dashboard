@@ -276,15 +276,15 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
             );
           })()}
 
-          <Section title="ที่จัดเก็บ">
-            <InfoRow icon={Archive} label="สถานที่จัดเก็บ" value={equipment.storage_location} />
+          <Section title="ที่ติดตั้งหรือจัดเก็บ">
+            <InfoRow icon={Archive} label="สถานที่ติดตั้งหรือจัดเก็บ" value={equipment.storage_location} />
             {equipment.storage_photo && (
               <div style={{ padding: '0.85rem 0' }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>รูปสถานที่จัดเก็บ</div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>รูปสถานที่ติดตั้งหรือจัดเก็บ</div>
                 <a href={buildImageUrl(equipment.storage_photo, equipment.updatedAt)} target="_blank" rel="noreferrer">
                   <img
                     src={buildImageUrl(equipment.storage_photo, equipment.updatedAt)}
-                    alt="รูปสถานที่จัดเก็บ"
+                    alt="รูปสถานที่ติดตั้งหรือจัดเก็บ"
                     style={{ width: '100px', height: '100px', objectFit: 'cover', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)' }}
                   />
                 </a>
