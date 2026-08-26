@@ -112,6 +112,13 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
   const [loadingSites, setLoadingSites] = useState(true);
   const [sitesSummary, setSitesSummary] = useState([]);
   const [siteSearch, setSiteSearch] = useState('');
+  // Client-side pagination for the sites list -- /api/pea-sites/summary
+  // returns the full ~200-site list in one shot (no server paging), so
+  // there was nothing to slice it down for display; kept separate from
+  // currentPage/itemsPerPage below since those are reset on every site
+  // selection and are for the equipment-within-a-site list instead.
+  const [sitesPage, setSitesPage] = useState(1);
+  const [sitesPerPage, setSitesPerPage] = useState(20);
 
   const [loadingEquipment, setLoadingEquipment] = useState(false);
   const [equipment, setEquipment] = useState([]);
@@ -175,6 +182,16 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
       (s.pea_province && s.pea_province.toLowerCase().includes(q))
     );
   }, [sites, siteSearch]);
+
+  const sitesTotalPages = Math.max(1, Math.ceil(filteredSites.length / sitesPerPage));
+  const paginatedSites = React.useMemo(
+    () => filteredSites.slice((sitesPage - 1) * sitesPerPage, sitesPage * sitesPerPage),
+    [filteredSites, sitesPage, sitesPerPage]
+  );
+
+  useEffect(() => {
+    setSitesPage(1);
+  }, [siteSearch, sitesPerPage]);
 
   // Resolved once the site list has loaded; may briefly be null right after a
   // deep-link / back-navigation lands on a site's URL before sites finish fetching.
@@ -473,7 +490,7 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
                         </td>
                       </tr>
                     ) : (
-                      filteredSites.map(site => (
+                      paginatedSites.map(site => (
                         <tr
                           key={site.id}
                           onClick={() => handleSiteClick(site)}
@@ -503,6 +520,42 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
                   </tbody>
                 </table>
               </div>
+
+              {/* Pagination -- client-side, since /api/pea-sites/summary
+                  returns the whole ~200-site list in one shot. */}
+              {!loadingSites && filteredSites.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid var(--border-subtle)', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                    แสดง {(sitesPage - 1) * sitesPerPage + 1} ถึง {Math.min(sitesPage * sitesPerPage, filteredSites.length)} จาก {filteredSites.length} รายการ
+                  </span>
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                    <select
+                      value={sitesPerPage}
+                      onChange={(e) => setSitesPerPage(Number(e.target.value))}
+                      className="glass"
+                      style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', padding: '0.3rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', outline: 'none' }}
+                    >
+                      {[10, 20, 50, 100].map(n => (
+                        <option key={n} value={n} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>แสดง {n}</option>
+                      ))}
+                    </select>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button onClick={() => setSitesPage(p => Math.max(1, p - 1))} disabled={sitesPage === 1} className="glass" style={{ padding: '0.4rem', border: 'none', cursor: 'pointer', opacity: sitesPage === 1 ? 0.3 : 1 }}><ChevronLeft size={16} /></button>
+                      <select
+                        value={sitesPage}
+                        onChange={(e) => setSitesPage(Number(e.target.value))}
+                        className="glass"
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', padding: '0.2rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', outline: 'none' }}
+                      >
+                        {Array.from({ length: sitesTotalPages }, (_, i) => i + 1).map(p => (
+                          <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>หน้า {p} จาก {sitesTotalPages}</option>
+                        ))}
+                      </select>
+                      <button onClick={() => setSitesPage(p => Math.min(sitesTotalPages, p + 1))} disabled={sitesPage === sitesTotalPages} className="glass" style={{ padding: '0.4rem', border: 'none', cursor: 'pointer', opacity: sitesPage === sitesTotalPages ? 0.3 : 1 }}><ChevronRight size={16} /></button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </motion.div>
         ) : (
@@ -865,7 +918,16 @@ const OfficeEquipmentManagement = ({ token, onBack, user, selectedSiteId = null,
                       >
                         <ChevronLeft size={16} />
                       </button>
-                      <span style={{ fontSize: '0.85rem', padding: '0 0.5rem' }}>Page {currentPage} of {totalPages}</span>
+                      <select
+                        value={currentPage}
+                        onChange={(e) => setCurrentPage(Number(e.target.value))}
+                        className="glass"
+                        style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', padding: '0.2rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', outline: 'none' }}
+                      >
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                          <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>หน้า {p} จาก {totalPages}</option>
+                        ))}
+                      </select>
                       <button
                         onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                         disabled={currentPage === totalPages}

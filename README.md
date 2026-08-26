@@ -42,7 +42,12 @@ VITE_API_BASE_URL=http://<backend-host>:<port>
 | `DownDevices.jsx`, `DowntimeHistory.jsx` | อุปกรณ์ที่ offline ตอนนี้ / ประวัติการขัดข้อง |
 | `Analytics.jsx` | Speedtest (ping/download/upload) + IP/endpoint diagnostics |
 | `BudgetDashboard.jsx`, `BudgetManagement.jsx` | ภาพรวม/CRUD งบประมาณ + อัปโหลด transaction จาก Excel/CSV |
-| `JobManagement.jsx` | ผูกธุรกรรมงบประมาณหลายรายการเข้าเป็น "งาน" ต่อสำนักงาน |
+| `JobReport.jsx` | หน้า "แจ้งปัญหา" สาธารณะ (ไม่ต้อง login เพื่อดู) — แจ้งงานใหม่ (ต้อง login) + ติดตามสถานะ |
+| `JobManagement.jsx` | หน้าหลังบ้าน (ใน "การจัดการ") สำหรับประมวลผลงานตามสถานะ: เปิดงาน → ระหว่างดำเนินการ → เสร็จงาน / ยกเลิก — แต่ละแถวมีปุ่มดูประวัติ/แก้ไข/ลบ (สิทธิ์ต่างกันตาม role) |
+| `JobFormModal.jsx` | ฟอร์มแจ้งงาน/แก้ไขงาน ใช้ร่วมกันทั้ง `JobReport.jsx` (สร้าง) และ `JobManagement.jsx` (แก้ไข) — ฟิลด์ที่แก้ไขได้ต่างกันตาม role เมื่อแก้ไขงานที่มีอยู่แล้ว |
+| `JobHistoryModal.jsx` | ประวัติ/audit log ของงาน (`GET /:id/history`) เปิดจากปุ่มไอคอนในแต่ละแถวของ `JobManagement.jsx` |
+| `EquipmentPicker.jsx` | ตัวเลือกอุปกรณ์แบบค้นหา+เลือกหลายชิ้น ใช้ทั้งอุปกรณ์ที่มีปัญหา (ตอนเปิดงาน) และอุปกรณ์ที่ใช้ดำเนินการ (ตอนปิดงาน) |
+| `BudgetTransactionPicker.jsx` | ค้นหา+เลือกธุรกรรมงบประมาณที่มีอยู่แล้วเพื่อผูกกับงาน ใช้ในหน้าต่างปิดงานของ `JobManagement.jsx` |
 | `Management.jsx`, `OfficeEquipmentManagement.jsx` | หน้ารวมเมนูจัดการ + จัดการอุปกรณ์สำนักงาน (คอมพิวเตอร์/ปริ้นเตอร์ ฯลฯ แยกจากอุปกรณ์เครือข่าย) |
 | `AdminSettings.jsx` | จัดการผู้ใช้ระบบ |
 | `Auth.jsx`, `SsoCallback.jsx` | login/register ปกติ + PEA SSO (ดู [SSO.md](SSO.md)) |
@@ -95,9 +100,9 @@ VITE_API_BASE_URL=http://<backend-host>:<port>
 
 **Budgets**: `/api/budgets`, `/api/budgets/:id`, `/api/budgets/selectors`, `/api/budgets/summary/:year`, `/api/budgets/upload-transactions`, `/api/budgets/transactions`, `/api/budgets/transactions/selectors`, `/api/budgets/transactions/find`
 
-**PEA Jobs**: `/api/pea-jobs`, `/api/pea-jobs/:id`, `/api/pea-jobs/sites`, `/api/pea-jobs/site/:id`
+**PEA Jobs**: `/api/pea-jobs` (GET แบบแบ่งหน้า/filter, POST สร้างงานใหม่ — ต้อง login), `/api/pea-jobs/:id` (GET รายละเอียด; PUT แก้ไข — ฟิลด์ job_name/job_description/job_type/priority/department/requester_*/notification_doc_no แก้ได้ทุก role ใน canManageWorkflow, ส่วน pea_site_id/status/progress_notes/work_order_no/closing_notes/cancelled_reason/notification_doc_file/completion_report_file แก้ได้เฉพาะ super_admin; DELETE ลบงาน — super_admin เท่านั้น), `/api/pea-jobs/:id/history` (GET ประวัติ/audit log ของงาน — role: super_admin/network_admin/computer_admin/operator), `/api/pea-jobs/:id/progress` (PUT, `assignees: [{ name, emp_id }, ...]` รองรับผู้รับผิดชอบหลายคน), `/api/pea-jobs/:id/complete` (PUT, multipart/form-data — `closing_notes` text field required, `completion_report` ไฟล์เดียว รูป/PDF ≤5MB ไม่บังคับ, เก็บไว้ที่ `completion_report_file`), `/api/pea-jobs/:id/cancel` (PUT, บังคับลำดับสถานะ, จำกัด role: super_admin/network_admin/computer_admin/operator), `/api/pea-jobs/:id/notification-doc` (POST, multipart, ไฟล์เดียว รูป/PDF ≤5MB), `/api/pea-jobs/:id/equipment` (POST, บันทึกอุปกรณ์ที่ใช้ดำเนินการ — คนละอันกับ problem_equipment), `/api/pea-jobs/:id/after-photos` (POST, multipart, สูงสุด 5 รูป ≤5MB/รูป), `/api/pea-jobs/transactions` (POST, ผูกธุรกรรมงบประมาณที่มีอยู่แล้วเข้ากับงาน), `/api/pea-jobs/sites`, `/api/pea-jobs/site/:id`
 
-**Office Equipment**: `/api/office-equipment/`, `/api/office-equipment/:id`, `/api/office-equipment/site/:pea_site_id` (ส่ง `network_ip` ของสำนักงานมาด้วย — `main`/`secondary_172`/`secondary_10`/`dhcp_range`)
+**Office Equipment**: `/api/office-equipment/`, `/api/office-equipment/:id`, `/api/office-equipment/site/:pea_site_id` (ส่ง `network_ip` ของสำนักงานมาด้วย — `main`/`secondary_172`/`secondary_10`/`dhcp_range`; ทั้งสามตัวนี้ยังส่ง `jobs` — งาน PEA Job ที่นำอุปกรณ์นี้ไปใช้ดำเนินการ — และ `problem_jobs` — งานที่แจ้งว่าอุปกรณ์นี้มีปัญหา คือประวัติการซ่อมจริง — แสดงเฉพาะใน `EquipmentDetails.jsx`, ไม่ได้ใส่ในหน้า list), `/api/office-equipment/search` (POST, ไม่ต้อง login — ค้นหาแบบ AND จากฟิลด์ใดก็ได้ผ่าน body แทน query string)
 
 **Stats**: `/api/stats/track`, `/api/stats/summary`
 

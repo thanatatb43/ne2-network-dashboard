@@ -9,6 +9,10 @@ import QrCodeModal from './QrCodeModal';
 // Fits neatly on one A4 page at a readable size (2 columns x 3 rows).
 const QR_PER_PAGE = 6;
 
+// Single-line ellipsis truncation for table cells -- full text still
+// available via the wrapping <span>'s title attribute on hover.
+const truncateStyle = { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+
 const statusColor = (status) => {
   const s = (status || '').trim();
   if (s === 'ใช้งาน') return 'var(--accent-success)';
@@ -40,7 +44,8 @@ const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 
 const ACTIVE_SITE_TAB_KEY = 'stock_active_site_tab';
 const SEARCH_TERM_KEY = 'stock_search_term';
 const STATUS_FILTER_KEY = 'stock_status_filter';
-const OTHER_SITE_FILTER_KEY = 'stock_other_site_filter';
+const OTHER_SITE_INPUT_KEY = 'stock_other_site_input';
+const SELECTED_IDS_KEY = 'stock_selected_ids';
 
 const readSavedSiteTab = () => {
   const saved = sessionStorage.getItem(ACTIVE_SITE_TAB_KEY);
@@ -49,6 +54,19 @@ const readSavedSiteTab = () => {
   return STOCK_SITE_IDS.includes(n) ? n : 198;
 };
 const readSaved = (key, fallback) => sessionStorage.getItem(key) ?? fallback;
+
+// Clicking a row navigates to EquipmentDetails.jsx through a different
+// top-level tab in App.jsx, which unmounts StockManagement entirely -- so a
+// plain useState for the QR selection was wiped out by that navigation,
+// same reason the filters above already go through sessionStorage instead.
+const readSavedSelectedIds = () => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SELECTED_IDS_KEY) || '[]');
+    return new Set(Array.isArray(saved) ? saved : []);
+  } catch {
+    return new Set();
+  }
+};
 
 const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, onRequireLogin }) => {
   const canEdit = ['super_admin', 'computer_admin', 'network_admin', 'operator'].includes(user?.role);
@@ -62,7 +80,12 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
   const [searchInput, setSearchInput] = useState(() => readSaved(SEARCH_TERM_KEY, ''));
   const [searchTerm, setSearchTerm] = useState(() => readSaved(SEARCH_TERM_KEY, ''));
   const [statusFilter, setStatusFilter] = useState(() => readSaved(STATUS_FILTER_KEY, 'All'));
-  const [otherSiteFilter, setOtherSiteFilter] = useState(() => readSaved(OTHER_SITE_FILTER_KEY, 'all'));
+  // สำนักงาน filter (in the "other" tab) is a typeable <input list> +
+  // <datalist> combo instead of a plain <select> -- only an exact match
+  // against a known site's label resolves to the id actually sent as
+  // ?pea_site_id=; partial typing just leaves it at 'all' (no site filter).
+  const [otherSiteInput, setOtherSiteInput] = useState(() => readSaved(OTHER_SITE_INPUT_KEY, ''));
+  const [otherSiteFilter, setOtherSiteFilter] = useState('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [peaSites, setPeaSites] = useState([]);
   const [tabCounts, setTabCounts] = useState({ 198: 0, 199: 0, 200: 0, other: 0 });
@@ -74,6 +97,11 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
   const [deleting, setDeleting] = useState(false);
   const [borrowItem, setBorrowItem] = useState(null);
   const [historyItem, setHistoryItem] = useState(null);
+  // Checkbox selection for batch-printing QR codes of EXISTING equipment --
+  // separate from showPrintModal's flow above, which creates brand-new blank
+  // records first. A Set (not scoped to the current page) so a selection
+  // survives paging through the list before printing everything at once.
+  const [selectedIds, setSelectedIds] = useState(readSavedSelectedIds);
   const itemsPerPage = 15;
 
   // Full PEA site directory -- used only to populate the "other" tab's site
@@ -185,12 +213,20 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
       .sort((a, b) => a.name.localeCompare(b.name, 'th'));
   }, [peaSites]);
 
+  // Only resolves to a real pea_site_id once the typed text exactly matches
+  // a known site's label (i.e. the user picked a datalist suggestion or
+  // typed the full name) -- partial text just leaves the filter at 'all'.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const match = otherSites.find(s => s.name === otherSiteInput);
+      setOtherSiteFilter(match ? String(match.id) : 'all');
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [otherSiteInput, otherSites]);
+
   const handleSiteTabChange = (tab) => {
     setActiveSiteTab(tab);
-    setCurrentPage(1);
-  };
-  const handleOtherSiteFilterChange = (value) => {
-    setOtherSiteFilter(value);
     setCurrentPage(1);
   };
   const handleStatusFilterChange = (value) => {
@@ -208,8 +244,11 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
     sessionStorage.setItem(STATUS_FILTER_KEY, statusFilter);
   }, [statusFilter]);
   useEffect(() => {
-    sessionStorage.setItem(OTHER_SITE_FILTER_KEY, otherSiteFilter);
-  }, [otherSiteFilter]);
+    sessionStorage.setItem(OTHER_SITE_INPUT_KEY, otherSiteInput);
+  }, [otherSiteInput]);
+  useEffect(() => {
+    sessionStorage.setItem(SELECTED_IDS_KEY, JSON.stringify(Array.from(selectedIds)));
+  }, [selectedIds]);
 
   // Creates N blank equipment records (so each gets a real id), then opens a
   // dedicated print window with their QR codes laid out on A4 pages -- QR
@@ -337,6 +376,39 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
     printWindow.document.close();
   };
 
+  const toggleSelected = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Header checkbox toggles just the CURRENT page's items -- selections made
+  // on other pages before/after are left untouched either way.
+  const allOnPageSelected = equipment.length > 0 && equipment.every(item => selectedIds.has(item.id));
+  const toggleSelectPage = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (allOnPageSelected) {
+        equipment.forEach(item => next.delete(item.id));
+      } else {
+        equipment.forEach(item => next.add(item.id));
+      }
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+
+  // These items already exist (unlike handleConfirmPrint's flow, which
+  // creates blank ones first), so printing their QR codes is just opening
+  // the same print window directly with the selected ids.
+  const handlePrintSelected = () => {
+    if (selectedIds.size === 0) return;
+    openQrPrintWindow(Array.from(selectedIds));
+  };
+
   const handleConfirmDelete = async () => {
     if (!canDelete || !itemToDelete) return;
 
@@ -378,33 +450,62 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
           <ArrowLeft size={16} /> กลับไปยัง Overview
         </button>
 
-        {canEdit && (
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button
-              onClick={() => setShowPrintModal(true)}
-              className="glass"
-              style={{
-                padding: '0.5rem 1.1rem', borderRadius: '0.5rem',
-                border: '1px solid var(--accent-primary)', background: 'var(--bg-accent-subtle)',
-                color: 'var(--accent-primary)', fontWeight: 600,
-                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem'
-              }}
-            >
-              <Printer size={16} /> พิมพ์ QR-Code
-            </button>
-            <button
-              onClick={() => onAddStock && onAddStock(activeSiteTab !== 'other' ? activeSiteTab : null)}
-              className="glass"
-              style={{
-                padding: '0.5rem 1.1rem', borderRadius: '0.5rem', border: 'none',
-                background: 'var(--accent-primary)', color: '#fff', fontWeight: 600,
-                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem'
-              }}
-            >
-              <Plus size={16} /> เพิ่ม Stock
-            </button>
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          {selectedIds.size > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem 0.4rem 1rem', borderRadius: '0.5rem', background: 'var(--bg-accent-subtle)', border: '1px solid var(--accent-primary)' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--accent-primary)' }}>เลือกแล้ว {selectedIds.size} รายการ</span>
+              <button
+                onClick={handlePrintSelected}
+                style={{
+                  padding: '0.4rem 0.9rem', borderRadius: '0.4rem', border: 'none',
+                  background: 'var(--accent-primary)', color: '#fff', fontWeight: 600, fontSize: '0.85rem',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem'
+                }}
+              >
+                <Printer size={14} /> พิมพ์ QR ที่เลือก
+              </button>
+              <button
+                onClick={clearSelection}
+                title="ล้างการเลือก"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: '1.8rem', height: '1.8rem', padding: 0, borderRadius: '0.4rem',
+                  border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer'
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
+          {canEdit && (
+            <>
+              <button
+                onClick={() => setShowPrintModal(true)}
+                className="glass"
+                title="สร้างรายการอุปกรณ์ใหม่ (ยังไม่กรอกข้อมูล) แล้วพิมพ์ QR ไว้ล่วงหน้า"
+                style={{
+                  padding: '0.5rem 1.1rem', borderRadius: '0.5rem',
+                  border: '1px solid var(--accent-primary)', background: 'var(--bg-accent-subtle)',
+                  color: 'var(--accent-primary)', fontWeight: 600,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem'
+                }}
+              >
+                <Printer size={16} /> พิมพ์ QR-Code (สร้างใหม่)
+              </button>
+              <button
+                onClick={() => onAddStock && onAddStock(activeSiteTab !== 'other' ? activeSiteTab : null)}
+                className="glass"
+                style={{
+                  padding: '0.5rem 1.1rem', borderRadius: '0.5rem', border: 'none',
+                  background: 'var(--accent-primary)', color: '#fff', fontWeight: 600,
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem'
+                }}
+              >
+                <Plus size={16} /> เพิ่ม Stock
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
@@ -489,18 +590,21 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
           {activeSiteTab === 'other' && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem',
-              background: otherSiteFilter !== 'all' ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
-              border: otherSiteFilter !== 'all' ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)'
+              background: otherSiteInput ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
+              border: otherSiteInput ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)'
             }}>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สำนักงาน:</span>
-              <select
-                value={otherSiteFilter}
-                onChange={(e) => handleOtherSiteFilterChange(e.target.value)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
-              >
-                <option value="all">ทั้งหมด</option>
-                {otherSites.map(s => <option key={s.id} value={String(s.id)}>{s.name}</option>)}
-              </select>
+              <input
+                type="text"
+                list="stock-other-site-options"
+                placeholder="ทั้งหมด"
+                value={otherSiteInput}
+                onChange={(e) => setOtherSiteInput(e.target.value)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '180px' }}
+              />
+              <datalist id="stock-other-site-options">
+                {otherSites.map(s => <option key={s.id} value={s.name} />)}
+              </datalist>
             </div>
           )}
 
@@ -526,28 +630,42 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
         </div>
 
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+          {/* Fixed layout so the truncated cells' maxWidth actually clips
+              instead of the column just growing to fit the longest value. */}
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', tableLayout: 'fixed' }}>
             <thead>
               <tr style={{ background: 'var(--glass-bg-subtle)' }}>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ID</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ชื่ออุปกรณ์</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ประเภท</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>แผนก</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>สำนักงาน</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>สถานะ</th>
+                <th style={{ padding: '1rem 0.75rem 1rem 1.5rem', width: '2.5rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={allOnPageSelected}
+                    onChange={toggleSelectPage}
+                    title="เลือกทั้งหมดในหน้านี้"
+                    style={{ cursor: 'pointer' }}
+                  />
+                </th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '4.5rem' }}>ID</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '170px' }}>ชื่ออุปกรณ์</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '130px' }}>ประเภท</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '130px' }}>รหัสทรัพย์สิน</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '150px' }}>Serial Number</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '130px' }}>ผู้ถือครอง</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '130px' }}>แผนก</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '160px' }}>สำนักงาน</th>
+                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '220px' }}>สถานะ</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-primary)' }}>
+                  <td colSpan="10" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-primary)' }}>
                     <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto' }} />
                     <p style={{ marginTop: '1rem' }}>กำลังโหลดรายการอุปกรณ์...</p>
                   </td>
                 </tr>
               ) : equipment.length === 0 ? (
                 <tr>
-                  <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                  <td colSpan="10" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
                     <Boxes size={40} style={{ opacity: 0.2, margin: '0 auto 1rem' }} />
                     <p>ไม่พบรายการอุปกรณ์</p>
                   </td>
@@ -561,12 +679,37 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
                     className="table-row-hover"
                     title="คลิกเพื่อดูรายละเอียดอุปกรณ์"
                   >
+                    <td style={{ padding: '1rem 0.75rem 1rem 1.5rem' }} onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(item.id)}
+                        onChange={() => toggleSelected(item.id)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    </td>
                     <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{item.id}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontWeight: 600 }}>{item.name || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem' }}>{item.equipment_type || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem' }}>{item.department || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem' }}>
-                      {item.pea_site ? `${item.pea_site.pea_name}${item.pea_site.pea_province ? ` (${item.pea_site.pea_province})` : ''}` : '-'}
+                    <td style={{ padding: '1rem 1.5rem', fontWeight: 600, overflow: 'hidden' }}>
+                      <span style={truncateStyle} title={item.name || '-'}>{item.name || '-'}</span>
+                    </td>
+                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', overflow: 'hidden' }}>
+                      <span style={truncateStyle} title={item.equipment_type || '-'}>{item.equipment_type || '-'}</span>
+                    </td>
+                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', fontFamily: 'monospace', overflow: 'hidden' }}>
+                      <span style={truncateStyle} title={item.asset_number || '-'}>{item.asset_number || '-'}</span>
+                    </td>
+                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', fontFamily: 'monospace', overflow: 'hidden' }}>
+                      <span style={truncateStyle} title={item.serial_number || '-'}>{item.serial_number || '-'}</span>
+                    </td>
+                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', overflow: 'hidden' }}>
+                      <span style={truncateStyle} title={item.asset_owner || '-'}>{item.asset_owner || '-'}</span>
+                    </td>
+                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', overflow: 'hidden' }}>
+                      <span style={truncateStyle} title={item.department || '-'}>{item.department || '-'}</span>
+                    </td>
+                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', overflow: 'hidden' }}>
+                      <span style={truncateStyle} title={item.pea_site ? `${item.pea_site.pea_name}${item.pea_site.pea_province ? ` (${item.pea_site.pea_province})` : ''}` : '-'}>
+                        {item.pea_site ? `${item.pea_site.pea_name}${item.pea_site.pea_province ? ` (${item.pea_site.pea_province})` : ''}` : '-'}
+                      </span>
                     </td>
                     <td style={{ padding: '1rem 1.5rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -652,9 +795,16 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
             >
               <ChevronLeft size={20} />
             </button>
-            <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-              หน้า <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{currentPage}</span> จาก <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.totalPages}</span>
-            </span>
+            <select
+              value={currentPage}
+              onChange={(e) => setCurrentPage(Number(e.target.value))}
+              className="glass"
+              style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', padding: '0.2rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', outline: 'none' }}
+            >
+              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map(p => (
+                <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>หน้า {p} จาก {pagination.totalPages}</option>
+              ))}
+            </select>
             <button
               disabled={currentPage === pagination.totalPages}
               onClick={() => setCurrentPage(prev => prev + 1)}

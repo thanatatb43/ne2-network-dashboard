@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X, History, Map, ChevronDown, ChevronRight, Cpu, ShoppingCart } from 'lucide-react';
+import { Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X, History, Map, ChevronDown, ChevronRight, Cpu, ShoppingCart, Search, ClipboardList } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import peaLogo from '../assets/logo/pea_logo.png';
@@ -46,7 +46,7 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => 
 
   const items = [
     { type: 'item', name: 'แผนที่', icon: Map, id: 'dashboard' },
-    { type: 'item', name: 'ภาพรวมการใช้งบประมาณ', icon: BadgeDollarSign, id: 'budget' },
+    { type: 'item', name: 'งบประมาณ', icon: BadgeDollarSign, id: 'budget' },
   ];
 
   // "ระบบเครือข่าย" bundles the network-related pages into one collapsible
@@ -61,15 +61,21 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => 
   networkChildren.push({ name: 'อุปกรณ์ทั้งหมด', icon: Database, id: 'devices' });
   items.push({ type: 'group', name: 'ระบบเครือข่าย', icon: Network, id: 'group-network', children: networkChildren });
 
-  // "ระบบคอมพิวเตอร์" bundles equipment borrow/return -- both pages are
-  // viewable without login (browsing/history are public), the borrow/return
-  // ACTIONS within them are what actually gate on being logged in.
+  // "ระบบคอมพิวเตอร์" bundles equipment borrow/return/search -- all three
+  // pages are viewable without login (browsing/history/search are public),
+  // the borrow/return ACTIONS within them are what actually gate on login.
   items.push({
     type: 'group', name: 'ระบบคอมพิวเตอร์', icon: Cpu, id: 'group-computer', children: [
       { name: 'ยืมอุปกรณ์', icon: ShoppingCart, id: 'equipment-borrow' },
-      { name: 'ประวัติการยืม', icon: History, id: 'equipment-loans' }
+      { name: 'ประวัติการยืม', icon: History, id: 'equipment-loans' },
+      { name: 'ค้นหาอุปกรณ์', icon: Search, id: 'equipment-search' }
     ]
   });
+
+  // "แจ้งปัญหา" is viewable without login (browsing/tracking status is
+  // public), the "แจ้งปัญหาใหม่" ACTION inside it is what gates on login --
+  // same convention as the equipment pages above.
+  items.push({ type: 'item', name: 'แจ้งปัญหา', icon: ClipboardList, id: 'report-issue' });
 
   if (user) {
     // Role-based access for administrative menus

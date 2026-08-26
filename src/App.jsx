@@ -19,6 +19,8 @@ import DowntimeHistory from './components/DowntimeHistory';
 import DownDevices from './components/DownDevices';
 import EquipmentBorrow from './components/EquipmentBorrow';
 import EquipmentLoanHistory from './components/EquipmentLoanHistory';
+import EquipmentSearch from './components/EquipmentSearch';
+import JobReport from './components/JobReport';
 import { useNetworkData } from './hooks/useNetworkData';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
@@ -47,6 +49,8 @@ const TAB_PATHS = {
   'down-devices': '/down-devices',
   'equipment-borrow': '/equipment-borrow',
   'equipment-loans': '/equipment-loans',
+  'equipment-search': '/equipment-search',
+  'report-issue': '/report-issue',
   about: '/about',
   login: '/login',
   'sso-callback': '/sso-callback'
@@ -737,6 +741,17 @@ function App() {
               token={token}
               user={user}
               onRequireLogin={() => requireLoginFor('/equipment-loans')}
+            />
+          ) : activeTab === 'equipment-search' ? (
+            <EquipmentSearch
+              token={token}
+              onEquipmentClick={(id) => navigate('equipmentDetails', { equipmentId: id })}
+            />
+          ) : activeTab === 'report-issue' ? (
+            <JobReport
+              token={token}
+              user={user}
+              onRequireLogin={() => requireLoginFor('/report-issue')}
             />
           ) : activeTab === 'about' ? (
             <About />

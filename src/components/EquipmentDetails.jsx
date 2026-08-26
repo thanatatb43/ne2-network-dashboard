@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft, Loader2, AlertTriangle, Cpu, Building2, Wifi, Hash,
   Briefcase, Calendar, StickyNote, MapPin, UserCircle, PackageSearch, Pencil,
-  Fingerprint, Tag, User, IdCard, Archive, Router, Repeat, ArrowLeftRight, UserCog
+  Fingerprint, Tag, User, IdCard, Archive, Router, Repeat, ArrowLeftRight, UserCog, Wrench
 } from 'lucide-react';
 import BorrowReturnModal from './BorrowReturnModal';
 import OwnerHistoryModal from './OwnerHistoryModal';
@@ -35,6 +35,55 @@ const formatDueDate = (value) => {
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
 };
+
+// Same status-color convention as JobManagement.jsx/JobReport.jsx's
+// jobStatusColor -- kept local since this file has no other reason to
+// import those components' internals.
+const jobStatusColorFor = (status) => {
+  const s = (status || '').trim();
+  if (s === 'เปิดงาน') return 'var(--text-secondary)';
+  if (s === 'ระหว่างดำเนินการ') return 'var(--accent-warning)';
+  if (s === 'เสร็จงาน') return 'var(--accent-success)';
+  if (s === 'ยกเลิก') return 'var(--accent-danger)';
+  return 'var(--text-secondary)';
+};
+
+const JobStatusBadge = ({ status }) => (
+  <span style={{
+    display: 'inline-block', padding: '0.15rem 0.5rem', borderRadius: '1rem',
+    fontSize: '0.7rem', fontWeight: 700,
+    color: jobStatusColorFor(status), background: `${jobStatusColorFor(status)}15`
+  }}>
+    {status || '-'}
+  </span>
+);
+
+// Shared row shape for both problem_jobs ("อุปกรณ์นี้ถูกแจ้งว่ามีปัญหาในงานนี้"
+// -- the actual repair history) and jobs ("อุปกรณ์นี้ถูกนำไปใช้ดำเนินการในงานนี้"
+// -- used as a tool/part for some other job's repair), from the new
+// GET /api/office-equipment/:id (and /, /site/:id) response fields.
+const JobHistoryList = ({ items }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+    {items.map(job => (
+      <div key={job.id} className="glass" style={{ padding: '0.75rem 0.9rem', borderRadius: '0.5rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+          <span style={{ fontWeight: 600, fontSize: '0.9rem', wordBreak: 'break-word' }}>{job.job_name || '-'}</span>
+          <JobStatusBadge status={job.status} />
+        </div>
+        {job.job_type && (
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>{job.job_type}</div>
+        )}
+        {job.closing_notes && (
+          <div style={{ fontSize: '0.8rem', marginTop: '0.35rem' }}>{job.closing_notes}</div>
+        )}
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.35rem' }}>
+          {job.createdAt ? new Date(job.createdAt).toLocaleDateString('th-TH') : '-'}
+          {job.updatedAt && job.updatedAt !== job.createdAt && ` · อัปเดตล่าสุด ${new Date(job.updatedAt).toLocaleDateString('th-TH')}`}
+        </div>
+      </div>
+    ))}
+  </div>
+);
 
 const InfoRow = ({ icon: Icon, label, value, mono, blurred }) => {
   if (!value) return null;
@@ -291,6 +340,24 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
               </div>
             )}
           </Section>
+
+          {equipment.problem_jobs && equipment.problem_jobs.length > 0 && (
+            <div className="card glass" style={{ padding: '1.25rem', marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Wrench size={15} /> ประวัติการแจ้งปัญหา/ซ่อม
+              </div>
+              <JobHistoryList items={equipment.problem_jobs} />
+            </div>
+          )}
+
+          {equipment.jobs && equipment.jobs.length > 0 && (
+            <div className="card glass" style={{ padding: '1.25rem', marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Briefcase size={15} /> งานที่นำอุปกรณ์นี้ไปใช้ดำเนินการ
+              </div>
+              <JobHistoryList items={equipment.jobs} />
+            </div>
+          )}
 
           {equipment.created_by && (
             <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center', padding: '0.5rem 0 1.5rem' }}>

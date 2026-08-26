@@ -59,15 +59,26 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
   const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, totalPages: 1 });
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 20;
+  const itemsPerPage = 10;
 
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  // ประเภท/แผนก/สำนักงาน are typeable <input list> + <datalist> combos
+  // instead of plain <select>s, same convention as EquipmentSearch.jsx --
+  // Input holds the raw typed text, committed after a debounce. ประเภท and
+  // แผนก are sent to the API as-is (exact match required server-side, so
+  // partial typing just returns nothing until it matches an option or the
+  // user picks a suggestion); สำนักงาน is a real FK, so it only resolves to
+  // an id once the text exactly matches a known site's label.
+  const [equipmentTypeInput, setEquipmentTypeInput] = useState('');
   const [equipmentType, setEquipmentType] = useState('');
+  const [departmentInput, setDepartmentInput] = useState('');
   const [department, setDepartment] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [siteInput, setSiteInput] = useState('');
   const [siteFilter, setSiteFilter] = useState('');
   const [sites, setSites] = useState([]);
+  const siteLabel = (s) => `${s.pea_name}${s.province ? ` (${s.province})` : ''}`;
 
   const [cart, setCart] = useState([]); // array of equipment objects
   const [showCart, setShowCart] = useState(false);
@@ -139,6 +150,34 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
     }, 400);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setEquipmentType(equipmentTypeInput);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [equipmentTypeInput]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDepartment(departmentInput);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [departmentInput]);
+
+  // Only resolves to a real pea_site_id once the typed text exactly matches
+  // a known site's label (i.e. the user picked a datalist suggestion or
+  // typed the full name) -- partial text just leaves the site filter unset.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const match = sites.find(s => siteLabel(s) === siteInput);
+      setSiteFilter(match ? String(match.id) : '');
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [siteInput, sites]);
 
   const handleFilterChange = (setter) => (value) => {
     setter(value);
@@ -239,26 +278,40 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
 
           <div className="glass" style={{
             display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: equipmentType ? '1px solid var(--accent-primary)' : undefined,
-            background: equipmentType ? 'var(--bg-accent-subtle)' : undefined
+            border: equipmentTypeInput ? '1px solid var(--accent-primary)' : undefined,
+            background: equipmentTypeInput ? 'var(--bg-accent-subtle)' : undefined
           }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>
-            <select value={equipmentType} onChange={(e) => handleFilterChange(setEquipmentType)(e.target.value)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-              <option value="">ทั้งหมด</option>
-              {EQUIPMENT_TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <input
+              type="text"
+              list="eq-borrow-type-options"
+              placeholder="ทั้งหมด"
+              value={equipmentTypeInput}
+              onChange={(e) => setEquipmentTypeInput(e.target.value)}
+              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '110px' }}
+            />
+            <datalist id="eq-borrow-type-options">
+              {EQUIPMENT_TYPE_OPTIONS.map(t => <option key={t} value={t} />)}
+            </datalist>
           </div>
 
           <div className="glass" style={{
             display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: department ? '1px solid var(--accent-primary)' : undefined,
-            background: department ? 'var(--bg-accent-subtle)' : undefined
+            border: departmentInput ? '1px solid var(--accent-primary)' : undefined,
+            background: departmentInput ? 'var(--bg-accent-subtle)' : undefined
           }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>แผนก:</span>
-            <select value={department} onChange={(e) => handleFilterChange(setDepartment)(e.target.value)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-              <option value="">ทั้งหมด</option>
-              {DEPARTMENT_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
+            <input
+              type="text"
+              list="eq-borrow-department-options"
+              placeholder="ทั้งหมด"
+              value={departmentInput}
+              onChange={(e) => setDepartmentInput(e.target.value)}
+              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '100px' }}
+            />
+            <datalist id="eq-borrow-department-options">
+              {DEPARTMENT_OPTIONS.map(d => <option key={d} value={d} />)}
+            </datalist>
           </div>
 
           <div className="glass" style={{
@@ -275,14 +328,21 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
 
           <div className="glass" style={{
             display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: siteFilter ? '1px solid var(--accent-primary)' : undefined,
-            background: siteFilter ? 'var(--bg-accent-subtle)' : undefined
+            border: siteInput ? '1px solid var(--accent-primary)' : undefined,
+            background: siteInput ? 'var(--bg-accent-subtle)' : undefined
           }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สำนักงาน:</span>
-            <select value={siteFilter} onChange={(e) => handleFilterChange(setSiteFilter)(e.target.value)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-              <option value="">ทั้งหมด</option>
-              {sites.map(s => <option key={s.id} value={s.id}>{s.pea_name}{s.province ? ` (${s.province})` : ''}</option>)}
-            </select>
+            <input
+              type="text"
+              list="eq-borrow-site-options"
+              placeholder="ทั้งหมด"
+              value={siteInput}
+              onChange={(e) => setSiteInput(e.target.value)}
+              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '180px' }}
+            />
+            <datalist id="eq-borrow-site-options">
+              {sites.map(s => <option key={s.id} value={siteLabel(s)} />)}
+            </datalist>
           </div>
 
           <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
@@ -389,9 +449,15 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
             >
               <ChevronLeft size={20} />
             </button>
-            <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-              หน้า <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{currentPage}</span> จาก <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.totalPages}</span>
-            </span>
+            <select
+              value={currentPage}
+              onChange={(e) => setCurrentPage(Number(e.target.value))}
+              style={{ padding: '0.5rem 0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', color: 'var(--text-primary)', fontSize: '0.9rem', cursor: 'pointer', outline: 'none' }}
+            >
+              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map(p => (
+                <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>หน้า {p} จาก {pagination.totalPages}</option>
+              ))}
+            </select>
             <button
               disabled={currentPage === pagination.totalPages}
               onClick={() => setCurrentPage(prev => prev + 1)}

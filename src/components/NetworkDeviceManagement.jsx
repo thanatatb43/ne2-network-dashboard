@@ -8,6 +8,29 @@ import { motion, AnimatePresence } from 'framer-motion';
 // which would double up to "ssh://ssh://172.x.x.x" if not stripped before building the link.
 const cleanHost = (value) => (value || '').toString().trim().replace(/^[a-z]+:\/\//i, '');
 
+// Clicking a device navigates to DeviceDetails through a different top-level
+// tab in App.jsx, which unmounts NetworkDeviceManagement entirely -- plain
+// useState for the search/filter/sort was wiped out by that navigation, so
+// clicking back landed on a blank/default-filtered list even though the URL
+// itself correctly returned to /management/network/devices. Persisted
+// through sessionStorage instead, same pattern StockManagement.jsx and
+// EquipmentSearch.jsx use for their own filters. currentPage is
+// deliberately NOT persisted -- it depends on which filters are active, and
+// pairing them back up reliably isn't worth the complexity here.
+const SEARCH_KEY = 'netdev_search';
+const TYPE_FILTER_KEY = 'netdev_type_filter';
+const PER_PAGE_KEY = 'netdev_per_page';
+const SORT_KEY = 'netdev_sort';
+
+const readSavedSort = () => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SORT_KEY) || 'null');
+    return saved && typeof saved === 'object' ? saved : { key: null, direction: 'asc' };
+  } catch {
+    return { key: null, direction: 'asc' };
+  }
+};
+
 const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -19,10 +42,10 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
 
   // Pagination and search states
   const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [devicesPerPage, setDevicesPerPage] = useState(10);
-  const [selectedType, setSelectedType] = useState('All');
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+  const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem(SEARCH_KEY) || '');
+  const [devicesPerPage, setDevicesPerPage] = useState(() => Number(sessionStorage.getItem(PER_PAGE_KEY)) || 10);
+  const [selectedType, setSelectedType] = useState(() => sessionStorage.getItem(TYPE_FILTER_KEY) || 'All');
+  const [sortConfig, setSortConfig] = useState(readSavedSort);
 
   const peaTypes = React.useMemo(() => {
     const types = new Set(devices.map(d => d.pea_type).filter(Boolean));
@@ -56,8 +79,29 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
     fetchDevices();
   }, []);
 
+  // Opening the edit/add form doesn't change the URL (App.jsx's router has
+  // no route for it), so without this, pressing browser Back while editing
+  // has nothing of ours to pop and falls straight through to whatever page
+  // came before this one (e.g. /management/network) -- skipping right past
+  // the device list the user actually expects to land back on. Pushing a
+  // marker entry (same pathname, just a new history slot) on entering the
+  // form gives Back something to consume first; the popstate listener below
+  // then closes the form locally instead of letting the app's own router
+  // navigate away.
+  useEffect(() => {
+    const onPopState = () => {
+      if (editingDevice) {
+        setEditingDevice(null);
+        setFormData({});
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [editingDevice]);
+
   const handleEditClick = (device) => {
     if (!canEdit) return;
+    window.history.pushState({ ndmEditing: true }, '', window.location.pathname);
     setEditingDevice(device);
     setFormData(device);
   };
@@ -74,6 +118,7 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
 
   const handleAddClick = () => {
     if (!canEdit) return;
+    window.history.pushState({ ndmEditing: true }, '', window.location.pathname);
     setEditingDevice({ isNew: true });
     setFormData({
       pea_type: "",
@@ -96,9 +141,17 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
     });
   };
 
+  // Closes the form when the USER explicitly does so (Cancel button, or
+  // after a successful Save) -- as opposed to the popstate listener above,
+  // which closes it in response to Back already having happened. Pops the
+  // marker entry pushed on open so a later Back doesn't land on a phantom
+  // history slot that does nothing.
   const handleCancelEdit = () => {
     setEditingDevice(null);
     setFormData({});
+    if (window.history.state?.ndmEditing) {
+      window.history.back();
+    }
   };
 
   const handleInputChange = (e) => {
@@ -249,6 +302,19 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
     setCurrentPage(1);
   }, [searchTerm]);
 
+  useEffect(() => {
+    sessionStorage.setItem(SEARCH_KEY, searchTerm);
+  }, [searchTerm]);
+  useEffect(() => {
+    sessionStorage.setItem(TYPE_FILTER_KEY, selectedType);
+  }, [selectedType]);
+  useEffect(() => {
+    sessionStorage.setItem(PER_PAGE_KEY, String(devicesPerPage));
+  }, [devicesPerPage]);
+  useEffect(() => {
+    sessionStorage.setItem(SORT_KEY, JSON.stringify(sortConfig));
+  }, [sortConfig]);
+
   const nextPage = () => {
     if (currentPage < totalPages) setCurrentPage(currentPage + 1);
   };
@@ -306,8 +372,8 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
     >
       <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <button 
-            onClick={onBack}
+          <button
+            onClick={editingDevice ? handleCancelEdit : onBack}
             className="glass"
             style={{ padding: '0.5rem 1rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
           >
