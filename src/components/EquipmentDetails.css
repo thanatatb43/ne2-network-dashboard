@@ -1,0 +1,23 @@
+.equipment-details-page { width: 100%; max-width: 1400px; min-width: 0; margin: 0 auto; }
+.equipment-details-hero { padding: 24px; margin-bottom: 20px; text-align: left; border-radius: 16px; }
+.equipment-details-hero > div:first-child { margin: 0 0 16px !important; }
+.equipment-details-hero h1 { font-size: clamp(1.5rem, 2vw, 2rem) !important; }
+.equipment-details-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.equipment-details-actions > button { width: auto !important; flex: 0 1 auto; min-height: 44px; padding: 12px 20px !important; margin: 0 !important; font: inherit; font-weight: 600; }
+.equipment-details-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+.equipment-details-section { min-width: 0; padding: 20px; border-radius: 16px; height: 100%; }
+.equipment-details-section-title { font-size: 1rem; font-weight: 700; margin: 0 0 8px; color: var(--text-primary); }
+.equipment-details-wide { grid-column: 1 / -1; min-width: 0; }
+.equipment-details-photo { width: 144px; height: 144px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-subtle); cursor: pointer; }
+.equipment-details-page :is(button, [role="button"]):focus-visible { outline: 3px solid var(--accent-primary); outline-offset: 3px; }
+@media (min-width: 1200px) {
+  .equipment-details-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .equipment-details-hero { position: relative; padding-left: 104px; min-height: 112px; }
+  .equipment-details-hero > div:first-child { position: absolute; left: 24px; top: 24px; }
+}
+@media (max-width: 600px) {
+  .equipment-details-hero, .equipment-details-section { padding: 16px; }
+  .equipment-details-actions > button { flex: 1 1 100%; }
+  .equipment-details-grid { gap: 16px; }
+  .equipment-details-photo { width: 96px; height: 96px; }
+}

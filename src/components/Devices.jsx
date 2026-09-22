@@ -197,63 +197,63 @@ const Devices = ({ onDeviceClick, user }) => {
   };
 
   return (
-    <div className="devices-page">
-      <header className="devices-header">
+    <div className="list-page devices-page">
+      <header className="list-header">
         <div>
           <h1>อุปกรณ์เครือข่าย</h1>
           <p>ตรวจสอบสถานะการเชื่อมต่อของสำนักงาน · อัปเดตอัตโนมัติทุก 1 นาที</p>
         </div>
-        <div className="devices-actions">
-          <button className="devices-button" onClick={fetchDevices} disabled={loading}>
+        <div className="list-actions">
+          <button className="list-button" onClick={fetchDevices} disabled={loading}>
             <RefreshCw size={18} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
             {loading ? 'กำลังโหลด' : 'รีเฟรช'}
           </button>
-          <button className="devices-button devices-button-primary" onClick={exportToExcel} disabled={!devices.length}>
+          <button className="list-button list-button-primary" onClick={exportToExcel} disabled={!devices.length}>
             <FileSpreadsheet size={18} aria-hidden="true" /> ส่งออกทั้งหมด (Excel)
           </button>
         </div>
       </header>
 
       {error && (
-        <div className="devices-error" role="alert">
+        <div className="list-error" role="alert">
           <AlertCircle size={20} aria-hidden="true" />
           <div><strong>{error}</strong>{lastUpdated && <p>กำลังแสดงข้อมูลจากการอัปเดตครั้งก่อน สถานะอาจเปลี่ยนแปลงแล้ว</p>}</div>
-          <button className="devices-button" onClick={fetchDevices} disabled={loading}>ลองใหม่</button>
+          <button className="list-button" onClick={fetchDevices} disabled={loading}>ลองใหม่</button>
         </div>
       )}
 
-      <section className="devices-panel" aria-label="รายการอุปกรณ์เครือข่าย">
-        <div className="devices-toolbar">
-          <label className="devices-field devices-search">
+      <section className="list-panel" aria-label="รายการอุปกรณ์เครือข่าย">
+        <div className="list-toolbar">
+          <label className="list-field list-search">
             <span>ค้นหาอุปกรณ์</span>
-            <div className="devices-search-input">
+            <div className="list-search-input">
               <Search size={18} aria-hidden="true" />
               <input type="search" placeholder="ชื่อสำนักงาน จังหวัด IP หรือ up / down" value={searchTerm}
                 onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }} />
             </div>
           </label>
-          <label className="devices-field">
+          <label className="list-field">
             <span>ประเภทสำนักงาน</span>
             <select value={selectedType} onChange={e => { setSelectedType(e.target.value); setCurrentPage(1); }}>
               {selectedType !== 'All' && !peaTypes.includes(selectedType) && <option value={selectedType}>{selectedType}</option>}
               {peaTypes.map(type => <option key={type} value={type}>{type === 'All' ? 'ทุกประเภท' : type}</option>)}
             </select>
           </label>
-          <button className="devices-button" onClick={clearFilters} disabled={!hasFilters}>ล้างตัวกรอง</button>
+          <button className="list-button" onClick={clearFilters} disabled={!hasFilters}>ล้างตัวกรอง</button>
         </div>
 
-        <div className="devices-result-info">
+        <div className="list-result-info">
           <span role="status">{lastUpdated ? `พบ ${sortedDevices.length.toLocaleString('th-TH')} จาก ${devices.length.toLocaleString('th-TH')} รายการ` : loading ? 'กำลังโหลดรายการอุปกรณ์…' : 'ยังไม่มีข้อมูลที่โหลดสำเร็จ'}</span>
           <span>{lastUpdated && `อัปเดตล่าสุด ${lastUpdated.toLocaleTimeString('th-TH')}`}{!sortConfig.key && ' · แสดงอุปกรณ์ที่ขัดข้องก่อน'}</span>
         </div>
-        <div id="devices-table-container" className="devices-table-scroll" role="region" aria-label="ตารางอุปกรณ์ เลื่อนแนวนอนเพื่อดูทุกคอลัมน์" tabIndex={0} aria-busy={loading}>
-          <table className="devices-table">
-            <caption className="devices-sr-only">อุปกรณ์เครือข่าย กดชื่อสำนักงานเพื่อเปิดรายละเอียด</caption>
+        <div id="devices-table-container" className="list-table-scroll" role="region" aria-label="ตารางอุปกรณ์ เลื่อนแนวนอนเพื่อดูทุกคอลัมน์" tabIndex={0} aria-busy={loading}>
+          <table className="list-table">
+            <caption className="list-sr-only">อุปกรณ์เครือข่าย กดชื่อสำนักงานเพื่อเปิดรายละเอียด</caption>
             <thead><tr>
               <th scope="col">ลำดับ</th>
               {columns.map(([key, label]) => (
                 <th key={key} scope="col" aria-sort={sortConfig.key === key ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                  <button className="devices-sort" onClick={() => requestSort(key)}>
+                  <button className="list-sort" onClick={() => requestSort(key)}>
                     {label}
                     {sortConfig.key === key ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />) : <ArrowUpDown size={14} aria-hidden="true" />}
                   </button>
@@ -262,27 +262,27 @@ const Devices = ({ onDeviceClick, user }) => {
             </tr></thead>
             <tbody>
               {!lastUpdated ? (
-                <tr><td colSpan={7} className="devices-empty">{loading ? 'กำลังโหลดข้อมูลอุปกรณ์…' : 'โหลดข้อมูลไม่สำเร็จ กด “ลองใหม่” เพื่อโหลดอีกครั้ง'}</td></tr>
+                <tr><td colSpan={7} className="list-empty">{loading ? 'กำลังโหลดข้อมูลอุปกรณ์…' : 'โหลดข้อมูลไม่สำเร็จ กด “ลองใหม่” เพื่อโหลดอีกครั้ง'}</td></tr>
               ) : currentItems.length === 0 ? (
-                <tr><td colSpan={7} className="devices-empty">
+                <tr><td colSpan={7} className="list-empty">
                   <strong>{hasFilters ? 'ไม่พบอุปกรณ์ที่ตรงกับตัวกรอง' : 'ยังไม่มีอุปกรณ์ในระบบ'}</strong>
                   <p>{hasFilters ? 'ลองเปลี่ยนคำค้น หรือเลือกประเภทสำนักงานอื่น' : 'รายการจะแสดงเมื่อมีข้อมูลอุปกรณ์'}</p>
-                  {hasFilters && <button className="devices-button" onClick={clearFilters}>ล้างตัวกรอง</button>}
+                  {hasFilters && <button className="list-button" onClick={clearFilters}>ล้างตัวกรอง</button>}
                 </td></tr>
               ) : currentItems.map((d, index) => (
-                <tr key={d.id} className={d.status === 'down' ? 'devices-row-down' : ''}>
+                <tr key={d.id} className={d.status === 'down' ? 'list-row-down' : ''}>
                   <td>{indexOfFirstItem + index + 1}</td>
-                  <td><a className="devices-name" href={`/device/${d.device_id || d.id}`} onClick={e => {
+                  <td><a className="list-name" title={d.device?.pea_name || 'ดูรายละเอียดอุปกรณ์'} href={`/device/${d.device_id || d.id}`} onClick={e => {
                     if (onDeviceClick && e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
                       e.preventDefault();
                       onDeviceClick(d.device_id || d.id);
                     }
                   }}>{d.device?.pea_name || 'ดูรายละเอียดอุปกรณ์'}</a></td>
                   <td>{d.device?.province || '—'}</td>
-                  <td className={user ? 'devices-ip' : 'devices-muted'}>{user ? (d.device?.gateway || '—') : 'เข้าสู่ระบบเพื่อดู IP'}</td>
-                  <td className="devices-number">{Number.isFinite(d.latency_ms) ? d.latency_ms.toFixed(2) : '—'}</td>
-                  <td className="devices-number">{d.packet_loss ?? '—'}</td>
-                  <td><span className={`devices-status devices-status-${d.status === 'up' ? 'up' : d.status === 'down' ? 'down' : 'unknown'}`}>
+                  <td className={user ? 'list-ip' : 'list-muted'}>{user ? (d.device?.gateway || '—') : 'เข้าสู่ระบบเพื่อดู IP'}</td>
+                  <td className="list-number">{Number.isFinite(d.latency_ms) ? d.latency_ms.toFixed(2) : '—'}</td>
+                  <td className="list-number">{d.packet_loss ?? '—'}</td>
+                  <td><span className={`list-status list-status-${d.status === 'up' ? 'up' : d.status === 'down' ? 'down' : 'unknown'}`}>
                     {d.status === 'up' ? <CheckCircle size={15} aria-hidden="true" /> : <AlertCircle size={15} aria-hidden="true" />}
                     {d.status === 'up' ? 'ออนไลน์' : d.status === 'down' ? 'ขัดข้อง' : 'ไม่ทราบสถานะ'}
                   </span></td>
@@ -291,19 +291,19 @@ const Devices = ({ onDeviceClick, user }) => {
             </tbody>
           </table>
         </div>
-        <footer className="devices-footer">
-          <label className="devices-page-size">แสดง
+        <footer className="list-footer">
+          <label className="list-page-size">แสดง
             <select value={itemsPerPage} onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
               {[10, 25, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
             </select>รายการต่อหน้า
           </label>
-          <span className="devices-muted">{sortedDevices.length ? `${indexOfFirstItem + 1}–${Math.min(indexOfFirstItem + itemsPerPage, sortedDevices.length)} จาก ${sortedDevices.length}` : '0 รายการ'}</span>
-          <nav className="devices-pagination" aria-label="แบ่งหน้ารายการอุปกรณ์">
-            <button className="devices-button" disabled={visiblePage === 1 || !lastUpdated} onClick={() => setCurrentPage(visiblePage - 1)}>ก่อนหน้า</button>
+          <span className="list-muted">{sortedDevices.length ? `${indexOfFirstItem + 1}–${Math.min(indexOfFirstItem + itemsPerPage, sortedDevices.length)} จาก ${sortedDevices.length}` : '0 รายการ'}</span>
+          <nav className="list-pagination" aria-label="แบ่งหน้ารายการอุปกรณ์">
+            <button className="list-button" disabled={visiblePage === 1 || !lastUpdated} onClick={() => setCurrentPage(visiblePage - 1)}>ก่อนหน้า</button>
             <label>หน้า <select value={visiblePage} onChange={e => setCurrentPage(Number(e.target.value))} disabled={!lastUpdated}>
               {Array.from({ length: totalPages }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
             </select> / {totalPages}</label>
-            <button className="devices-button" disabled={visiblePage === totalPages || !lastUpdated} onClick={() => setCurrentPage(visiblePage + 1)}>ถัดไป</button>
+            <button className="list-button" disabled={visiblePage === totalPages || !lastUpdated} onClick={() => setCurrentPage(visiblePage + 1)}>ถัดไป</button>
           </nav>
         </footer>
       </section>

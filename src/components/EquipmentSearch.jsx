@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
-import { Search, Loader2, ChevronLeft, ChevronRight, ChevronDown, SlidersHorizontal, X } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Search, Loader2, RefreshCw, ChevronDown, SlidersHorizontal, FileSpreadsheet, AlertCircle } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import './ListPage.css';
+import './EquipmentSearch.css';
+import SearchableDropdown from './SearchableDropdown';
 
 // Same fixed option lists EquipmentBorrow.jsx uses, duplicated here since
 // they aren't exported from that file.
@@ -13,7 +16,7 @@ const DEPARTMENT_OPTIONS = [
   'ผสน', 'ผบร', 'ผบส', 'ผปบ', 'ผกส', 'ผมต', 'ผคพ (แยกจากวงสำนักงาน)',
   'ผู้บริหาร + บุคลากรอื่นๆ', 'กฟส (ผปร)', 'กฟส (ผบค)', 'กฟส (ผบง)'
 ];
-const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'ถูกยืม'];
+const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'ถูกยืม', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน'];
 
 // Advanced (less commonly used) text filters -- sent as-is in the POST body,
 // substring-matched server-side. Kept separate from the primary filter row
@@ -34,491 +37,253 @@ const ADVANCED_FIELDS = [
 
 const buildImageUrl = (path) => path ? `${import.meta.env.VITE_API_BASE_URL}${path}` : null;
 
-const statusColor = (status) => {
-  const s = (status || '').trim();
-  if (s === 'ใช้งาน') return 'var(--accent-success)';
-  if (s === 'รอปรับปรุง' || s === 'รอจำหน่าย') return 'var(--accent-warning)';
-  if (s === 'เลิกใช้งาน' || s === 'จำหน่าย') return 'var(--accent-danger)';
-  if (s === 'ถูกยืม') return '#a855f7';
-  return 'var(--text-secondary)';
+
+const emptyPrimary = { equipment_type: '', department: '', status: '' };
+const emptyAdvanced = Object.fromEntries(ADVANCED_FIELDS.map(({ key }) => [key, '']));
+const read = (key, fallback = '') => {
+  try { return sessionStorage.getItem(key) ?? fallback; } catch { return fallback; }
 };
-
-const inputStyle = {
-  padding: '0.6rem 0.8rem',
-  borderRadius: '0.5rem',
-  border: '1px solid var(--input-border)',
-  background: 'var(--input-bg)',
-  color: 'var(--text-primary)',
-  fontSize: '0.9rem',
-  outline: 'none'
+const save = (key, value) => {
+  try { sessionStorage.setItem(key, value); } catch { /* Storage is optional. */ }
 };
-
-const emptyAdvanced = ADVANCED_FIELDS.reduce((acc, f) => ({ ...acc, [f.key]: '' }), {});
-
-// Clicking a result navigates to EquipmentDetails.jsx through a different
-// top-level tab in App.jsx, which unmounts EquipmentSearch entirely -- a
-// plain useState for the search filters was wiped out by that navigation,
-// so clicking back landed on a blank search. Persisted through
-// sessionStorage instead, same pattern StockManagement.jsx uses for its own
-// filters/selection.
-const NAME_KEY = 'eq_search_name';
-const PRIMARY_KEY = 'eq_search_primary';
-const SITE_INPUT_KEY = 'eq_search_site_input';
-const ADVANCED_KEY = 'eq_search_advanced';
-const SHOW_ADVANCED_KEY = 'eq_search_show_advanced';
-
-const readSavedJson = (key, fallback) => {
+const readFields = (key, defaults) => {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(key) || 'null');
-    return saved && typeof saved === 'object' ? { ...fallback, ...saved } : fallback;
-  } catch {
-    return fallback;
-  }
+    const value = JSON.parse(read(key, '{}'));
+    return Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, typeof value?.[k] === 'string' ? value[k] : v]));
+  } catch { return defaults; }
 };
+const readPage = () => {
+  const page = Number(read('eq_search_page', '1'));
+  return Number.isSafeInteger(page) && page > 0 ? page : 1;
+};
+const siteLabel = s => `${s.pea_name}${s.pea_province ? ` (${s.pea_province})` : ''}`;
+const statusTone = status => {
+  if (status === 'ใช้งาน') return 'up';
+  if (['รอปรับปรุง', 'รอจำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน'].includes(status)) return 'warning';
+  if (['เลิกใช้งาน', 'จำหน่าย'].includes(status)) return 'down';
+  if (status === 'ถูกยืม') return 'borrowed';
+  return 'unknown';
+};
+const PRIMARY_FIELDS = [
+  ['equipment_type', 'ประเภทอุปกรณ์', EQUIPMENT_TYPE_OPTIONS],
+  ['department', 'แผนก', DEPARTMENT_OPTIONS],
+  ['status', 'สถานะ', STATUS_OPTIONS],
+];
 
 const EquipmentSearch = ({ token, onEquipmentClick }) => {
-  const [equipment, setEquipment] = useState([]);
-  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, totalPages: 1 });
-  const [loading, setLoading] = useState(true);
-  const [hasSearched, setHasSearched] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [inputs, setInputs] = useState(() => ({
+    name: read('eq_search_name'), site: read('eq_search_site_input'),
+    primary: readFields('eq_search_primary', emptyPrimary),
+    advanced: readFields('eq_search_advanced', emptyAdvanced),
+  }));
+  const [filters, setFilters] = useState(inputs);
+  const [currentPage, setCurrentPage] = useState(readPage);
   const itemsPerPage = 10;
-
-  const [nameInput, setNameInput] = useState(() => sessionStorage.getItem(NAME_KEY) || '');
-  const [name, setName] = useState(() => sessionStorage.getItem(NAME_KEY) || '');
-
-  // ประเภท/แผนก/สถานะ are typeable (substring-matched server-side) via a
-  // native <input list> + <datalist> combo instead of a plain <select>, so
-  // the user can filter the option list by typing instead of scrolling it.
-  const emptyPrimary = { equipment_type: '', department: '', status: '' };
-  const [primaryInputs, setPrimaryInputs] = useState(() => readSavedJson(PRIMARY_KEY, emptyPrimary));
-  const [primaryFilters, setPrimaryFilters] = useState(() => readSavedJson(PRIMARY_KEY, emptyPrimary));
-
-  // สำนักงาน is an FK (pea_site_id) -- the datalist shows site names, but
-  // only an exact match against a known site's label resolves to an id that
-  // actually gets sent as a filter. Free typing that doesn't match a real
-  // site yet just doesn't filter by site (rather than sending a bogus id).
-  const [siteInput, setSiteInput] = useState(() => sessionStorage.getItem(SITE_INPUT_KEY) || '');
-  const [siteFilterId, setSiteFilterId] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(() => read('eq_search_show_advanced') === '1');
   const [sites, setSites] = useState([]);
-  const siteLabel = (s) => `${s.pea_name}${s.pea_province ? ` (${s.pea_province})` : ''}`;
+  const [sitesLoading, setSitesLoading] = useState(true);
+  const [sitesError, setSitesError] = useState(false);
+  const [siteRetry, setSiteRetry] = useState(0);
+  const [retry, setRetry] = useState(0);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [exportingExcel, setExportingExcel] = useState(false);
 
-  const [showAdvanced, setShowAdvanced] = useState(() => sessionStorage.getItem(SHOW_ADVANCED_KEY) === '1');
-  const [advancedInputs, setAdvancedInputs] = useState(() => readSavedJson(ADVANCED_KEY, emptyAdvanced));
-  const [advanced, setAdvanced] = useState(() => readSavedJson(ADVANCED_KEY, emptyAdvanced));
+  useEffect(() => {
+    save('eq_search_name', inputs.name);
+    save('eq_search_site_input', inputs.site);
+    save('eq_search_primary', JSON.stringify(inputs.primary));
+    save('eq_search_advanced', JSON.stringify(inputs.advanced));
+  }, [inputs]);
+  useEffect(() => { save('eq_search_page', String(currentPage)); }, [currentPage]);
+  useEffect(() => { save('eq_search_show_advanced', showAdvanced ? '1' : '0'); }, [showAdvanced]);
+  useEffect(() => {
+    if (inputs === filters) return;
+    const timer = setTimeout(() => { setFilters(inputs); setCurrentPage(1); }, 400);
+    return () => clearTimeout(timer);
+  }, [inputs, filters]);
 
-  const advancedActiveCount = Object.values(advanced).filter(Boolean).length;
-  const anyFilterActive = !!(
-    name || primaryFilters.equipment_type || primaryFilters.department || primaryFilters.status ||
-    siteFilterId || advancedActiveCount > 0
-  );
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const load = async () => {
+      setSitesLoading(true);
+      setSitesError(false);
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/sites`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal,
+        });
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        const list = data.data || data;
+        if (!Array.isArray(list)) throw new Error();
+        if (active) setSites(list);
+      } catch { if (active) setSitesError(true); }
+      finally { clearTimeout(timer); if (active) setSitesLoading(false); }
+    };
+    load();
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [token, siteRetry]);
 
-  const fetchSites = async () => {
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/sites`, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-      });
-      const result = await response.json();
-      const list = result.data || result || [];
-      setSites(Array.isArray(list) ? list : []);
-    } catch (error) {
-      console.error('Error fetching PEA sites:', error);
+  const site = sites.find(s => siteLabel(s) === filters.site);
+  const siteInputMatches = sites.some(s => siteLabel(s) === inputs.site);
+  const waitingForSite = Boolean(filters.site && sitesLoading);
+  const body = useMemo(() => {
+    const next = { page: currentPage, limit: itemsPerPage };
+    if (filters.name.trim()) next.name = filters.name.trim();
+    for (const [key, value] of Object.entries({ ...filters.primary, ...filters.advanced })) {
+      if (value.trim()) next[key] = value.trim();
     }
-  };
-
-  const runSearch = async () => {
-    setLoading(true);
-    try {
-      const body = { page: currentPage, limit: itemsPerPage };
-      if (name.trim()) body.name = name.trim();
-      if (primaryFilters.equipment_type) body.equipment_type = primaryFilters.equipment_type;
-      if (primaryFilters.department) body.department = primaryFilters.department;
-      if (primaryFilters.status) body.status = primaryFilters.status;
-      if (siteFilterId) body.pea_site_id = Number(siteFilterId);
-      ADVANCED_FIELDS.forEach(({ key }) => {
-        if (advanced[key] && advanced[key].trim()) body[key] = advanced[key].trim();
-      });
-
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/search`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify(body)
-      });
-      const result = await response.json();
-      if (result.success) {
-        setEquipment(result.data || []);
-        if (result.pagination) setPagination(result.pagination);
-      } else {
-        toast.error(result.message || 'ค้นหาไม่สำเร็จ');
-      }
-    } catch (error) {
-      console.error('Error searching office equipment:', error);
-      toast.error('ไม่สามารถค้นหาอุปกรณ์ได้');
-    } finally {
-      setHasSearched(true);
-      setLoading(false);
-    }
-  };
+    if (site) next.pea_site_id = Number(site.id);
+    return next;
+  }, [filters, currentPage, site]);
+  const requestKey = JSON.stringify(body);
+  const pending = inputs !== filters || waitingForSite || loading || result?.key !== requestKey || result?.token !== token;
 
   useEffect(() => {
-    fetchSites();
-    runSearch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (waitingForSite) return;
+    const controller = new AbortController();
+    let active = true;
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const search = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/search`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: requestKey, signal: controller.signal,
+        });
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        if (!data.success || !Array.isArray(data.data)) throw new Error();
+        if (!active) return;
+        const total = Number(data.pagination?.total ?? data.data.length);
+        const totalPages = Math.max(1, Number(data.pagination?.totalPages) || Math.ceil(total / itemsPerPage));
+        if (currentPage > totalPages) { setCurrentPage(totalPages); return; }
+        setResult({ equipment: data.data, total, totalPages, page: currentPage, key: requestKey, token, updated: new Date() });
+      } catch { if (active) setError('ไม่สามารถค้นหาอุปกรณ์ได้ กรุณาลองใหม่'); }
+      finally { clearTimeout(timer); if (active) setLoading(false); }
+    };
+    search();
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [requestKey, token, retry, waitingForSite, currentPage]);
 
-  useEffect(() => {
-    if (!hasSearched) return;
-    runSearch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, currentPage, name, primaryFilters, siteFilterId, advanced]);
-
-  // Debounces the free-text name field, the ประเภท/แผนก/สถานะ inputs, the
-  // site input, and the whole advanced-filter object into committed values,
-  // batching each with the page-1 reset so they land together instead of
-  // racing across separate effects.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setName(nameInput);
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [nameInput]);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setPrimaryFilters(primaryInputs);
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [primaryInputs]);
-
-  // Only resolves to a real pea_site_id once the typed text exactly matches
-  // a known site's label (i.e. the user picked a datalist suggestion or
-  // typed the full name) -- partial text just leaves the site filter unset.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const match = sites.find(s => siteLabel(s) === siteInput);
-      setSiteFilterId(match ? String(match.id) : '');
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [siteInput, sites]);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setAdvanced(advancedInputs);
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [advancedInputs]);
-
-  useEffect(() => {
-    sessionStorage.setItem(NAME_KEY, nameInput);
-  }, [nameInput]);
-  useEffect(() => {
-    sessionStorage.setItem(PRIMARY_KEY, JSON.stringify(primaryInputs));
-  }, [primaryInputs]);
-  useEffect(() => {
-    sessionStorage.setItem(SITE_INPUT_KEY, siteInput);
-  }, [siteInput]);
-  useEffect(() => {
-    sessionStorage.setItem(ADVANCED_KEY, JSON.stringify(advancedInputs));
-  }, [advancedInputs]);
-  useEffect(() => {
-    sessionStorage.setItem(SHOW_ADVANCED_KEY, showAdvanced ? '1' : '0');
-  }, [showAdvanced]);
-
-  const handlePrimaryChange = (key) => (value) => {
-    setPrimaryInputs(prev => ({ ...prev, [key]: value }));
-  };
-
-  const handleAdvancedChange = (key) => (value) => {
-    setAdvancedInputs(prev => ({ ...prev, [key]: value }));
-  };
-
+  // Only show rows for this page's filters and current authorization context.
+  const shown = result?.key === requestKey && result?.token === token ? result : null;
+  const advancedActiveCount = Object.values(inputs.advanced).filter(value => value.trim()).length;
+  const anyFilterActive = Boolean(inputs.name || inputs.site || Object.values(inputs.primary).some(Boolean) || advancedActiveCount);
+  const change = (key, value) => setInputs(prev => ({ ...prev, [key]: value }));
+  const changeField = (group, key, value) => setInputs(prev => ({ ...prev, [group]: { ...prev[group], [key]: value } }));
   const clearAllFilters = () => {
-    setNameInput('');
-    setName('');
-    setPrimaryInputs(emptyPrimary);
-    setPrimaryFilters(emptyPrimary);
-    setSiteInput('');
-    setSiteFilterId('');
-    setAdvancedInputs(emptyAdvanced);
-    setAdvanced(emptyAdvanced);
-    setCurrentPage(1);
+    const cleared = { name: '', site: '', primary: emptyPrimary, advanced: emptyAdvanced };
+    setInputs(cleared); setFilters(cleared); setCurrentPage(1);
+  };
+
+  const exportToExcel = async () => {
+    if (pending || error || !shown?.total || exportingExcel) return;
+    setExportingExcel(true);
+    try {
+      // Follow server pagination: do not silently truncate at a high limit.
+      const all = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/search`, {
+          method: 'POST', signal: AbortSignal.timeout(30000),
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+          body: JSON.stringify({ ...body, page, limit: itemsPerPage }),
+        });
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        if (!data.success || !Array.isArray(data.data) || !data.data.length) throw new Error();
+        all.push(...data.data);
+        totalPages = Math.max(1, Number(data.pagination?.totalPages) || Math.ceil(Number(data.pagination?.total ?? shown.total) / itemsPerPage));
+        page += 1;
+      } while (page <= totalPages);
+      const result = { data: all };
+      const rows = result.data.map(item => ({
+        'ชื่ออุปกรณ์': item.name || '-',
+        'ประเภทอุปกรณ์': item.equipment_type || '-',
+        'แผนก': item.department || '-',
+        'สถานะ': item.status || '-',
+        'สำนักงาน': item.pea_site ? `${item.pea_site.pea_name}${item.pea_site.pea_province ? ` (${item.pea_site.pea_province})` : ''}` : '-',
+        'IP Address': item.ip_address || '-',
+        'MAC Address': item.mac_address || '-',
+        'ผู้ขาย': item.vendor || '-',
+        'เลขที่สัญญา': item.contract_no || '-',
+        'วันเริ่มสัญญา': item.contract_start_date || '-',
+        'วันหมดอายุสัญญา': item.contract_expiry_date || '-',
+        'Serial Number': item.serial_number || '-',
+        'รหัสทรัพย์สิน': item.asset_number || '-',
+        'ผู้ถือครอง': item.asset_owner || '-',
+        'รหัสพนักงานผู้ถือครอง': item.asset_owner_emp_id || '-',
+        'สถานที่ติดตั้งหรือจัดเก็บ': item.storage_location || '-',
+        'หมายเหตุ': item.notes || '-'
+      }));
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'อุปกรณ์');
+      XLSX.writeFile(workbook, `Equipment_Search_${new Date().toISOString().split('T')[0]}.xlsx`);
+      toast.success(`ส่งออก Excel สำเร็จ (${rows.length} รายการ)`);
+    } catch {
+      toast.error('ส่งออกไม่สำเร็จ กรุณาลองใหม่');
+    } finally { setExportingExcel(false); }
   };
 
   return (
-    <motion.div
-      key="equipment-search"
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      transition={{ duration: 0.2 }}
-    >
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>ค้นหาอุปกรณ์คอมพิวเตอร์</h1>
-        <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }}>ค้นหาอุปกรณ์คอมพิวเตอร์ ด้วย รหัสทรัพย์สิน, Serial Number, หรือรายละเอียดอื่นๆ</p>
-      </div>
-
-      <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', flex: '1 1 240px' }}>
-            <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-            <input
-              type="text"
-              placeholder="ค้นหาชื่ออุปกรณ์..."
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              style={{
-                ...inputStyle, width: '100%', padding: '0.6rem 0.6rem 0.6rem 2.5rem',
-                border: nameInput ? '1px solid var(--accent-primary)' : inputStyle.border,
-                background: nameInput ? 'var(--bg-accent-subtle)' : inputStyle.background
-              }}
-            />
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: primaryInputs.equipment_type ? '1px solid var(--accent-primary)' : undefined,
-            background: primaryInputs.equipment_type ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>
-            <input
-              type="text"
-              list="eq-search-type-options"
-              placeholder="ทั้งหมด"
-              value={primaryInputs.equipment_type}
-              onChange={(e) => handlePrimaryChange('equipment_type')(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '110px' }}
-            />
-            <datalist id="eq-search-type-options">
-              {EQUIPMENT_TYPE_OPTIONS.map(t => <option key={t} value={t} />)}
-            </datalist>
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: primaryInputs.department ? '1px solid var(--accent-primary)' : undefined,
-            background: primaryInputs.department ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>แผนก:</span>
-            <input
-              type="text"
-              list="eq-search-department-options"
-              placeholder="ทั้งหมด"
-              value={primaryInputs.department}
-              onChange={(e) => handlePrimaryChange('department')(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '100px' }}
-            />
-            <datalist id="eq-search-department-options">
-              {DEPARTMENT_OPTIONS.map(d => <option key={d} value={d} />)}
-            </datalist>
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: primaryInputs.status ? '1px solid var(--accent-primary)' : undefined,
-            background: primaryInputs.status ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สถานะ:</span>
-            <input
-              type="text"
-              list="eq-search-status-options"
-              placeholder="ทั้งหมด"
-              value={primaryInputs.status}
-              onChange={(e) => handlePrimaryChange('status')(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '100px' }}
-            />
-            <datalist id="eq-search-status-options">
-              {STATUS_OPTIONS.map(s => <option key={s} value={s} />)}
-            </datalist>
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: siteInput ? '1px solid var(--accent-primary)' : undefined,
-            background: siteInput ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สำนักงาน:</span>
-            <input
-              type="text"
-              list="eq-search-site-options"
-              placeholder="ทั้งหมด"
-              value={siteInput}
-              onChange={(e) => setSiteInput(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '180px' }}
-            />
-            <datalist id="eq-search-site-options">
-              {sites.map(s => <option key={s.id} value={siteLabel(s)} />)}
-            </datalist>
-          </div>
-
-          <button
-            onClick={() => setShowAdvanced(prev => !prev)}
-            className="glass"
-            style={{
-              display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.5rem 0.9rem', borderRadius: '0.5rem',
-              border: advancedActiveCount > 0 ? '1px solid var(--accent-primary)' : undefined,
-              background: advancedActiveCount > 0 ? 'var(--bg-accent-subtle)' : undefined,
-              color: advancedActiveCount > 0 ? 'var(--accent-primary)' : 'var(--text-primary)',
-              cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600
-            }}
-          >
-            <SlidersHorizontal size={14} />
-            ตัวกรองขั้นสูง{advancedActiveCount > 0 ? ` (${advancedActiveCount})` : ''}
-            <ChevronDown size={14} style={{ transform: showAdvanced ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+    <div className="list-page equipment-search-page">
+      <header className="list-header">
+        <div><h1>ค้นหาอุปกรณ์คอมพิวเตอร์</h1><p>ค้นหาด้วยชื่ออุปกรณ์ หรือกรองตามสำนักงาน รหัสทรัพย์สิน และรายละเอียดอื่น ๆ</p></div>
+        <div className="list-actions">
+          <button className="list-button" disabled={loading || waitingForSite} onClick={() => setRetry(n => n + 1)}><RefreshCw size={18} aria-hidden="true" className={loading ? 'animate-spin' : ''} />รีเฟรช</button>
+          <button className="list-button list-button-primary" disabled={pending || Boolean(error) || !shown?.total || exportingExcel} onClick={exportToExcel}>
+            {exportingExcel ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <FileSpreadsheet size={18} aria-hidden="true" />}
+            {exportingExcel ? 'กำลังส่งออก…' : 'ส่งออกผลการค้นหา (Excel)'}
           </button>
-
-          {anyFilterActive && (
-            <button
-              onClick={clearAllFilters}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', padding: '0.5rem 0.7rem', borderRadius: '0.5rem', border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '0.85rem' }}
-            >
-              <X size={14} /> ล้างตัวกรอง
-            </button>
-          )}
-
-          <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
-            พบ <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.total}</span> รายการ
-          </div>
         </div>
-
-        {showAdvanced && (
-          <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '0.75rem', background: 'var(--glass-bg-subtle)' }}>
-            {ADVANCED_FIELDS.map(({ key, label }) => (
-              <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{label}</label>
-                <input
-                  type="text"
-                  value={advancedInputs[key]}
-                  onChange={(e) => handleAdvancedChange(key)(e.target.value)}
-                  style={{
-                    ...inputStyle, padding: '0.5rem 0.7rem', fontSize: '0.85rem',
-                    border: advancedInputs[key] ? '1px solid var(--accent-primary)' : inputStyle.border,
-                    background: advancedInputs[key] ? 'var(--bg-accent-subtle)' : inputStyle.background
-                  }}
-                />
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ background: 'var(--glass-bg-subtle)' }}>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ชื่ออุปกรณ์</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ประเภท</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>แผนก</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>สำนักงาน</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>รหัสทรัพย์สิน / Serial</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ผู้ถือครอง</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>สถานะ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="7" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-primary)' }}>
-                    <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto' }} />
-                    <p style={{ marginTop: '1rem' }}>กำลังค้นหา...</p>
-                  </td>
-                </tr>
-              ) : equipment.length === 0 ? (
-                <tr>
-                  <td colSpan="7" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                    ไม่พบอุปกรณ์ที่ตรงกับเงื่อนไข
-                  </td>
-                </tr>
-              ) : (
-                equipment.map(item => (
-                  <tr
-                    key={item.id}
-                    onClick={() => onEquipmentClick && onEquipmentClick(item.id)}
-                    style={{ borderBottom: '1px solid var(--border-subtle)', cursor: onEquipmentClick ? 'pointer' : 'default' }}
-                    className="table-row-hover"
-                    title="คลิกเพื่อดูรายละเอียดอุปกรณ์"
-                  >
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                        {item.photos?.[0] && (
-                          <img
-                            src={buildImageUrl(item.photos[0])}
-                            alt=""
-                            style={{ width: '2.25rem', height: '2.25rem', borderRadius: '0.4rem', objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border-subtle)' }}
-                          />
-                        )}
-                        <span>{item.name || '-'}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{item.equipment_type || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.department || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>
-                      {item.pea_site ? `${item.pea_site.pea_name}${item.pea_site.pea_province ? ` (${item.pea_site.pea_province})` : ''}` : '-'}
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                      {item.asset_number || '-'}{item.serial_number ? ` / ${item.serial_number}` : ''}
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>
-                      <div>{item.asset_owner || '-'}</div>
-                      {item.asset_owner_emp_id && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{item.asset_owner_emp_id}</div>
-                      )}
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>
-                      <span style={{
-                        display: 'inline-block', padding: '0.2rem 0.6rem', borderRadius: '1rem',
-                        fontSize: '0.75rem', fontWeight: 600,
-                        color: statusColor(item.status), background: `${statusColor(item.status)}15`
-                      }}>
-                        {item.status || '-'}
-                      </span>
-                      {item.current_loan?.borrower_name && (
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                          โดย {item.current_loan.borrower_name}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
+      </header>
+      {error && <div className="list-error" role="alert"><AlertCircle size={20} aria-hidden="true" /><div><strong>{error}</strong>{shown && <p>แสดงผลจากการค้นหาครั้งก่อน ข้อมูลอาจเปลี่ยนแปลงแล้ว</p>}</div><button className="list-button" disabled={loading} onClick={() => setRetry(n => n + 1)}>ลองใหม่</button></div>}
+      <section className="list-panel" aria-label="ค้นหาและกรองอุปกรณ์">
+        <div className="equipment-filters">
+          <label className="list-field equipment-name-filter"><span>ชื่ออุปกรณ์</span><div className="list-search-input"><Search size={18} aria-hidden="true" /><input type="search" placeholder="พิมพ์ชื่ออุปกรณ์" value={inputs.name} onChange={e => change('name', e.target.value)} /></div></label>
+          {PRIMARY_FIELDS.map(([key, label, options]) => <label className="list-field" key={key}><span>{label}</span><SearchableDropdown label={label} placeholder="ทั้งหมด" value={inputs.primary[key]} onChange={value => changeField('primary', key, value)} options={options} /></label>)}
+          <label className="list-field equipment-site-filter"><span>สำนักงาน</span><SearchableDropdown label="สำนักงาน" placeholder={sitesLoading ? 'กำลังโหลดสำนักงาน…' : 'พิมพ์แล้วเลือกสำนักงาน'} value={inputs.site} onChange={value => change('site', value)} describedBy="equipment-site-help" options={[...new Set(sites.map(siteLabel))]} /></label>
+        </div>
+        <div className="equipment-filter-help" id="equipment-site-help">
+          {sitesError ? <span role="alert">โหลดรายชื่อสำนักงานไม่สำเร็จ <button className="list-button" onClick={() => setSiteRetry(n => n + 1)}>โหลดสำนักงานใหม่</button></span> : inputs.site && !siteInputMatches && !sitesLoading ? <span className="equipment-site-warning">ยังไม่ได้กรองสำนักงาน กรุณาเลือกชื่อให้ตรงกับรายการแนะนำ</span> : 'สำนักงานต้องเลือกชื่อให้ตรงกับรายการแนะนำ ส่วนตัวกรองอื่นพิมพ์บางส่วนได้'}
+        </div>
+        <div className="equipment-filter-actions">
+          <button className="list-button" aria-expanded={showAdvanced} aria-controls="equipment-advanced" onClick={() => setShowAdvanced(value => !value)}><SlidersHorizontal size={18} aria-hidden="true" />ตัวกรองขั้นสูง{advancedActiveCount > 0 ? ` (${advancedActiveCount})` : ''}<ChevronDown size={16} aria-hidden="true" style={{ transform: showAdvanced ? 'rotate(180deg)' : undefined }} /></button>
+          <button className="list-button" disabled={!anyFilterActive} onClick={clearAllFilters}>ล้างตัวกรอง</button>
+          <span className="list-muted">ค้นหาอัตโนมัติ · ใช้ทุกเงื่อนไขร่วมกัน</span>
+        </div>
+        <div id="equipment-advanced" className="equipment-advanced" hidden={!showAdvanced}>
+          {ADVANCED_FIELDS.map(({ key, label }) => <label className="list-field" key={key}><span>{label}</span><input value={inputs.advanced[key]} onChange={e => changeField('advanced', key, e.target.value)} /></label>)}
+        </div>
+        <div className="list-result-info"><span role="status">{error ? 'ค้นหาไม่สำเร็จ' : pending ? 'กำลังค้นหา…' : `พบ ${shown?.total.toLocaleString('th-TH') ?? 0} รายการ`}</span><span>{shown && `อัปเดตล่าสุด ${shown.updated.toLocaleTimeString('th-TH')}`}</span></div>
+        {!shown || !shown.equipment.length ? <div className="equipment-empty">
+          <strong>{error ? 'ไม่สามารถแสดงผลการค้นหาล่าสุด' : pending ? 'กำลังค้นหาอุปกรณ์…' : anyFilterActive ? 'ไม่พบอุปกรณ์ที่ตรงกับตัวกรอง' : 'ยังไม่มีอุปกรณ์ในระบบ'}</strong>
+          {!pending && !error && anyFilterActive && <><p>ลองเปลี่ยนคำค้น หรือล้างตัวกรองเพื่อดูรายการทั้งหมด</p><button className="list-button" onClick={clearAllFilters}>ล้างตัวกรอง</button></>}
+        </div> : <div className="list-table-scroll" tabIndex={0} role="region" aria-label="ตารางผลการค้นหา เลื่อนแนวนอนเพื่อดูทุกคอลัมน์" aria-busy={pending}>
+          <table className="list-table"><caption className="list-sr-only">ผลการค้นหาอุปกรณ์ กดชื่ออุปกรณ์เพื่อเปิดรายละเอียด</caption><thead><tr>{['ชื่ออุปกรณ์', 'ประเภท', 'แผนก', 'สำนักงาน', 'รหัสทรัพย์สิน / Serial', 'ผู้ถือครอง', 'สถานะ'].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
+            <tbody>{shown.equipment.map(item => <tr key={item.id}>
+              <td><div className="equipment-name-cell">{item.photos?.[0] && <img src={buildImageUrl(item.photos[0])} alt="" loading="lazy" />}<a className="list-name" title={item.name || 'ดูรายละเอียดอุปกรณ์'} href={`/equipment/${item.id}`} onClick={e => { if (onEquipmentClick && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) { e.preventDefault(); onEquipmentClick(item.id); } }}>{item.name || 'ดูรายละเอียดอุปกรณ์'}</a></div></td>
+              <td title={item.equipment_type || '—'}>{item.equipment_type || '—'}</td>
+              <td title={item.department || '—'}>{item.department || '—'}</td>
+              <td title={item.pea_site ? siteLabel(item.pea_site) : '—'}>{item.pea_site ? siteLabel(item.pea_site) : '—'}</td>
+              <td title={`${item.asset_number || '—'} / Serial: ${item.serial_number || '—'}`}>{item.asset_number || '—'} / <span className="list-muted">Serial: {item.serial_number || '—'}</span></td>
+              <td title={[item.asset_owner || '—', item.asset_owner_emp_id].filter(Boolean).join(' · ')}>{item.asset_owner || '—'}{item.asset_owner_emp_id && <span className="list-muted"> · {item.asset_owner_emp_id}</span>}</td>
+              <td title={[item.status || 'ไม่ทราบสถานะ', item.current_loan?.borrower_name && `โดย ${item.current_loan.borrower_name}`].filter(Boolean).join(' · ')}><span className={`list-status list-status-${statusTone(item.status)}`}>{item.status || 'ไม่ทราบสถานะ'}</span>{item.current_loan?.borrower_name && <span className="list-muted"> · โดย {item.current_loan.borrower_name}</span>}</td>
+            </tr>)}</tbody>
           </table>
-        </div>
-
-        {!loading && pagination.totalPages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', padding: '1.5rem', borderTop: '1px solid var(--border-subtle)' }}>
-            <button
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(prev => prev - 1)}
-              style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.3 : 1 }}
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <select
-              value={currentPage}
-              onChange={(e) => setCurrentPage(Number(e.target.value))}
-              style={{ padding: '0.5rem 0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', color: 'var(--text-primary)', fontSize: '0.9rem', cursor: 'pointer', outline: 'none' }}
-            >
-              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map(p => (
-                <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>หน้า {p} จาก {pagination.totalPages}</option>
-              ))}
-            </select>
-            <button
-              disabled={currentPage === pagination.totalPages}
-              onClick={() => setCurrentPage(prev => prev + 1)}
-              style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === pagination.totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === pagination.totalPages ? 0.3 : 1 }}
-            >
-              <ChevronRight size={20} />
-            </button>
-          </div>
-        )}
-      </div>
-    </motion.div>
+        </div>}
+        <footer className="list-footer"><span className="list-muted">{shown?.total ? `${(shown.page - 1) * itemsPerPage + 1}–${(shown.page - 1) * itemsPerPage + shown.equipment.length} จาก ${shown.total} รายการ` : '—'} · {itemsPerPage} รายการต่อหน้า</span>
+          <nav className="list-pagination" aria-label="แบ่งหน้าผลการค้นหา"><button className="list-button" disabled={pending || Boolean(error) || currentPage <= 1} onClick={() => setCurrentPage(p => p - 1)}>ก่อนหน้า</button><label>หน้า <select value={shown?.page || currentPage} disabled={pending || Boolean(error)} onChange={e => setCurrentPage(Number(e.target.value))}>{Array.from({ length: Math.max(currentPage, shown?.totalPages || 1) }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select> / {shown?.totalPages || '—'}</label><button className="list-button" disabled={pending || Boolean(error) || !shown || currentPage >= shown.totalPages} onClick={() => setCurrentPage(p => p + 1)}>ถัดไป</button></nav>
+        </footer>
+      </section>
+    </div>
   );
 };
 

@@ -1,9 +1,10 @@
+import './EquipmentDetails.css';
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as Motion, AnimatePresence } from 'framer-motion';
 import {
-  ChevronLeft, Loader2, AlertTriangle, Cpu, Building2, Wifi, Hash,
+  ChevronLeft, ChevronRight, Loader2, AlertTriangle, Cpu, Building2, Wifi, Hash,
   Briefcase, Calendar, StickyNote, MapPin, UserCircle, PackageSearch, Pencil,
-  Fingerprint, Tag, User, IdCard, Archive, Router, Repeat, ArrowLeftRight, UserCog, Wrench
+  Fingerprint, Tag, User, IdCard, Archive, Router, Repeat, ArrowLeftRight, UserCog, Wrench, X
 } from 'lucide-react';
 import BorrowReturnModal from './BorrowReturnModal';
 import OwnerHistoryModal from './OwnerHistoryModal';
@@ -85,11 +86,94 @@ const JobHistoryList = ({ items }) => (
   </div>
 );
 
+// In-page photo viewer -- replaces plain <a target="_blank"> thumbnails so
+// browsing pictures doesn't leave the equipment page. Works for both the
+// multi-photo gallery (with prev/next + arrow-key navigation) and the
+// single storage photo (images.length === 1, arrows just don't render).
+const ImageLightbox = ({ images, index, onClose, onNavigate }) => {
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+      else if (e.key === 'ArrowLeft' && images.length > 1) onNavigate((index - 1 + images.length) % images.length);
+      else if (e.key === 'ArrowRight' && images.length > 1) onNavigate((index + 1) % images.length);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [index, images.length, onClose, onNavigate]);
+
+  return (
+    <Motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.9)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1.5rem'
+      }}
+      onClick={onClose}
+    >
+      <button
+        onClick={onClose}
+        style={{
+          position: 'absolute', top: '1rem', right: '1rem', background: 'rgba(255,255,255,0.1)',
+          border: 'none', color: '#fff', borderRadius: '50%', width: '2.5rem', height: '2.5rem',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+        }}
+      >
+        <X size={20} />
+      </button>
+
+      {images.length > 1 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onNavigate((index - 1 + images.length) % images.length); }}
+          style={{
+            position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)',
+            background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '50%',
+            width: '2.75rem', height: '2.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+          }}
+        >
+          <ChevronLeft size={24} />
+        </button>
+      )}
+
+      <img
+        src={images[index]}
+        alt={`รูปที่ ${index + 1}`}
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', borderRadius: '0.5rem' }}
+      />
+
+      {images.length > 1 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onNavigate((index + 1) % images.length); }}
+          style={{
+            position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)',
+            background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '50%',
+            width: '2.75rem', height: '2.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+          }}
+        >
+          <ChevronRight size={24} />
+        </button>
+      )}
+
+      {images.length > 1 && (
+        <div style={{
+          position: 'absolute', bottom: '1.25rem', left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '0.8rem',
+          padding: '0.3rem 0.8rem', borderRadius: '1rem'
+        }}>
+          {index + 1} / {images.length}
+        </div>
+      )}
+    </Motion.div>
+  );
+};
+
 const InfoRow = ({ icon: Icon, label, value, mono, blurred }) => {
   if (!value) return null;
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', padding: '0.85rem 0' }}>
-      <Icon size={18} style={{ color: 'var(--text-secondary)', flexShrink: 0, marginTop: '0.15rem' }} />
+      {React.createElement(Icon, { size: 18, style: { color: 'var(--text-secondary)', flexShrink: 0, marginTop: '0.15rem' } })}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>{label}</div>
         <div style={{
@@ -110,8 +194,8 @@ const Section = ({ title, children }) => {
   const items = React.Children.toArray(children).filter(Boolean);
   if (items.length === 0) return null;
   return (
-    <div className="card glass" style={{ padding: '0.5rem 1.25rem', marginBottom: '1rem' }}>
-      <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', padding: '0.85rem 0 0.25rem' }}>{title}</div>
+    <section className="glass equipment-details-section">
+      <h2 className="equipment-details-section-title">{title}</h2>
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {items.map((child, i) => (
           <div key={i} style={{ borderBottom: i < items.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
@@ -119,7 +203,7 @@ const Section = ({ title, children }) => {
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 };
 
@@ -131,6 +215,10 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
   const [loadingLoan, setLoadingLoan] = useState(true);
   const [showBorrowModal, setShowBorrowModal] = useState(false);
   const [showOwnerHistory, setShowOwnerHistory] = useState(false);
+  // Which gallery is open in the lightbox -- 'photos' | 'storage' | null --
+  // plus the index within that gallery's image list.
+  const [lightboxGallery, setLightboxGallery] = useState(null);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
 
   const fetchEquipment = async () => {
     setLoading(true);
@@ -178,10 +266,10 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
   const hasContractInfo = equipment && (equipment.vendor || equipment.contract_no || equipment.contract_start_date || equipment.contract_expiry_date);
 
   return (
-    <motion.div
+    <Motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      style={{ maxWidth: '480px', margin: '0 auto', width: '100%' }}
+      className="equipment-details-page"
     >
       <button
         onClick={onBack}
@@ -207,7 +295,7 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
       ) : equipment ? (
         <>
           {/* Hero */}
-          <div className="card glass" style={{ padding: '1.5rem', marginBottom: '1rem', textAlign: 'center' }}>
+          <header className="glass equipment-details-hero">
             <div style={{
               width: '3.5rem', height: '3.5rem', borderRadius: '50%',
               background: 'var(--bg-accent-subtle)', color: 'var(--accent-primary)',
@@ -236,137 +324,9 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
                 {openLoan.due_date && <>· กำหนดคืน {formatDueDate(openLoan.due_date)}</>}
               </div>
             )}
-          </div>
+          </header>
 
-          {equipment.photos && equipment.photos.length > 0 && (
-            <div className="card glass" style={{ padding: '1.25rem', marginBottom: '1rem' }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem' }}>รูปภาพอุปกรณ์</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
-                {equipment.photos.map((path, i) => (
-                  <a key={i} href={buildImageUrl(path, equipment.updatedAt)} target="_blank" rel="noreferrer">
-                    <img
-                      src={buildImageUrl(path, equipment.updatedAt)}
-                      alt={`รูปอุปกรณ์ ${i + 1}`}
-                      style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)' }}
-                    />
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <Section title="ข้อมูลทั่วไป">
-            <InfoRow icon={Cpu} label="ประเภทอุปกรณ์" value={equipment.equipment_type} />
-            <InfoRow icon={Building2} label="แผนก" value={equipment.department} />
-          </Section>
-
-          <Section title="เครือข่าย">
-            <InfoRow icon={Wifi} label="IP Address" value={equipment.ip_address} mono blurred={!user} />
-            <InfoRow icon={Hash} label="MAC Address" value={equipment.mac_address} mono blurred={!user} />
-          </Section>
-
-          <Section title="ครุภัณฑ์">
-            <InfoRow icon={Fingerprint} label="Serial Number" value={equipment.serial_number} mono />
-            <InfoRow icon={Tag} label="รหัสทรัพย์สิน" value={equipment.asset_number} />
-            <InfoRow icon={User} label="ผู้ถือครอง" value={equipment.asset_owner} />
-            <InfoRow icon={IdCard} label="รหัสพนักงานผู้ถือครอง" value={equipment.asset_owner_emp_id} />
-          </Section>
-
-          {hasContractInfo && (
-            <Section title="ข้อมูลผู้ขาย/สัญญา">
-              <InfoRow icon={Briefcase} label="ผู้ขาย" value={equipment.vendor} />
-              <InfoRow icon={Hash} label="เลขที่สัญญา" value={equipment.contract_no} />
-              <InfoRow icon={Calendar} label="วันเริ่มสัญญา" value={equipment.contract_start_date} />
-              <InfoRow icon={Calendar} label="วันหมดอายุสัญญา" value={equipment.contract_expiry_date} />
-            </Section>
-          )}
-
-          <Section title="หมายเหตุ">
-            <InfoRow icon={StickyNote} label="หมายเหตุ" value={equipment.notes} />
-          </Section>
-
-          <Section title="สำนักงาน">
-            <InfoRow
-              icon={MapPin}
-              label="สำนักงาน"
-              value={equipment.pea_site ? `${equipment.pea_site.pea_name}${equipment.pea_site.pea_province ? ` (${equipment.pea_site.pea_province})` : ''}` : null}
-            />
-          </Section>
-
-          {equipment.network_ip && (() => {
-            const ranges = [
-              { label: 'วงหลัก', ip: equipment.network_ip.main },
-              { label: '172.x (สำรอง)', ip: equipment.network_ip.secondary_172 },
-              { label: '10.221.x', ip: equipment.network_ip.secondary_10 },
-              { label: 'DHCP Range', ip: equipment.network_ip.dhcp_range }
-            ].filter(item => item.ip && item.ip !== '-');
-            if (ranges.length === 0) return null;
-            return (
-              <div className="card glass" style={{ padding: '1.25rem', marginBottom: '1rem' }}>
-                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <Router size={15} /> วง IP ของสำนักงาน
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
-                  {ranges.map(item => (
-                    <div
-                      key={item.label}
-                      className="glass"
-                      style={{ padding: '0.5rem 0.9rem', borderRadius: '0.5rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                    >
-                      <span style={{ color: 'var(--text-secondary)' }}>{item.label}:</span>
-                      <span style={{
-                        fontFamily: 'monospace', fontWeight: 700, color: 'var(--accent-primary)',
-                        filter: !user ? 'blur(4px)' : 'none', userSelect: !user ? 'none' : 'auto'
-                      }}>{item.ip}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-
-          <Section title="ที่ติดตั้งหรือจัดเก็บ">
-            <InfoRow icon={Archive} label="สถานที่ติดตั้งหรือจัดเก็บ" value={equipment.storage_location} />
-            {equipment.storage_photo && (
-              <div style={{ padding: '0.85rem 0' }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>รูปสถานที่ติดตั้งหรือจัดเก็บ</div>
-                <a href={buildImageUrl(equipment.storage_photo, equipment.updatedAt)} target="_blank" rel="noreferrer">
-                  <img
-                    src={buildImageUrl(equipment.storage_photo, equipment.updatedAt)}
-                    alt="รูปสถานที่ติดตั้งหรือจัดเก็บ"
-                    style={{ width: '100px', height: '100px', objectFit: 'cover', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)' }}
-                  />
-                </a>
-              </div>
-            )}
-          </Section>
-
-          {equipment.problem_jobs && equipment.problem_jobs.length > 0 && (
-            <div className="card glass" style={{ padding: '1.25rem', marginBottom: '1rem' }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <Wrench size={15} /> ประวัติการแจ้งปัญหา/ซ่อม
-              </div>
-              <JobHistoryList items={equipment.problem_jobs} />
-            </div>
-          )}
-
-          {equipment.jobs && equipment.jobs.length > 0 && (
-            <div className="card glass" style={{ padding: '1.25rem', marginBottom: '1rem' }}>
-              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <Briefcase size={15} /> งานที่นำอุปกรณ์นี้ไปใช้ดำเนินการ
-              </div>
-              <JobHistoryList items={equipment.jobs} />
-            </div>
-          )}
-
-          {equipment.created_by && (
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center', padding: '0.5rem 0 1.5rem' }}>
-              <UserCircle size={14} style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} />
-              บันทึกโดย {equipment.created_by.first_name} {equipment.created_by.last_name} (@{equipment.created_by.username})
-              {equipment.updatedAt && ` · แก้ไขล่าสุด ${new Date(equipment.updatedAt).toLocaleString('th-TH')}`}
-            </p>
-          )}
-
+          <div className="equipment-details-actions" aria-label="จัดการอุปกรณ์">
           <button
             onClick={() => {
               if (!user) { onRequireLogin && onRequireLogin(); return; }
@@ -442,6 +402,140 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
             <Pencil size={18} /> แก้ไขข้อมูลอุปกรณ์
           </button>
 
+          </div>
+
+          <div className="equipment-details-grid">
+          {equipment.photos && equipment.photos.length > 0 && (
+            <div className="glass equipment-details-section equipment-details-wide">
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem' }}>รูปภาพอุปกรณ์</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
+                {equipment.photos.map((path, i) => (
+                  <img
+                    key={i}
+                    src={buildImageUrl(path, equipment.updatedAt)}
+                    alt={`รูปอุปกรณ์ ${i + 1}`}
+                    onClick={() => { setLightboxGallery('photos'); setLightboxIndex(i); }}
+                    className="equipment-details-photo" role="button" tabIndex={0}
+                    onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setLightboxGallery('photos'); setLightboxIndex(i); } }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Section title="ข้อมูลทั่วไป">
+            <InfoRow icon={Cpu} label="ประเภทอุปกรณ์" value={equipment.equipment_type} />
+            <InfoRow icon={Building2} label="แผนก" value={equipment.department} />
+          </Section>
+
+          <Section title="เครือข่าย">
+            <InfoRow icon={Wifi} label="IP Address" value={equipment.ip_address} mono blurred={!user} />
+            <InfoRow icon={Hash} label="MAC Address" value={equipment.mac_address} mono blurred={!user} />
+          </Section>
+
+          <Section title="ครุภัณฑ์">
+            <InfoRow icon={Fingerprint} label="Serial Number" value={equipment.serial_number} mono />
+            <InfoRow icon={Tag} label="รหัสทรัพย์สิน" value={equipment.asset_number} />
+            <InfoRow icon={User} label="ผู้ถือครอง" value={equipment.asset_owner} />
+            <InfoRow icon={IdCard} label="รหัสพนักงานผู้ถือครอง" value={equipment.asset_owner_emp_id} />
+          </Section>
+
+          {hasContractInfo && (
+            <Section title="ข้อมูลผู้ขาย/สัญญา">
+              <InfoRow icon={Briefcase} label="ผู้ขาย" value={equipment.vendor} />
+              <InfoRow icon={Hash} label="เลขที่สัญญา" value={equipment.contract_no} />
+              <InfoRow icon={Calendar} label="วันเริ่มสัญญา" value={equipment.contract_start_date} />
+              <InfoRow icon={Calendar} label="วันหมดอายุสัญญา" value={equipment.contract_expiry_date} />
+            </Section>
+          )}
+
+          <Section title="หมายเหตุ">
+            <InfoRow icon={StickyNote} label="หมายเหตุ" value={equipment.notes} />
+          </Section>
+
+          <Section title="สำนักงาน">
+            <InfoRow
+              icon={MapPin}
+              label="สำนักงาน"
+              value={equipment.pea_site ? `${equipment.pea_site.pea_name}${equipment.pea_site.pea_province ? ` (${equipment.pea_site.pea_province})` : ''}` : null}
+            />
+          </Section>
+
+          {equipment.network_ip && (() => {
+            const ranges = [
+              { label: 'วงหลัก', ip: equipment.network_ip.main },
+              { label: '172.x (สำรอง)', ip: equipment.network_ip.secondary_172 },
+              { label: '10.221.x', ip: equipment.network_ip.secondary_10 },
+              { label: 'DHCP Range', ip: equipment.network_ip.dhcp_range }
+            ].filter(item => item.ip && item.ip !== '-');
+            if (ranges.length === 0) return null;
+            return (
+              <div className="glass equipment-details-section equipment-details-wide">
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Router size={15} /> วง IP ของสำนักงาน
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
+                  {ranges.map(item => (
+                    <div
+                      key={item.label}
+                      className="glass"
+                      style={{ padding: '0.5rem 0.9rem', borderRadius: '0.5rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                    >
+                      <span style={{ color: 'var(--text-secondary)' }}>{item.label}:</span>
+                      <span style={{
+                        fontFamily: 'monospace', fontWeight: 700, color: 'var(--accent-primary)',
+                        filter: !user ? 'blur(4px)' : 'none', userSelect: !user ? 'none' : 'auto'
+                      }}>{item.ip}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          <Section title="ที่ติดตั้งหรือจัดเก็บ">
+            <InfoRow icon={Archive} label="สถานที่ติดตั้งหรือจัดเก็บ" value={equipment.storage_location} />
+            {equipment.storage_photo && (
+              <div style={{ padding: '0.85rem 0' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>รูปสถานที่ติดตั้งหรือจัดเก็บ</div>
+                <img
+                  src={buildImageUrl(equipment.storage_photo, equipment.updatedAt)}
+                  alt="รูปสถานที่ติดตั้งหรือจัดเก็บ"
+                  onClick={() => { setLightboxGallery('storage'); setLightboxIndex(0); }}
+                  style={{ width: '100px', height: '100px', objectFit: 'cover', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', cursor: 'pointer' }}
+                />
+              </div>
+            )}
+          </Section>
+
+          {equipment.problem_jobs && equipment.problem_jobs.length > 0 && (
+            <div className="glass equipment-details-section equipment-details-wide">
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Wrench size={15} /> ประวัติการแจ้งปัญหา/ซ่อม
+              </div>
+              <JobHistoryList items={equipment.problem_jobs} />
+            </div>
+          )}
+
+          {equipment.jobs && equipment.jobs.length > 0 && (
+            <div className="glass equipment-details-section equipment-details-wide">
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <Briefcase size={15} /> งานที่นำอุปกรณ์นี้ไปใช้ดำเนินการ
+              </div>
+              <JobHistoryList items={equipment.jobs} />
+            </div>
+          )}
+
+          {equipment.created_by && (
+            <p className="equipment-details-wide" style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '0.5rem 0' }}>
+              <UserCircle size={14} style={{ verticalAlign: 'middle', marginRight: '0.25rem' }} />
+              บันทึกโดย {equipment.created_by.first_name} {equipment.created_by.last_name} (@{equipment.created_by.username})
+              {equipment.updatedAt && ` · แก้ไขล่าสุด ${new Date(equipment.updatedAt).toLocaleString('th-TH')}`}
+            </p>
+          )}
+
+          </div>
+
           <AnimatePresence>
             {showBorrowModal && (
               <BorrowReturnModal
@@ -464,10 +558,22 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
                 onClose={() => setShowOwnerHistory(false)}
               />
             )}
+            {lightboxGallery && (
+              <ImageLightbox
+                images={
+                  lightboxGallery === 'photos'
+                    ? equipment.photos.map(p => buildImageUrl(p, equipment.updatedAt))
+                    : [buildImageUrl(equipment.storage_photo, equipment.updatedAt)]
+                }
+                index={lightboxIndex}
+                onNavigate={setLightboxIndex}
+                onClose={() => setLightboxGallery(null)}
+              />
+            )}
           </AnimatePresence>
         </>
       ) : null}
-    </motion.div>
+    </Motion.div>
   );
 };
 

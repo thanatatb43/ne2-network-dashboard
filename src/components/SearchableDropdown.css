@@ -1,0 +1,11 @@
+.searchable-dropdown { position: relative; min-width: 0; width: 100%; font-size: .875rem; font-weight: 400; line-height: 1.5; }
+.equipment-search-page .searchable-dropdown input { padding-right: 36px; }
+.searchable-dropdown-chevron { position: absolute; right: 12px; top: 14px; pointer-events: none; color: var(--text-secondary); }
+.searchable-dropdown-options { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; width: 100%; max-height: 240px; overflow-y: auto; overscroll-behavior: contain; padding: 4px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); box-shadow: 0 8px 24px rgba(15, 23, 42, .16); }
+.dark-theme .searchable-dropdown-options { background: var(--bg-color); }
+.searchable-dropdown-options[hidden] { display: none; }
+.searchable-dropdown-option, .searchable-dropdown-empty { padding: 10px 8px; min-height: 40px; overflow-wrap: anywhere; border-radius: 4px; }
+.searchable-dropdown-option { cursor: pointer; }
+.searchable-dropdown-option:hover, .searchable-dropdown-option.is-active { background: var(--bg-accent-subtle); }
+.searchable-dropdown-option[aria-selected="true"] { color: var(--list-action); font-weight: 600; }
+.searchable-dropdown-empty { color: var(--text-secondary); }
