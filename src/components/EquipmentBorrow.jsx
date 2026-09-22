@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-hot-toast';
 import {
-  Search, Loader2, ChevronLeft, ChevronRight, ShoppingCart, X, Plus, Check,
+  Search, Loader2, RefreshCw, AlertCircle, ShoppingCart, X, Plus, Check,
   CheckCircle2, XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import './ListPage.css';
+import './EquipmentBorrow.css';
+import SearchableDropdown from './SearchableDropdown';
 
 // Same fixed option lists OfficeEquipmentManagement.jsx's create/edit form
 // uses, duplicated here since they aren't exported from that file.
@@ -19,20 +22,27 @@ const DEPARTMENT_OPTIONS = [
 // "ถูกยืม" isn't one of the record's own lifecycle statuses -- it's what the
 // API reports when an item currently has an open loan -- but it's still a
 // valid filter value, so it's listed separately from the fixed lifecycle list.
-const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'ถูกยืม'];
+const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน', 'ถูกยืม'];
+const PRIMARY_FIELDS = [
+  ['equipment_type', 'ประเภท', EQUIPMENT_TYPE_OPTIONS],
+  ['department', 'แผนก', DEPARTMENT_OPTIONS],
+  ['status', 'สถานะ', STATUS_OPTIONS],
+];
+const emptyPrimary = { equipment_type: '', department: '', status: '' };
 
 // photos come back from the API as relative paths (e.g.
 // "/uploads/office-equipment/9-xxx.png") that need the backend's own origin
 // prefixed to be viewable -- same convention as EquipmentDetails.jsx.
 const buildImageUrl = (path) => path ? `${import.meta.env.VITE_API_BASE_URL}${path}` : null;
-
-const statusColor = (status) => {
-  const s = (status || '').trim();
-  if (s === 'ใช้งาน') return 'var(--accent-success)';
-  if (s === 'รอปรับปรุง' || s === 'รอจำหน่าย') return 'var(--accent-warning)';
-  if (s === 'เลิกใช้งาน' || s === 'จำหน่าย') return 'var(--accent-danger)';
-  if (s === 'ถูกยืม') return '#a855f7';
-  return 'var(--text-secondary)';
+const siteLabel = (s) => `${s.pea_name}${s.pea_province || s.province ? ` (${s.pea_province || s.province})` : ''}`;
+// Same tone groups as EquipmentSearch.jsx's statusTone, plus "borrowed" for
+// the API-derived loan status this page cares about.
+const statusTone = (status) => {
+  if (status === 'ใช้งาน') return 'up';
+  if (['รอปรับปรุง', 'รอจำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน'].includes(status)) return 'warning';
+  if (['เลิกใช้งาน', 'จำหน่าย'].includes(status)) return 'down';
+  if (status === 'ถูกยืม') return 'borrowed';
+  return 'unknown';
 };
 
 // due_date is a full timestamp; <input type="datetime-local"> gives back a
@@ -44,41 +54,51 @@ const toBangkokIso = (datetimeLocalValue) => {
   return `${datetimeLocalValue}:00+07:00`;
 };
 
-const inputStyle = {
-  padding: '0.6rem 0.8rem',
-  borderRadius: '0.5rem',
-  border: '1px solid var(--input-border)',
-  background: 'var(--input-bg)',
-  color: 'var(--text-primary)',
-  fontSize: '0.9rem',
-  outline: 'none'
+// Basic modal accessibility (name via aria-labelledby, aria-modal, initial
+// focus, Tab trap, and returning focus to the opener on close) -- there is
+// no shared Modal component yet (see DESIGN_STANDARDS.md section 12), so
+// this is a small local implementation reused across this page's 3 dialogs.
+const useModalA11y = (open, containerRef, onEscape) => {
+  const openerRef = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    openerRef.current = document.activeElement;
+    const getFocusable = () => Array.from(
+      containerRef.current?.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])') || []
+    ).filter(el => !el.disabled);
+    (getFocusable()[0] || containerRef.current)?.focus();
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') { onEscape?.(); return; }
+      if (e.key !== 'Tab') return;
+      const items = getFocusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      openerRef.current?.focus?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 };
 
-const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
-  const [equipment, setEquipment] = useState([]);
-  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, totalPages: 1 });
-  const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
+const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
   const itemsPerPage = 10;
-
-  const [searchInput, setSearchInput] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  // ประเภท/แผนก/สำนักงาน are typeable <input list> + <datalist> combos
-  // instead of plain <select>s, same convention as EquipmentSearch.jsx --
-  // Input holds the raw typed text, committed after a debounce. ประเภท and
-  // แผนก are sent to the API as-is (exact match required server-side, so
-  // partial typing just returns nothing until it matches an option or the
-  // user picks a suggestion); สำนักงาน is a real FK, so it only resolves to
-  // an id once the text exactly matches a known site's label.
-  const [equipmentTypeInput, setEquipmentTypeInput] = useState('');
-  const [equipmentType, setEquipmentType] = useState('');
-  const [departmentInput, setDepartmentInput] = useState('');
-  const [department, setDepartment] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [siteInput, setSiteInput] = useState('');
-  const [siteFilter, setSiteFilter] = useState('');
+  const [inputs, setInputs] = useState({ search: '', site: '', primary: emptyPrimary });
+  const [filters, setFilters] = useState(inputs);
+  const [currentPage, setCurrentPage] = useState(1);
   const [sites, setSites] = useState([]);
-  const siteLabel = (s) => `${s.pea_name}${s.province ? ` (${s.province})` : ''}`;
+  const [sitesLoading, setSitesLoading] = useState(true);
+  const [sitesError, setSitesError] = useState(false);
+  const [siteRetry, setSiteRetry] = useState(0);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
 
   const [cart, setCart] = useState([]); // array of equipment objects
   const [showCart, setShowCart] = useState(false);
@@ -89,99 +109,99 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
   const [submitting, setSubmitting] = useState(false);
   const [responseModal, setResponseModal] = useState(null); // { type: 'success' | 'error', message: string }
 
-  const fetchSites = async () => {
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/sites`, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-      });
-      const result = await response.json();
-      const list = result.data || result || [];
-      setSites(Array.isArray(list) ? list : []);
-    } catch (error) {
-      console.error('Error fetching PEA sites:', error);
-    }
-  };
-
-  const fetchEquipment = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      params.append('page', String(currentPage));
-      params.append('limit', String(itemsPerPage));
-      if (searchTerm.trim()) params.append('search', searchTerm.trim());
-      if (equipmentType) params.append('equipment_type', equipmentType);
-      if (department) params.append('department', department);
-      if (statusFilter) params.append('status', statusFilter);
-      if (siteFilter) params.append('pea_site_id', siteFilter);
-
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment?${params.toString()}`, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-      });
-      const result = await response.json();
-      if (result.success) {
-        setEquipment(result.data || []);
-        if (result.pagination) setPagination(result.pagination);
-      }
-    } catch (error) {
-      console.error('Error fetching office equipment:', error);
-      toast.error('ไม่สามารถโหลดรายการอุปกรณ์ได้');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const cartRef = useRef(null);
+  const confirmRef = useRef(null);
+  const responseRef = useRef(null);
+  useModalA11y(showCart, cartRef, () => setShowCart(false));
+  useModalA11y(showConfirm, confirmRef, () => { if (!submitting) setShowConfirm(false); });
+  useModalA11y(Boolean(responseModal), responseRef, () => setResponseModal(null));
 
   useEffect(() => {
-    fetchSites();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const controller = new AbortController();
+    let active = true;
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const load = async () => {
+      setSitesLoading(true);
+      setSitesError(false);
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/sites`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal,
+        });
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        const list = data.data || data;
+        if (!Array.isArray(list)) throw new Error();
+        if (active) setSites(list);
+      } catch { if (active) setSitesError(true); }
+      finally { clearTimeout(timer); if (active) setSitesLoading(false); }
+    };
+    load();
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [token, siteRetry]);
+
+  // Debounces every typed filter into a single committed set 400ms after the
+  // user stops typing, and resets to page 1 -- same convention as
+  // EquipmentSearch.jsx.
+  useEffect(() => {
+    if (inputs === filters) return;
+    const timer = setTimeout(() => { setFilters(inputs); setCurrentPage(1); }, 400);
+    return () => clearTimeout(timer);
+  }, [inputs, filters]);
+
+  // สำนักงาน only resolves to a real pea_site_id once the typed text exactly
+  // matches a known site's label (i.e. the user picked a suggestion or typed
+  // the full name) -- partial text just leaves the site filter unset.
+  const site = sites.find(s => siteLabel(s) === filters.site);
+  const siteInputMatches = sites.some(s => siteLabel(s) === inputs.site);
+  const waitingForSite = Boolean(filters.site && sitesLoading);
+  const requestParams = (() => {
+    const params = new URLSearchParams();
+    params.set('page', String(currentPage));
+    params.set('limit', String(itemsPerPage));
+    if (filters.search.trim()) params.set('search', filters.search.trim());
+    Object.entries(filters.primary).forEach(([k, v]) => { if (v.trim()) params.set(k, v.trim()); });
+    if (site) params.set('pea_site_id', String(site.id));
+    return params;
+  })();
+  const requestKey = requestParams.toString();
+  const pending = inputs !== filters || waitingForSite || loading || result?.key !== requestKey || result?.token !== token;
 
   useEffect(() => {
-    fetchEquipment();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, currentPage, searchTerm, equipmentType, department, statusFilter, siteFilter]);
+    if (waitingForSite) return;
+    const controller = new AbortController();
+    let active = true;
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const load = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment?${requestKey}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal,
+        });
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        if (!data.success || !Array.isArray(data.data)) throw new Error();
+        if (!active) return;
+        const total = Number(data.pagination?.total ?? data.data.length);
+        const totalPages = Math.max(1, Number(data.pagination?.totalPages) || Math.ceil(total / itemsPerPage));
+        if (currentPage > totalPages) { setCurrentPage(totalPages); return; }
+        setResult({ equipment: data.data, total, totalPages, page: currentPage, key: requestKey, token, updated: new Date() });
+      } catch { if (active) setError('ไม่สามารถโหลดรายการอุปกรณ์ได้ กรุณาลองใหม่'); }
+      finally { clearTimeout(timer); if (active) setLoading(false); }
+    };
+    load();
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [requestKey, token, retry, waitingForSite, currentPage]);
 
-  // Debounces free-text search into a single request; lands together with
-  // the page-1 reset so they batch into one re-render instead of racing
-  // across two separate effects.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setSearchTerm(searchInput);
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setEquipmentType(equipmentTypeInput);
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [equipmentTypeInput]);
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setDepartment(departmentInput);
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [departmentInput]);
-
-  // Only resolves to a real pea_site_id once the typed text exactly matches
-  // a known site's label (i.e. the user picked a datalist suggestion or
-  // typed the full name) -- partial text just leaves the site filter unset.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const match = sites.find(s => siteLabel(s) === siteInput);
-      setSiteFilter(match ? String(match.id) : '');
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [siteInput, sites]);
-
-  const handleFilterChange = (setter) => (value) => {
-    setter(value);
-    setCurrentPage(1);
+  // Only show rows matching this page's current filters/auth context, so an
+  // in-flight response for a stale search never overwrites a newer one.
+  const shown = result?.key === requestKey && result?.token === token ? result : null;
+  const anyFilterActive = Boolean(inputs.search || inputs.site || Object.values(inputs.primary).some(Boolean));
+  const change = (key, value) => setInputs(prev => ({ ...prev, [key]: value }));
+  const changeField = (key, value) => setInputs(prev => ({ ...prev, primary: { ...prev.primary, [key]: value } }));
+  const clearAllFilters = () => {
+    const cleared = { search: '', site: '', primary: emptyPrimary };
+    setInputs(cleared); setFilters(cleared); setCurrentPage(1);
   };
 
   const isBorrowed = (item) => item.status === 'ถูกยืม' || !!item.current_loan;
@@ -234,7 +254,7 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
         setDueDate('');
         setShowConfirm(false);
         setShowCart(false);
-        fetchEquipment();
+        setRetry(n => n + 1);
       } else {
         setResponseModal({ type: 'error', message: result.message || result.error || 'ยืมอุปกรณ์ไม่สำเร็จ' });
       }
@@ -247,251 +267,157 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
   };
 
   return (
-    <motion.div
-      key="equipment-borrow"
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      transition={{ duration: 0.2 }}
-    >
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>ยืมอุปกรณ์</h1>
-        <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }}>เลือกอุปกรณ์ที่ต้องการยืมลงตระกร้า แล้วยืนยันการยืมพร้อมกันได้หลายชิ้น</p>
-      </div>
+    <div className="list-page equipment-borrow-page">
+      <header className="list-header">
+        <div>
+          <h1>ยืมอุปกรณ์</h1>
+          <p>เลือกอุปกรณ์ที่ต้องการยืมลงตระกร้า แล้วยืนยันการยืมพร้อมกันได้หลายชิ้น</p>
+        </div>
+        <div className="list-actions">
+          <button className="list-button" disabled={loading || waitingForSite} onClick={() => setRetry(n => n + 1)}>
+            <RefreshCw size={18} aria-hidden="true" className={loading ? 'animate-spin' : ''} />รีเฟรช
+          </button>
+        </div>
+      </header>
 
-      <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', flex: '1 1 240px' }}>
-            <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-            <input
-              type="text"
-              placeholder="ค้นหาชื่อ / รหัสทรัพย์สิน / Serial / IP / MAC..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              style={{
-                ...inputStyle, width: '100%', padding: '0.6rem 0.6rem 0.6rem 2.5rem',
-                border: searchInput ? '1px solid var(--accent-primary)' : inputStyle.border,
-                background: searchInput ? 'var(--bg-accent-subtle)' : inputStyle.background
-              }}
+      {error && (
+        <div className="list-error" role="alert">
+          <AlertCircle size={20} aria-hidden="true" />
+          <div>
+            <strong>{error}</strong>
+            {shown && <p>แสดงรายการจากการโหลดครั้งก่อน ข้อมูลอาจเปลี่ยนแปลงแล้ว</p>}
+          </div>
+          <button className="list-button" disabled={loading} onClick={() => setRetry(n => n + 1)}>ลองใหม่</button>
+        </div>
+      )}
+
+      <section className="list-panel" aria-label="ค้นหาและกรองอุปกรณ์ที่ยืมได้">
+        <div className="equipment-borrow-filters">
+          <label className="list-field equipment-borrow-search-filter">
+            <span>ค้นหา</span>
+            <div className="list-search-input">
+              <Search size={18} aria-hidden="true" />
+              <input type="search" placeholder="ชื่อ / รหัสทรัพย์สิน / Serial / IP / MAC" value={inputs.search} onChange={(e) => change('search', e.target.value)} />
+            </div>
+          </label>
+          {PRIMARY_FIELDS.map(([key, label, options]) => (
+            <label className="list-field" key={key}>
+              <span>{label}</span>
+              <SearchableDropdown label={label} placeholder="ทั้งหมด" value={inputs.primary[key]} onChange={(value) => changeField(key, value)} options={options} />
+            </label>
+          ))}
+          <label className="list-field">
+            <span>สำนักงาน</span>
+            <SearchableDropdown
+              label="สำนักงาน"
+              placeholder={sitesLoading ? 'กำลังโหลดสำนักงาน…' : 'ทั้งหมด'}
+              value={inputs.site}
+              onChange={(value) => change('site', value)}
+              describedBy="equipment-borrow-site-help"
+              options={[...new Set(sites.map(siteLabel))]}
             />
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: equipmentTypeInput ? '1px solid var(--accent-primary)' : undefined,
-            background: equipmentTypeInput ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>
-            <input
-              type="text"
-              list="eq-borrow-type-options"
-              placeholder="ทั้งหมด"
-              value={equipmentTypeInput}
-              onChange={(e) => setEquipmentTypeInput(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '110px' }}
-            />
-            <datalist id="eq-borrow-type-options">
-              {EQUIPMENT_TYPE_OPTIONS.map(t => <option key={t} value={t} />)}
-            </datalist>
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: departmentInput ? '1px solid var(--accent-primary)' : undefined,
-            background: departmentInput ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>แผนก:</span>
-            <input
-              type="text"
-              list="eq-borrow-department-options"
-              placeholder="ทั้งหมด"
-              value={departmentInput}
-              onChange={(e) => setDepartmentInput(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '100px' }}
-            />
-            <datalist id="eq-borrow-department-options">
-              {DEPARTMENT_OPTIONS.map(d => <option key={d} value={d} />)}
-            </datalist>
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: statusFilter ? '1px solid var(--accent-primary)' : undefined,
-            background: statusFilter ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สถานะ:</span>
-            <select value={statusFilter} onChange={(e) => handleFilterChange(setStatusFilter)(e.target.value)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-              <option value="">ทั้งหมด</option>
-              {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: siteInput ? '1px solid var(--accent-primary)' : undefined,
-            background: siteInput ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สำนักงาน:</span>
-            <input
-              type="text"
-              list="eq-borrow-site-options"
-              placeholder="ทั้งหมด"
-              value={siteInput}
-              onChange={(e) => setSiteInput(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '180px' }}
-            />
-            <datalist id="eq-borrow-site-options">
-              {sites.map(s => <option key={s.id} value={siteLabel(s)} />)}
-            </datalist>
-          </div>
-
-          <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
-            แสดง <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{equipment.length}</span> จาก <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.total}</span> รายการ
-          </div>
+          </label>
+        </div>
+        <div className="equipment-borrow-filter-help" id="equipment-borrow-site-help">
+          {sitesError ? (
+            <span role="alert">โหลดรายชื่อสำนักงานไม่สำเร็จ <button className="list-button" onClick={() => setSiteRetry(n => n + 1)}>โหลดสำนักงานใหม่</button></span>
+          ) : inputs.site && !siteInputMatches && !sitesLoading ? (
+            <span className="list-filter-warning">ยังไม่ได้กรองสำนักงาน กรุณาเลือกชื่อให้ตรงกับรายการแนะนำ</span>
+          ) : 'สำนักงานต้องเลือกชื่อให้ตรงกับรายการแนะนำ ส่วนตัวกรองอื่นเลือกจากรายการแนะนำ'}
+        </div>
+        <div className="equipment-borrow-filter-actions">
+          <button className="list-button" disabled={!anyFilterActive} onClick={clearAllFilters}>ล้างตัวกรอง</button>
+          <span className="list-muted">ค้นหาอัตโนมัติ · ใช้ทุกเงื่อนไขร่วมกัน</span>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ background: 'var(--glass-bg-subtle)' }}>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ชื่ออุปกรณ์</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ประเภท</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>แผนก</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>สำนักงาน</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>สถานะ</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', textAlign: 'right' }}>ดำเนินการ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
+        <div className="list-result-info">
+          <span role="status">{error ? 'โหลดไม่สำเร็จ' : pending ? 'กำลังโหลด…' : `พบ ${shown?.total.toLocaleString('th-TH') ?? 0} รายการ`}</span>
+          <span>{shown && `อัปเดตล่าสุด ${shown.updated.toLocaleTimeString('th-TH')}`}</span>
+        </div>
+
+        {!shown || !shown.equipment.length ? (
+          <div className="equipment-borrow-empty">
+            <strong>{error ? 'ไม่สามารถแสดงรายการล่าสุด' : pending ? 'กำลังโหลดรายการอุปกรณ์…' : anyFilterActive ? 'ไม่พบอุปกรณ์ที่ตรงกับตัวกรอง' : 'ยังไม่มีอุปกรณ์ในระบบ'}</strong>
+            {!pending && !error && anyFilterActive && (
+              <>
+                <p>ลองเปลี่ยนคำค้น หรือล้างตัวกรองเพื่อดูรายการทั้งหมด</p>
+                <button className="list-button" onClick={clearAllFilters}>ล้างตัวกรอง</button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="list-table-scroll" tabIndex={0} role="region" aria-label="ตารางอุปกรณ์ที่ยืมได้ เลื่อนแนวนอนเพื่อดูทุกคอลัมน์" aria-busy={pending}>
+            <table className="list-table">
+              <caption className="list-sr-only">รายการอุปกรณ์ที่ยืมได้ กดชื่ออุปกรณ์เพื่อเปิดรายละเอียด กดเพิ่มลงตระกร้าเพื่อเลือกยืม</caption>
+              <thead>
                 <tr>
-                  <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-primary)' }}>
-                    <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto' }} />
-                    <p style={{ marginTop: '1rem' }}>กำลังโหลดรายการอุปกรณ์...</p>
-                  </td>
+                  {['ชื่ออุปกรณ์', 'ประเภท', 'แผนก', 'สำนักงาน', 'สถานะ', 'ดำเนินการ'].map(label => <th scope="col" key={label}>{label}</th>)}
                 </tr>
-              ) : equipment.length === 0 ? (
-                <tr>
-                  <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                    ไม่พบอุปกรณ์ที่ตรงกับเงื่อนไข
-                  </td>
-                </tr>
-              ) : (
-                equipment.map(item => {
+              </thead>
+              <tbody>
+                {shown.equipment.map(item => {
                   const borrowed = isBorrowed(item);
                   const inCart = isInCart(item);
                   return (
-                    <tr key={item.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                          {item.photos?.[0] && (
-                            <img
-                              src={buildImageUrl(item.photos[0])}
-                              alt=""
-                              style={{ width: '2.25rem', height: '2.25rem', borderRadius: '0.4rem', objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border-subtle)' }}
-                            />
-                          )}
-                          <span>{item.name || '-'}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{item.equipment_type || '-'}</td>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.department || '-'}</td>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>
-                        {item.pea_site ? `${item.pea_site.pea_name}${item.pea_site.pea_province ? ` (${item.pea_site.pea_province})` : ''}` : '-'}
-                      </td>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>
-                        <span style={{
-                          display: 'inline-block', padding: '0.2rem 0.6rem', borderRadius: '1rem',
-                          fontSize: '0.75rem', fontWeight: 600,
-                          color: statusColor(item.status), background: `${statusColor(item.status)}15`
-                        }}>
-                          {item.status || '-'}
-                        </span>
-                        {borrowed && item.current_loan?.borrower_name && (
-                          <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                            โดย {item.current_loan.borrower_name}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>
-                        {borrowed ? (
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>ถูกยืมอยู่</span>
-                        ) : (
-                          <button
-                            onClick={() => toggleCart(item)}
-                            className="glass"
-                            style={{
-                              padding: '0.4rem 0.9rem', borderRadius: '0.5rem', border: 'none',
-                              background: inCart ? 'var(--bg-accent-subtle)' : 'var(--accent-primary)',
-                              color: inCart ? 'var(--accent-primary)' : '#fff',
-                              cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-                              fontSize: '0.8rem', fontWeight: 600
+                    <tr key={item.id}>
+                      <td>
+                        <div className="equipment-name-cell">
+                          {item.photos?.[0] && <img src={buildImageUrl(item.photos[0])} alt="" loading="lazy" />}
+                          <a
+                            className="list-name"
+                            title={item.name || 'ดูรายละเอียดอุปกรณ์'}
+                            href={`/equipment/${item.id}`}
+                            onClick={(e) => {
+                              if (onEquipmentClick && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                                e.preventDefault();
+                                onEquipmentClick(item.id);
+                              }
                             }}
                           >
-                            {inCart ? <><Check size={14} /> อยู่ในตระกร้า</> : <><Plus size={14} /> เพิ่มลงตระกร้า</>}
+                            {item.name || 'ดูรายละเอียดอุปกรณ์'}
+                          </a>
+                        </div>
+                      </td>
+                      <td title={item.equipment_type || '—'}>{item.equipment_type || '—'}</td>
+                      <td title={item.department || '—'}>{item.department || '—'}</td>
+                      <td title={item.pea_site ? siteLabel(item.pea_site) : '—'}>{item.pea_site ? siteLabel(item.pea_site) : '—'}</td>
+                      <td title={[item.status || 'ไม่ทราบสถานะ', borrowed && item.current_loan?.borrower_name && `โดย ${item.current_loan.borrower_name}`].filter(Boolean).join(' · ')}>
+                        <span className={`list-status list-status-${statusTone(item.status)}`}>{item.status || 'ไม่ทราบสถานะ'}</span>
+                        {borrowed && item.current_loan?.borrower_name && <span className="list-muted"> · โดย {item.current_loan.borrower_name}</span>}
+                      </td>
+                      <td>
+                        {borrowed ? (
+                          <span className="list-muted">ถูกยืมอยู่</span>
+                        ) : (
+                          <button type="button" className={`list-button${inCart ? '' : ' list-button-primary'}`} onClick={() => toggleCart(item)}>
+                            {inCart ? <><Check size={14} aria-hidden="true" /> อยู่ในตระกร้า</> : <><Plus size={14} aria-hidden="true" /> เพิ่มลงตระกร้า</>}
                           </button>
                         )}
                       </td>
                     </tr>
                   );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {!loading && pagination.totalPages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', padding: '1.5rem', borderTop: '1px solid var(--border-subtle)' }}>
-            <button
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(prev => prev - 1)}
-              style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.3 : 1 }}
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <select
-              value={currentPage}
-              onChange={(e) => setCurrentPage(Number(e.target.value))}
-              style={{ padding: '0.5rem 0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', color: 'var(--text-primary)', fontSize: '0.9rem', cursor: 'pointer', outline: 'none' }}
-            >
-              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map(p => (
-                <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>หน้า {p} จาก {pagination.totalPages}</option>
-              ))}
-            </select>
-            <button
-              disabled={currentPage === pagination.totalPages}
-              onClick={() => setCurrentPage(prev => prev + 1)}
-              style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === pagination.totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === pagination.totalPages ? 0.3 : 1 }}
-            >
-              <ChevronRight size={20} />
-            </button>
+                })}
+              </tbody>
+            </table>
           </div>
         )}
-      </div>
+
+        <footer className="list-footer">
+          <span className="list-muted">{shown?.total ? `${(shown.page - 1) * itemsPerPage + 1}–${(shown.page - 1) * itemsPerPage + shown.equipment.length} จาก ${shown.total} รายการ` : '—'} · {itemsPerPage} รายการต่อหน้า</span>
+          <nav className="list-pagination" aria-label="แบ่งหน้ารายการอุปกรณ์">
+            <button className="list-button" disabled={pending || Boolean(error) || currentPage <= 1} onClick={() => setCurrentPage(p => p - 1)}>ก่อนหน้า</button>
+            <label>หน้า <select value={shown?.page || currentPage} disabled={pending || Boolean(error)} onChange={(e) => setCurrentPage(Number(e.target.value))}>
+              {Array.from({ length: Math.max(currentPage, shown?.totalPages || 1) }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
+            </select> / {shown?.totalPages || '—'}</label>
+            <button className="list-button" disabled={pending || Boolean(error) || !shown || currentPage >= shown.totalPages} onClick={() => setCurrentPage(p => p + 1)}>ถัดไป</button>
+          </nav>
+        </footer>
+      </section>
 
       {/* Floating cart button */}
-      <button
-        onClick={openCart}
-        style={{
-          position: 'fixed', bottom: '2rem', right: '2rem', zIndex: 900,
-          width: '3.5rem', height: '3.5rem', borderRadius: '50%', border: 'none',
-          background: 'var(--accent-primary)', color: '#fff', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.3)'
-        }}
-        title="ตระกร้ายืมอุปกรณ์"
-      >
-        <ShoppingCart size={22} />
-        {cart.length > 0 && (
-          <span style={{
-            position: 'absolute', top: '-4px', right: '-4px', minWidth: '1.4rem', height: '1.4rem',
-            borderRadius: '1rem', background: 'var(--accent-danger)', color: '#fff',
-            fontSize: '0.75rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: '0 0.3rem'
-          }}>
-            {cart.length}
-          </span>
-        )}
+      <button type="button" className="equipment-borrow-cart-fab" onClick={openCart} aria-label={`เปิดตระกร้ายืมอุปกรณ์ (${cart.length} รายการ)`}>
+        <ShoppingCart size={22} aria-hidden="true" />
+        {cart.length > 0 && <span className="equipment-borrow-cart-badge" aria-hidden="true">{cart.length}</span>}
       </button>
 
       {/* Cart drawer */}
@@ -505,6 +431,11 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
             onClick={() => setShowCart(false)}
           >
             <motion.div
+              ref={cartRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="equipment-borrow-cart-heading"
+              tabIndex={-1}
               initial={{ x: 400 }}
               animate={{ x: 0 }}
               exit={{ x: 400 }}
@@ -514,11 +445,11 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
               style={{ width: '100%', maxWidth: '420px', height: '100%', overflowY: 'auto', padding: '1.5rem', borderRadius: 0 }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                <h3 style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <ShoppingCart size={18} /> ตระกร้ายืมอุปกรณ์ ({cart.length})
-                </h3>
-                <button onClick={() => setShowCart(false)} className="glass" style={{ padding: '0.4rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' }}>
-                  <X size={18} />
+                <h2 id="equipment-borrow-cart-heading" style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <ShoppingCart size={18} aria-hidden="true" /> ตระกร้ายืมอุปกรณ์ ({cart.length})
+                </h2>
+                <button onClick={() => setShowCart(false)} className="glass" aria-label="ปิดตระกร้ายืมอุปกรณ์" style={{ padding: '0.4rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' }}>
+                  <X size={18} aria-hidden="true" />
                 </button>
               </div>
 
@@ -528,50 +459,37 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
                 <>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginBottom: '1.5rem' }}>
                     {cart.map(item => (
-                      <div key={item.id} className="glass" style={{ padding: '0.75rem 1rem', borderRadius: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                      <div key={item.id} className="equipment-borrow-drawer-item">
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', minWidth: 0 }}>
-                          {item.photos?.[0] && (
-                            <img
-                              src={buildImageUrl(item.photos[0])}
-                              alt=""
-                              style={{ width: '2rem', height: '2rem', borderRadius: '0.4rem', objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border-subtle)' }}
-                            />
-                          )}
+                          {item.photos?.[0] && <img src={buildImageUrl(item.photos[0])} alt="" />}
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontWeight: 600, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name || '-'}</div>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{item.equipment_type || '-'}</div>
                           </div>
                         </div>
-                        <button onClick={() => removeFromCart(item.id)} style={{ background: 'none', border: 'none', color: 'var(--accent-danger)', cursor: 'pointer', display: 'flex', flexShrink: 0 }}>
-                          <X size={16} />
+                        <button onClick={() => removeFromCart(item.id)} aria-label={`นำ ${item.name || 'อุปกรณ์'} ออกจากตระกร้า`} style={{ background: 'none', border: 'none', color: 'var(--accent-danger)', cursor: 'pointer', display: 'flex', flexShrink: 0 }}>
+                          <X size={16} aria-hidden="true" />
                         </button>
                       </div>
                     ))}
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                      <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>ชื่อผู้ยืม <span style={{ color: 'var(--accent-danger)' }}>*</span></label>
-                      <input type="text" value={borrowerName} onChange={(e) => setBorrowerName(e.target.value)} style={inputStyle} placeholder="ชื่อ-นามสกุลผู้ยืม" />
+                    <div className="equipment-borrow-field">
+                      <label htmlFor="equipment-borrow-name">ชื่อผู้ยืม <span style={{ color: 'var(--accent-danger)' }}>*</span></label>
+                      <input id="equipment-borrow-name" type="text" required aria-required="true" value={borrowerName} onChange={(e) => setBorrowerName(e.target.value)} placeholder="ชื่อ-นามสกุลผู้ยืม" />
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                      <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>รหัสพนักงานผู้ยืม</label>
-                      <input type="text" value={borrowerEmpId} onChange={(e) => setBorrowerEmpId(e.target.value)} style={inputStyle} />
+                    <div className="equipment-borrow-field">
+                      <label htmlFor="equipment-borrow-emp-id">รหัสพนักงานผู้ยืม</label>
+                      <input id="equipment-borrow-emp-id" type="text" value={borrowerEmpId} onChange={(e) => setBorrowerEmpId(e.target.value)} />
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                      <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>กำหนดคืน (วันและเวลา)</label>
-                      <input type="datetime-local" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
+                    <div className="equipment-borrow-field">
+                      <label htmlFor="equipment-borrow-due-date">กำหนดคืน (วันและเวลา)</label>
+                      <input id="equipment-borrow-due-date" type="datetime-local" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
                     </div>
 
-                    <button
-                      onClick={handleBorrowClick}
-                      style={{
-                        marginTop: '0.5rem', padding: '0.85rem', borderRadius: '0.5rem', border: 'none',
-                        background: 'var(--accent-primary)', color: '#fff', fontWeight: 700, fontSize: '0.95rem',
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
-                      }}
-                    >
-                      <ShoppingCart size={16} /> ยืมอุปกรณ์ {cart.length} รายการ
+                    <button type="button" className="list-button list-button-primary" style={{ marginTop: '0.5rem', minHeight: '44px' }} onClick={handleBorrowClick}>
+                      <ShoppingCart size={16} aria-hidden="true" /> ยืมอุปกรณ์ {cart.length} รายการ
                     </button>
                   </div>
                 </>
@@ -592,6 +510,11 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
             onClick={() => !submitting && setShowConfirm(false)}
           >
             <motion.div
+              ref={confirmRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="equipment-borrow-confirm-heading"
+              tabIndex={-1}
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
@@ -600,33 +523,20 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
               style={{ padding: '2rem', maxWidth: '400px', width: '90%', textAlign: 'center' }}
             >
               <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'var(--bg-accent-subtle)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem' }}>
-                <ShoppingCart size={24} />
+                <ShoppingCart size={24} aria-hidden="true" />
               </div>
-              <h3 style={{ margin: '0 0 1rem', fontSize: '1.15rem' }}>ยืนยันการยืมอุปกรณ์</h3>
+              <h2 id="equipment-borrow-confirm-heading" style={{ margin: '0 0 1rem', fontSize: '1.15rem' }}>ยืนยันการยืมอุปกรณ์</h2>
               <p style={{ color: 'var(--text-secondary)', margin: '0 0 2rem', lineHeight: 1.6, fontSize: '0.9rem' }}>
                 ยืมอุปกรณ์ <strong style={{ color: 'var(--text-primary)' }}>{cart.length} รายการ</strong> ให้<br />
                 <strong style={{ color: 'var(--text-primary)' }}>{borrowerName}</strong>{borrowerEmpId ? ` (${borrowerEmpId})` : ''} ใช่หรือไม่?
               </p>
               <div style={{ display: 'flex', gap: '1rem' }}>
-                <button
-                  onClick={() => setShowConfirm(false)}
-                  disabled={submitting}
-                  className="glass"
-                  style={{ flex: 1, padding: '0.75rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-primary)', cursor: 'pointer' }}
-                >
+                <button type="button" onClick={() => setShowConfirm(false)} disabled={submitting} className="list-button" style={{ flex: 1 }}>
                   ยกเลิก
                 </button>
-                <button
-                  onClick={handleConfirmBorrow}
-                  disabled={submitting}
-                  style={{
-                    flex: 1, padding: '0.75rem', borderRadius: '0.5rem', border: 'none',
-                    background: 'var(--accent-primary)', color: '#fff', cursor: 'pointer', fontWeight: 600,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
-                  }}
-                >
-                  {submitting ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
-                  ยืนยัน
+                <button type="button" onClick={handleConfirmBorrow} disabled={submitting} className="list-button list-button-primary" style={{ flex: 1 }}>
+                  {submitting ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Check size={16} aria-hidden="true" />}
+                  {submitting ? 'กำลังบันทึก…' : 'ยืนยัน'}
                 </button>
               </div>
             </motion.div>
@@ -645,6 +555,11 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
             onClick={() => setResponseModal(null)}
           >
             <motion.div
+              ref={responseRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="equipment-borrow-response-heading"
+              tabIndex={-1}
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
@@ -654,25 +569,22 @@ const EquipmentBorrow = ({ token, user, onRequireLogin }) => {
             >
               <div style={{
                 width: '64px', height: '64px', borderRadius: '50%',
-                background: responseModal.type === 'success' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-                color: responseModal.type === 'success' ? '#10b981' : '#ef4444',
+                background: responseModal.type === 'success' ? 'var(--bg-success-subtle)' : 'var(--bg-danger-subtle)',
+                color: responseModal.type === 'success' ? 'var(--accent-success)' : 'var(--accent-danger)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem'
               }}>
-                {responseModal.type === 'success' ? <CheckCircle2 size={32} /> : <XCircle size={32} />}
+                {responseModal.type === 'success' ? <CheckCircle2 size={32} aria-hidden="true" /> : <XCircle size={32} aria-hidden="true" />}
               </div>
-              <h3 style={{ margin: '0 0 1rem', fontSize: '1.2rem' }}>{responseModal.type === 'success' ? 'สำเร็จ' : 'เกิดข้อผิดพลาด'}</h3>
+              <h2 id="equipment-borrow-response-heading" style={{ margin: '0 0 1rem', fontSize: '1.2rem' }}>{responseModal.type === 'success' ? 'สำเร็จ' : 'เกิดข้อผิดพลาด'}</h2>
               <p style={{ color: 'var(--text-secondary)', margin: '0 0 2rem', lineHeight: 1.5, fontSize: '0.9rem' }}>{responseModal.message}</p>
-              <button
-                onClick={() => setResponseModal(null)}
-                style={{ padding: '0.75rem 2rem', borderRadius: '0.5rem', border: 'none', background: 'var(--accent-primary)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
-              >
+              <button type="button" onClick={() => setResponseModal(null)} className="list-button list-button-primary" style={{ padding: '0.75rem 2rem' }}>
                 ตกลง
               </button>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </div>
   );
 };
 

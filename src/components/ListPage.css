@@ -39,6 +39,10 @@
 .list-status-up { color: var(--list-success); background: var(--bg-success-subtle); }
 .list-status-down { color: var(--list-danger); background: var(--bg-danger-subtle); }
 .list-status-unknown { color: var(--text-secondary); background: var(--glass-bg-subtle); }
+.list-status-warning, .list-filter-warning { color: #92400e; }
+.list-status-warning { background: var(--bg-secondary-subtle); }
+.list-status-borrowed { color: var(--list-action); background: var(--bg-accent-subtle); }
+.dark-theme .list-status-warning, .dark-theme .list-filter-warning { color: #fde68a; }
 .list-table .list-empty { text-align: center; padding: 48px 20px; color: var(--text-secondary); }
 .list-empty p { margin: 8px 0 16px; }
 .list-footer { justify-content: space-between; padding: 16px 20px; font-size: .875rem; }

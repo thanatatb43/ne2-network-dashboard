@@ -21,10 +21,6 @@
 .equipment-search-page .list-table th:nth-child(5) { width: 17%; }
 .equipment-search-page .list-table th:nth-child(6) { width: 12%; }
 .equipment-search-page .list-table th:nth-child(7) { width: 10%; }
-.equipment-site-warning, .equipment-search-page .list-status-warning { color: #92400e; }
-.equipment-search-page .list-status-warning { background: var(--bg-secondary-subtle); }
-.equipment-search-page .list-status-borrowed { color: var(--list-action); background: var(--bg-accent-subtle); }
-.dark-theme .equipment-site-warning, .dark-theme .equipment-search-page .list-status-warning { color: #fde68a; }
 @media (max-width: 900px) {
   .equipment-filters, .equipment-advanced { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

@@ -735,6 +735,7 @@ function App() {
               token={token}
               user={user}
               onRequireLogin={() => requireLoginFor('/equipment-borrow')}
+              onEquipmentClick={(id) => navigate('equipmentDetails', { equipmentId: id })}
             />
           ) : activeTab === 'equipment-loans' ? (
             <EquipmentLoanHistory
