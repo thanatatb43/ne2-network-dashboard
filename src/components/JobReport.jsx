@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import {
-  Plus, Search, Loader2, ChevronLeft, ChevronRight, ArrowLeft, FileText, ExternalLink
+  Plus, Search, Loader2, ChevronLeft, ChevronRight, ArrowLeft, FileText, ExternalLink, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import JobFormModal from './JobFormModal';
@@ -81,12 +81,14 @@ const JobStatusDetails = ({ job }) => (
   </div>
 );
 
-// Renders an attached doc inline -- an <img> for images, an <iframe> for
-// PDFs (Chrome/most browsers render PDFs natively in an iframe), plus an
-// "open in new tab" fallback link either way. Shared by the notification
-// doc (attached when the job is opened) and the completion report
-// (attached when the job is closed) -- same shape, different label.
-const NotificationDocPreview = ({ path, label = 'ไฟล์หนังสือแจ้ง' }) => {
+// Renders an attached doc inline -- an <img> for images, a small clickable
+// preview block for PDFs. Shared by the notification doc (attached when the
+// job is opened) and the completion report (attached when the job is
+// closed) -- same shape, different label. Either one opens the in-page
+// lightbox (onOpen) instead of a new tab -- a full-size 520px <iframe> sitting
+// inline used to dominate the page for PDFs, so that's now just a compact
+// preview card that expands full-screen on click, same as the image case.
+const NotificationDocPreview = ({ path, label = 'ไฟล์หนังสือแจ้ง', onOpen }) => {
   if (!path) return null;
   const url = buildDocUrl(path);
   return (
@@ -95,21 +97,43 @@ const NotificationDocPreview = ({ path, label = 'ไฟล์หนังสื�
         <FileText size={14} /> {label}
       </div>
       {isImagePath(path) ? (
-        <a href={url} target="_blank" rel="noopener noreferrer">
-          <img src={url} alt={label} style={{ maxWidth: '100%', maxHeight: '420px', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', display: 'block' }} />
-        </a>
+        <img
+          src={url}
+          alt={label}
+          onClick={onOpen}
+          style={{ maxWidth: '100%', maxHeight: '420px', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', display: 'block', cursor: 'pointer' }}
+        />
       ) : (
-        <iframe src={url} title={label} style={{ width: '100%', height: '520px', border: '1px solid var(--border-subtle)', borderRadius: '0.5rem' }} />
+        <>
+          <div
+            onClick={onOpen}
+            className="glass"
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.9rem 1.1rem',
+              borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', cursor: 'pointer', maxWidth: '320px'
+            }}
+          >
+            <div style={{ background: 'var(--bg-accent-subtle)', color: 'var(--accent-primary)', padding: '0.6rem', borderRadius: '0.5rem', display: 'flex' }}>
+              <FileText size={20} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>ไฟล์ PDF</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>คลิกเพื่อดูแบบเต็มจอ</div>
+            </div>
+          </div>
+          <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: '0.5rem' }}>
+            เปิดในแท็บใหม่ <ExternalLink size={12} />
+          </a>
+        </>
       )}
-      <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: '0.5rem' }}>
-        เปิดในแท็บใหม่ <ExternalLink size={12} />
-      </a>
     </div>
   );
 };
 
-// Grid of after-work photo thumbnails, each opening full-size in a new tab.
-const AfterPhotosGallery = ({ paths }) => {
+// Grid of after-work photo thumbnails -- clicking one opens the in-page
+// lightbox (onPhotoClick) with next/prev browsing across the whole set,
+// instead of opening a new tab.
+const AfterPhotosGallery = ({ paths, onPhotoClick }) => {
   if (!paths || paths.length === 0) return null;
   return (
     <div>
@@ -118,12 +142,109 @@ const AfterPhotosGallery = ({ paths }) => {
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
         {paths.map((path, i) => (
-          <a key={i} href={buildDocUrl(path)} target="_blank" rel="noopener noreferrer">
-            <img src={buildDocUrl(path)} alt={`รูปหลังดำเนินการ ${i + 1}`} style={{ width: '110px', height: '110px', objectFit: 'cover', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)' }} />
-          </a>
+          <img
+            key={i}
+            src={buildDocUrl(path)}
+            alt={`รูปหลังดำเนินการ ${i + 1}`}
+            onClick={() => onPhotoClick(i)}
+            style={{ width: '110px', height: '110px', objectFit: 'cover', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', cursor: 'pointer' }}
+          />
         ))}
       </div>
     </div>
+  );
+};
+
+// In-page viewer -- replaces new-tab links for the notification-doc/
+// completion-report previews (image or PDF) and the after-photos gallery,
+// so viewing never leaves the job report page. type='pdf' renders a
+// full-size <iframe> instead of <img> -- PDFs are always a single item
+// (never a multi-page gallery here), so prev/next just don't render for them.
+const ImageLightbox = ({ images, index, onClose, onNavigate, type = 'image' }) => {
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+      else if (e.key === 'ArrowLeft' && images.length > 1) onNavigate((index - 1 + images.length) % images.length);
+      else if (e.key === 'ArrowRight' && images.length > 1) onNavigate((index + 1) % images.length);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [index, images.length, onClose, onNavigate]);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.9)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1.5rem'
+      }}
+      onClick={onClose}
+    >
+      <button
+        onClick={onClose}
+        style={{
+          position: 'absolute', top: '1rem', right: '1rem', background: 'rgba(255,255,255,0.1)',
+          border: 'none', color: '#fff', borderRadius: '50%', width: '2.5rem', height: '2.5rem',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+        }}
+      >
+        <X size={20} />
+      </button>
+
+      {images.length > 1 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onNavigate((index - 1 + images.length) % images.length); }}
+          style={{
+            position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)',
+            background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '50%',
+            width: '2.75rem', height: '2.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+          }}
+        >
+          <ChevronLeft size={24} />
+        </button>
+      )}
+
+      {type === 'pdf' ? (
+        <iframe
+          src={images[index]}
+          title={`เอกสาร ${index + 1}`}
+          onClick={(e) => e.stopPropagation()}
+          style={{ width: '90vw', height: '85vh', maxWidth: '1000px', border: 'none', borderRadius: '0.5rem', background: '#fff' }}
+        />
+      ) : (
+        <img
+          src={images[index]}
+          alt={`รูปที่ ${index + 1}`}
+          onClick={(e) => e.stopPropagation()}
+          style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', borderRadius: '0.5rem' }}
+        />
+      )}
+
+      {images.length > 1 && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onNavigate((index + 1) % images.length); }}
+          style={{
+            position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)',
+            background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '50%',
+            width: '2.75rem', height: '2.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+          }}
+        >
+          <ChevronRight size={24} />
+        </button>
+      )}
+
+      {images.length > 1 && (
+        <div style={{
+          position: 'absolute', bottom: '1.25rem', left: '50%', transform: 'translateX(-50%)',
+          background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '0.8rem',
+          padding: '0.3rem 0.8rem', borderRadius: '1rem'
+        }}>
+          {index + 1} / {images.length}
+        </div>
+      )}
+    </motion.div>
   );
 };
 
@@ -174,6 +295,19 @@ const JobReport = ({ token, user, onRequireLogin }) => {
   const [selectedJobId, setSelectedJobId] = useState(null);
   const [jobDetails, setJobDetails] = useState(null);
   const [loadingJob, setLoadingJob] = useState(false);
+
+  // In-page viewer -- shared by the notification-doc/completion-report
+  // previews and the after-photos gallery, each opening with its own images
+  // array so browsing stays scoped to that one gallery. type is 'pdf' for
+  // the doc/report previews when the attached file isn't an image.
+  const [lightboxImages, setLightboxImages] = useState(null);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [lightboxType, setLightboxType] = useState('image');
+  const openLightbox = (images, index, type = 'image') => {
+    setLightboxImages(images);
+    setLightboxIndex(index);
+    setLightboxType(type);
+  };
 
   const fetchSites = async () => {
     try {
@@ -325,8 +459,15 @@ const JobReport = ({ token, user, onRequireLogin }) => {
               <div><span style={{ color: 'var(--text-secondary)' }}>เบอร์ติดต่อ:</span> {jobDetails.requester_contact || '-'}</div>
             </div>
 
-            <NotificationDocPreview path={jobDetails.notification_doc_file} />
-            <NotificationDocPreview path={jobDetails.completion_report_file} label="รายงานผลการดำเนินการ" />
+            <NotificationDocPreview
+              path={jobDetails.notification_doc_file}
+              onOpen={() => openLightbox([buildDocUrl(jobDetails.notification_doc_file)], 0, isImagePath(jobDetails.notification_doc_file) ? 'image' : 'pdf')}
+            />
+            <NotificationDocPreview
+              path={jobDetails.completion_report_file}
+              label="รายงานผลการดำเนินการ"
+              onOpen={() => openLightbox([buildDocUrl(jobDetails.completion_report_file)], 0, isImagePath(jobDetails.completion_report_file) ? 'image' : 'pdf')}
+            />
 
             <div style={{ marginBottom: (jobDetails.equipment || []).length > 0 ? '1.5rem' : 0 }}>
               <div style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.75rem' }}>อุปกรณ์ที่มีปัญหา</div>
@@ -360,7 +501,10 @@ const JobReport = ({ token, user, onRequireLogin }) => {
 
             {(jobDetails.after_photos || []).length > 0 && (
               <div style={{ marginBottom: '1.5rem' }}>
-                <AfterPhotosGallery paths={jobDetails.after_photos} />
+                <AfterPhotosGallery
+                  paths={jobDetails.after_photos}
+                  onPhotoClick={(i) => openLightbox(jobDetails.after_photos.map(p => buildDocUrl(p)), i)}
+                />
               </div>
             )}
 
@@ -395,6 +539,20 @@ const JobReport = ({ token, user, onRequireLogin }) => {
             )}
           </div>
         )}
+
+        {/* In-page viewer -- notification doc / completion report previews
+            and the after-photos gallery all open here instead of a new tab. */}
+        <AnimatePresence>
+          {lightboxImages && (
+            <ImageLightbox
+              images={lightboxImages}
+              index={lightboxIndex}
+              type={lightboxType}
+              onNavigate={setLightboxIndex}
+              onClose={() => setLightboxImages(null)}
+            />
+          )}
+        </AnimatePresence>
       </motion.div>
     );
   }

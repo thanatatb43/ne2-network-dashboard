@@ -161,7 +161,7 @@ const Auth = ({ onAuthSuccess }) => {
                   }}
                 >
                   <KeyRound size={18} color="var(--text-secondary)" />
-                  เข้าสู่ระบบด้วยบัญชีผู้ใช้ภายใน
+                  Local Login
                 </button>
               </motion.div>
             ) : (

@@ -1,6 +1,7 @@
+import './EquipmentEdit.css';
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as Motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { ChevronLeft, Loader2, AlertTriangle, Save, ShieldAlert, ImagePlus, Upload, ImageOff, X, Trash2, Search } from 'lucide-react';
 
@@ -67,7 +68,7 @@ const DEPARTMENT_OPTIONS = [
   'ผสน', 'ผบร', 'ผบส', 'ผปบ', 'ผกส', 'ผมต', 'ผคพ (แยกจากวงสำนักงาน)',
   'ผู้บริหาร + บุคลากรอื่นๆ', 'กฟส (ผปร)', 'กฟส (ผบค)', 'กฟส (ผบง)'
 ];
-const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'active', 'จัดเก็บ', 'อื่นๆ'];
+const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน', 'active', 'จัดเก็บ', 'อื่นๆ'];
 
 const GENERAL_FIELDS = [
   { name: 'name', label: 'ชื่ออุปกรณ์', type: 'text', required: true },
@@ -117,11 +118,11 @@ const FormField = ({ field, value, onChange, disabled, disabledHint }) => {
   const disabledStyle = disabled ? { opacity: 0.6, cursor: 'not-allowed', background: 'var(--glass-bg-subtle)' } : {};
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', padding: '0.75rem 0' }}>
-      <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+      <label htmlFor={`equipment-field-${field.name}`} style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
         {field.label}{field.required && <span style={{ color: 'var(--accent-danger)' }}> *</span>}
       </label>
       {field.type === 'select' ? (
-        <select name={field.name} value={value || ''} onChange={onChange} disabled={disabled} style={{ ...fieldInputStyle, ...disabledStyle }}>
+        <select id={`equipment-field-${field.name}`} name={field.name} value={value || ''} onChange={onChange} disabled={disabled} style={{ ...fieldInputStyle, ...disabledStyle }}>
           <option value="">-- ไม่ระบุ --</option>
           {field.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
         </select>
@@ -130,7 +131,7 @@ const FormField = ({ field, value, onChange, disabled, disabledHint }) => {
           <input
             type="text"
             list={`${field.name}-options`}
-            name={field.name}
+            id={`equipment-field-${field.name}`} name={field.name}
             value={value || ''}
             onChange={onChange}
             disabled={disabled}
@@ -143,7 +144,7 @@ const FormField = ({ field, value, onChange, disabled, disabledHint }) => {
         </>
       ) : field.type === 'textarea' ? (
         <textarea
-          name={field.name}
+          id={`equipment-field-${field.name}`} name={field.name}
           value={value || ''}
           onChange={onChange}
           disabled={disabled}
@@ -154,7 +155,7 @@ const FormField = ({ field, value, onChange, disabled, disabledHint }) => {
       ) : (
         <input
           type={field.type}
-          name={field.name}
+          id={`equipment-field-${field.name}`} name={field.name}
           value={value || ''}
           onChange={onChange}
           disabled={disabled}
@@ -304,10 +305,10 @@ const SiteSearchSelect = ({ sites, value, onChange }) => {
 };
 
 const FormSection = ({ title, children }) => (
-  <div className="card glass" style={{ padding: '0.5rem 1.25rem', marginBottom: '1rem' }}>
-    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', padding: '0.85rem 0 0.25rem' }}>{title}</div>
-    <div style={{ display: 'flex', flexDirection: 'column' }}>{children}</div>
-  </div>
+  <section className="glass equipment-edit-section">
+    <h2 className="equipment-edit-section-title">{title}</h2>
+    <div className="equipment-edit-fields">{children}</div>
+  </section>
 );
 
 const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, defaultSiteId }) => {
@@ -333,16 +334,33 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
   const justCreatedIdRef = useRef(null);
 
   // Re-fetches just the equipment record (not the site list) -- used on
-  // mount and again after a photo upload, since photos/storage_photo are
-  // returned by this same endpoint but written via separate upload
+  // mount and again after a photo upload/delete, since photos/storage_photo
+  // are returned by this same endpoint but written via separate upload
   // endpoints, so the local formData needs to be refreshed to pick them up.
-  const refetchEquipment = async () => {
+  //
+  // mergeFieldsOnly restricts the refresh to just those field names (plus
+  // updatedAt, for cache-busting the image URLs) instead of replacing the
+  // whole formData object. Saving is a separate, later "บันทึกข้อมูล" action,
+  // so at the time a photo finishes uploading the user may well have other
+  // fields edited but not yet saved -- a full setFormData(result.data) here
+  // would silently overwrite those with the server's still-old values,
+  // wiping out unsaved work the user never asked to discard. Only the
+  // initial load (mount) needs/wants the full replace.
+  const refetchEquipment = async (mergeFieldsOnly = null) => {
     const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${equipmentId}`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     const result = await res.json();
     if (result.success) {
-      setFormData(result.data);
+      if (mergeFieldsOnly) {
+        setFormData(prev => {
+          const merged = { ...prev, updatedAt: result.data.updatedAt };
+          mergeFieldsOnly.forEach(field => { merged[field] = result.data[field]; });
+          return merged;
+        });
+      } else {
+        setFormData(result.data);
+      }
       return true;
     }
     return false;
@@ -446,7 +464,7 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
     }
 
     try {
-      await refetchEquipment();
+      await refetchEquipment(['photos']);
     } catch (err) {
       console.error('Failed to refresh equipment after photo upload:', err);
     }
@@ -480,7 +498,7 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
     }
 
     try {
-      await refetchEquipment();
+      await refetchEquipment(['photos']);
     } catch (err) {
       console.error('Failed to refresh equipment after photo delete:', err);
     }
@@ -521,7 +539,7 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
     }
 
     try {
-      await refetchEquipment();
+      await refetchEquipment(['storage_photo']);
     } catch (err) {
       console.error('Failed to refresh equipment after storage photo upload:', err);
     }
@@ -615,10 +633,10 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
   };
 
   return (
-    <motion.div
+    <Motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      style={{ maxWidth: '480px', margin: '0 auto', width: '100%' }}
+      className="equipment-edit-page"
     >
       <button
         onClick={onBack}
@@ -647,11 +665,12 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
           <p style={{ color: 'var(--text-secondary)' }}>{error}</p>
         </div>
       ) : (
-        <form onSubmit={handleSubmit}>
-          <h1 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 1rem', textAlign: 'center' }}>
+        <form onSubmit={handleSubmit} className="equipment-edit-form">
+          <h1 className="equipment-edit-title">
             {isNew ? 'เพิ่มอุปกรณ์สำนักงานใหม่' : 'แก้ไขข้อมูลอุปกรณ์'}
           </h1>
 
+          <div className="equipment-edit-grid">
           <FormSection title="ข้อมูลทั่วไป">
             {GENERAL_FIELDS.map(f => (
               <FormField
@@ -821,6 +840,10 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
             ))}
           </FormSection>
 
+          </div>
+
+          <div className="equipment-edit-savebar">
+          <span className="equipment-edit-savehint">ตรวจสอบข้อมูลก่อนบันทึก · ช่องที่มี * จำเป็นต้องกรอก</span>
           <button
             type="submit"
             disabled={saving}
@@ -846,12 +869,13 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
             {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
             {isNew ? 'สร้างอุปกรณ์' : 'บันทึกข้อมูล'}
           </button>
+          </div>
         </form>
       )}
 
       <AnimatePresence>
         {photoToDelete && (
-          <motion.div
+          <Motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -861,7 +885,7 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
             }}
             onClick={() => !deletingPhoto && setPhotoToDelete(null)}
           >
-            <motion.div
+            <Motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
@@ -902,14 +926,14 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
                   ลบรูป
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </Motion.div>
+          </Motion.div>
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {showUploadPendingConfirm && (
-          <motion.div
+          <Motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -919,7 +943,7 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
             }}
             onClick={() => setShowUploadPendingConfirm(false)}
           >
-            <motion.div
+            <Motion.div
               initial={{ scale: 0.9, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
@@ -957,11 +981,11 @@ const EquipmentEdit = ({ equipmentId, token, user, onBack, onSaved, onCreated, d
                   ยืนยัน
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </Motion.div>
+          </Motion.div>
         )}
       </AnimatePresence>
-    </motion.div>
+    </Motion.div>
   );
 };
 

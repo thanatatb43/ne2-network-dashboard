@@ -34,7 +34,7 @@ const EXCLUDE_STOCK_SITES_PARAM = STOCK_SITE_IDS.join(',');
 // Fixed status list, matching the options office-equipment records are
 // created with (see OfficeEquipmentManagement's formFields) -- can't be
 // derived from the current page anymore since equipment is server-paginated.
-const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย'];
+const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'จัดเก็บ', 'อื่นๆ'];
 
 // Which storage-location tab/filters were active, kept outside React state so
 // they survive StockManagement unmounting -- clicking into an equipment's
@@ -136,6 +136,10 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
     }
     if (statusFilter !== 'All') params.append('status', statusFilter);
     if (searchTerm.trim()) params.append('search', searchTerm.trim());
+    // Newest-added first by default -- id itself isn't a sortable column,
+    // but createdAt is and tracks the same thing.
+    params.append('sort', 'createdAt');
+    params.append('order', 'desc');
     Object.entries(extra).forEach(([k, v]) => params.set(k, v));
     return params;
   };
