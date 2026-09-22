@@ -1,17 +1,41 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { CheckCircle, AlertCircle, Search, RefreshCw, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, FileSpreadsheet } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { CheckCircle, AlertCircle, Search, RefreshCw, ArrowUpDown, ArrowUp, ArrowDown, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
+import './Devices.css';
+
+const VIEW_KEY = 'network-devices:view:v1';
+const readView = () => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(VIEW_KEY)) || {};
+    return {
+      searchTerm: typeof saved.searchTerm === 'string' ? saved.searchTerm : '',
+      selectedType: typeof saved.selectedType === 'string' ? saved.selectedType : 'All',
+      currentPage: Number.isSafeInteger(saved.currentPage) && saved.currentPage > 0 ? saved.currentPage : 1,
+      itemsPerPage: [10, 25, 50, 100].includes(saved.itemsPerPage) ? saved.itemsPerPage : 10,
+      sortConfig: ['pea_name', 'province', 'gateway', 'latency_ms', 'packet_loss', 'status'].includes(saved.sortConfig?.key) && ['asc', 'desc'].includes(saved.sortConfig?.direction) ? saved.sortConfig : { key: null, direction: 'asc' },
+    };
+  } catch { return {}; }
+};
 
 const Devices = ({ onDeviceClick, user }) => {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
-  const [selectedType, setSelectedType] = useState('All');
+  const [savedView] = useState(readView);
+  const [searchTerm, setSearchTerm] = useState(savedView.searchTerm || '');
+  const [currentPage, setCurrentPage] = useState(savedView.currentPage || 1);
+  const [itemsPerPage, setItemsPerPage] = useState(savedView.itemsPerPage || 10);
+  const [sortConfig, setSortConfig] = useState(savedView.sortConfig || { key: null, direction: 'asc' });
+  const [selectedType, setSelectedType] = useState(savedView.selectedType || 'All');
+  const [error, setError] = useState('');
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const requestRef = useRef(null);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(VIEW_KEY, JSON.stringify({ searchTerm, currentPage, itemsPerPage, sortConfig, selectedType }));
+    } catch { /* Browsing still works when browser storage is unavailable. */ }
+  }, [searchTerm, currentPage, itemsPerPage, sortConfig, selectedType]);
   const peaTypes = React.useMemo(() => {
     const types = new Set();
     devices.forEach(d => {
@@ -21,28 +45,47 @@ const Devices = ({ onDeviceClick, user }) => {
     return ['All', ...Array.from(types).sort()];
   }, [devices]);
 
-  const fetchDevices = async () => {
+  const fetchDevices = useCallback(async () => {
+    if (requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    setLoading(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latency/metrics`);
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latency/metrics`, { signal: controller.signal });
+      if (!response.ok) throw new Error('Unable to load devices');
       const result = await response.json();
-      setDevices(result.data || []);
-    } catch (error) {
-      console.error('Error fetching devices:', error);
+      if (result.success === false || !Array.isArray(result.data)) throw new Error('Invalid device response');
+      if (requestRef.current !== controller) return;
+      setDevices(result.data);
+      setLastUpdated(new Date());
+      setError('');
+    } catch {
+      if (requestRef.current === controller) setError('ไม่สามารถโหลดข้อมูลอุปกรณ์ได้ กรุณาลองใหม่');
     } finally {
-      setLoading(false);
+      clearTimeout(timeout);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setLoading(false);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchDevices();
     const interval = setInterval(fetchDevices, 60000);
-    return () => clearInterval(interval);
-  }, []);
+    return () => {
+      clearInterval(interval);
+      const controller = requestRef.current;
+      requestRef.current = null;
+      controller?.abort();
+    };
+  }, [fetchDevices]);
 
   const filteredDevices = devices.filter(d => {
-    const matchesSearch = d.device?.pea_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.device?.gateway?.includes(searchTerm) ||
-      d.status?.toLowerCase().includes(searchTerm.toLowerCase());
+    const query = searchTerm.trim().toLowerCase();
+    const matchesSearch = [d.device?.pea_name, d.device?.province, d.device?.gateway, d.status]
+      .some(value => String(value || '').toLowerCase().includes(query));
     
     const dType = d.device?.pea_type || d.pea_type;
     const matchesType = selectedType === 'All' || dType === selectedType;
@@ -59,6 +102,7 @@ const Devices = ({ onDeviceClick, user }) => {
       key = null;
     }
     setSortConfig({ key, direction });
+    setCurrentPage(1);
   };
 
   const sortedDevices = React.useMemo(() => {
@@ -112,12 +156,21 @@ const Devices = ({ onDeviceClick, user }) => {
     });
   }, [filteredDevices, sortConfig]);
 
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentItems = sortedDevices.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(sortedDevices.length / itemsPerPage);
-
-  const paginate = (pageNumber) => setCurrentPage(pageNumber);
+  const totalPages = Math.max(1, Math.ceil(sortedDevices.length / itemsPerPage));
+  // Clamp only the displayed page: keep the saved page during initial loading.
+  const visiblePage = Math.min(currentPage, totalPages);
+  const indexOfFirstItem = (visiblePage - 1) * itemsPerPage;
+  const currentItems = sortedDevices.slice(indexOfFirstItem, indexOfFirstItem + itemsPerPage);
+  const hasFilters = Boolean(searchTerm || selectedType !== 'All');
+  const clearFilters = () => {
+    setSearchTerm('');
+    setSelectedType('All');
+    setCurrentPage(1);
+  };
+  const columns = [
+    ['pea_name', 'สำนักงาน'], ['province', 'จังหวัด'], ['gateway', 'Gateway IP'],
+    ['latency_ms', 'Latency (ms)'], ['packet_loss', 'Packet loss (%)'], ['status', 'สถานะ'],
+  ];
 
   // Exports every device fetched for this page, not just whatever the
   // current search/type filter or page happens to show on screen.
@@ -132,7 +185,7 @@ const Devices = ({ onDeviceClick, user }) => {
       // Same protection as the blurred on-screen column -- IP only goes into
       // the export for logged-in users.
       'Gateway IP': user ? (d.device?.gateway || '-') : 'เข้าสู่ระบบเพื่อดู',
-      'Latency (ms)': d.latency_ms != null ? d.latency_ms.toFixed(2) : '-',
+      'Latency (ms)': Number.isFinite(d.latency_ms) ? d.latency_ms.toFixed(2) : '-',
       'Packet Loss (%)': d.packet_loss ?? '-',
       'Status': d.status || '-'
     }));
@@ -144,294 +197,117 @@ const Devices = ({ onDeviceClick, user }) => {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="devices-page"
-    >
-      <header style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="devices-page">
+      <header className="devices-header">
         <div>
-          <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 700 }}>รายการอุปกรณ์เครือข่ายภายในสำนักงาน</h1>
-          <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }}>รายละเอียดอุปกรณ์เครือข่ายภายในหลักของสำนักงาน (Auto-refreshes every minute).</p>
+          <h1>อุปกรณ์เครือข่าย</h1>
+          <p>ตรวจสอบสถานะการเชื่อมต่อของสำนักงาน · อัปเดตอัตโนมัติทุก 1 นาที</p>
         </div>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <button
-            onClick={exportToExcel}
-            className="glass"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              padding: '0.6rem 1.2rem',
-              gap: '0.5rem',
-              borderRadius: '0.75rem',
-              background: 'var(--accent-primary)',
-              color: '#fff',
-              border: 'none',
-              cursor: 'pointer',
-              fontWeight: 600,
-              boxShadow: '0 4px 12px rgba(168, 85, 247, 0.2)'
-            }}
-          >
-            <FileSpreadsheet size={18} /> Export Excel
+        <div className="devices-actions">
+          <button className="devices-button" onClick={fetchDevices} disabled={loading}>
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} aria-hidden="true" />
+            {loading ? 'กำลังโหลด' : 'รีเฟรช'}
           </button>
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            background: selectedType !== 'All' ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
-            border: selectedType !== 'All' ? '1px solid var(--accent-primary)' : '1px solid var(--input-border)'
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>
-            <select
-              value={selectedType}
-              onChange={(e) => {
-                setSelectedType(e.target.value);
-                setCurrentPage(1);
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#0f172a',
-                outline: 'none',
-                cursor: 'pointer',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                paddingRight: '1.5rem',
-                appearance: 'none',
-                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right center',
-                backgroundSize: '1rem'
-              }}
-            >
-              {peaTypes.map(type => (
-                <option key={type} value={type}>{type}</option>
-              ))}
-            </select>
-          </div>
-          <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Show:</span>
-            <select
-              value={itemsPerPage}
-              onChange={(e) => {
-                setItemsPerPage(Number(e.target.value));
-                setCurrentPage(1);
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#0f172a',
-                outline: 'none',
-                cursor: 'pointer',
-                fontSize: '0.85rem',
-                fontWeight: 700,
-                paddingRight: '1.5rem',
-                appearance: 'none',
-                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right center',
-                backgroundSize: '1rem'
-              }}
-            >
-              <option value="10" style={{ background: '#ffffff', color: '#0f172a' }}>10</option>
-              <option value="25" style={{ background: '#ffffff', color: '#0f172a' }}>25</option>
-              <option value="50" style={{ background: '#ffffff', color: '#0f172a' }}>50</option>
-              <option value="100" style={{ background: '#ffffff', color: '#0f172a' }}>100</option>
-            </select>
-          </div>
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.5rem 1rem', gap: '0.5rem', borderRadius: '0.5rem',
-            background: searchTerm ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
-            border: searchTerm ? '1px solid var(--accent-primary)' : '1px solid var(--input-border)'
-          }}>
-            <Search size={18} color="var(--text-secondary)" />
-            <input
-              type="text"
-              placeholder="ค้นหาอุปกรณ์..."
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', width: '200px' }}
-            />
-          </div>
+          <button className="devices-button devices-button-primary" onClick={exportToExcel} disabled={!devices.length}>
+            <FileSpreadsheet size={18} aria-hidden="true" /> ส่งออกทั้งหมด (Excel)
+          </button>
         </div>
       </header>
 
-      <div id="devices-table-container" className="card glass" style={{ padding: '0', overflow: 'hidden', marginBottom: '1.5rem', borderRadius: '0.75rem' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-          <thead>
-            <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-              <th style={{ padding: '1.25rem 1.5rem', width: '60px' }}>No.</th>
-              <th 
-                style={{ padding: '1.25rem 1.5rem', cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => requestSort('pea_name')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  PEA Name {sortConfig.key === 'pea_name' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}
-                </div>
-              </th>
-              <th 
-                style={{ padding: '1.25rem 1.5rem', cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => requestSort('province')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  Province {sortConfig.key === 'province' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}
-                </div>
-              </th>
-              <th 
-                style={{ padding: '1.25rem 1.5rem', cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => requestSort('gateway')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  Gateway IP {sortConfig.key === 'gateway' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}
-                </div>
-              </th>
-              <th 
-                style={{ padding: '1.25rem 1.5rem', cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => requestSort('latency_ms')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  Latency (ms) {sortConfig.key === 'latency_ms' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}
-                </div>
-              </th>
-              <th 
-                style={{ padding: '1.25rem 1.5rem', cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => requestSort('packet_loss')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  Packet Loss {sortConfig.key === 'packet_loss' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}
-                </div>
-              </th>
-              <th 
-                style={{ padding: '1.25rem 1.5rem', cursor: 'pointer', userSelect: 'none' }}
-                onClick={() => requestSort('status')}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  Status {sortConfig.key === 'status' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}
-                </div>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && devices.length === 0 ? (
-              <tr><td colSpan="7" style={{ padding: '3rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading devices...</td></tr>
-            ) : currentItems.map((d, index) => (
-              <tr
-                key={d.id}
-                onClick={() => onDeviceClick && onDeviceClick(d.device_id || d.id)}
-                style={{
-                  borderBottom: '1px solid rgba(255,255,255,0.02)',
-                  transition: 'all 0.2s',
-                  cursor: 'pointer'
-                }}
-                className="table-row-hover"
-              >
-                <td style={{ padding: '1.25rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-                  {indexOfFirstItem + index + 1}
-                </td>
-                <td style={{ padding: '1.25rem 1.5rem', fontWeight: 600 }}>{d.device?.pea_name || '-'}</td>
-                <td style={{ padding: '1.25rem 1.5rem', color: 'var(--text-secondary)' }}>{d.device?.province || '-'}</td>
-                <td style={{ 
-                  padding: '1.25rem 1.5rem', 
-                  fontFamily: 'ui-monospace', 
-                  fontSize: '0.9rem',
-                  filter: !user ? 'blur(4px)' : 'none',
-                  transition: 'filter 0.3s ease',
-                  userSelect: !user ? 'none' : 'auto'
-                }}>{d.device?.gateway || '-'}</td>
-                <td style={{ padding: '1.25rem 1.5rem' }}>
-                  <span style={{
-                    color: (d.latency_ms === null || d.status === 'down') ? 'var(--accent-danger)' : d.latency_ms > 150 ? 'var(--accent-danger)' : d.latency_ms > 80 ? 'var(--accent-warning)' : 'var(--accent-success)',
-                    fontWeight: 600
-                  }}>
-                    {d.latency_ms !== null ? `${d.latency_ms.toFixed(2)} ms` : 'N/A'}
-                  </span>
-                </td>
-                <td style={{ padding: '1.25rem 1.5rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <div style={{ flex: 1, height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', minWidth: '60px' }}>
-                      <div style={{
-                        width: `${Math.min(d.packet_loss || 0, 100)}%`,
-                        height: '100%',
-                        background: (d.packet_loss || 0) > 5 || d.status === 'down' ? 'var(--accent-danger)' : 'var(--accent-success)',
-                        borderRadius: '2px'
-                      }} />
-                    </div>
-                    <span style={{ fontSize: '0.8rem' }}>{d.packet_loss || 0}%</span>
-                  </div>
-                </td>
-                <td style={{ padding: '1.25rem 1.5rem' }}>
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    padding: '0.25rem 0.75rem',
-                    borderRadius: '1rem',
-                    background: d.status === 'up' ? 'rgba(52, 211, 153, 0.1)' : 'rgba(244, 63, 94, 0.1)',
-                    color: d.status === 'up' ? 'var(--accent-success)' : 'var(--accent-danger)',
-                    fontSize: '0.75rem',
-                    fontWeight: 600,
-                    textTransform: 'uppercase'
-                  }}>
-                    {d.status === 'up' ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
-                    {d.status}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {totalPages > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', padding: '1rem 0' }}>
-          <button
-            disabled={currentPage === 1}
-            onClick={() => paginate(currentPage - 1)}
-            style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', color: '#0f172a', opacity: currentPage === 1 ? 0.3 : 1 }}
-          >
-            Prev
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', color: 'var(--text-secondary)' }}>
-            <span style={{ fontSize: '0.9rem' }}>Go to:</span>
-            <select
-              value={currentPage}
-              onChange={(e) => paginate(Number(e.target.value))}
-              style={{
-                background: 'var(--input-bg)',
-                color: '#0f172a',
-                border: '1px solid var(--input-border)',
-                padding: '0.4rem 1.8rem 0.4rem 0.8rem',
-                borderRadius: '0.5rem',
-                outline: 'none',
-                cursor: 'pointer',
-                fontSize: '0.9rem',
-                appearance: 'none',
-                WebkitAppearance: 'none',
-                backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 0.5rem center',
-                backgroundSize: '1rem'
-              }}
-            >
-              {[...Array(totalPages).keys()].map(n => (
-                <option key={n + 1} value={n + 1} style={{ background: '#ffffff', color: '#0f172a' }}>
-                  Page {n + 1}
-                </option>
-              ))}
-            </select>
-            <span style={{ fontSize: '0.9rem' }}>of {totalPages}</span>
-          </div>
-          <button
-            disabled={currentPage === totalPages}
-            onClick={() => paginate(currentPage + 1)}
-            style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', color: '#0f172a', opacity: currentPage === totalPages ? 0.3 : 1 }}
-          >
-            Next
-          </button>
+      {error && (
+        <div className="devices-error" role="alert">
+          <AlertCircle size={20} aria-hidden="true" />
+          <div><strong>{error}</strong>{lastUpdated && <p>กำลังแสดงข้อมูลจากการอัปเดตครั้งก่อน สถานะอาจเปลี่ยนแปลงแล้ว</p>}</div>
+          <button className="devices-button" onClick={fetchDevices} disabled={loading}>ลองใหม่</button>
         </div>
       )}
-    </motion.div>
+
+      <section className="devices-panel" aria-label="รายการอุปกรณ์เครือข่าย">
+        <div className="devices-toolbar">
+          <label className="devices-field devices-search">
+            <span>ค้นหาอุปกรณ์</span>
+            <div className="devices-search-input">
+              <Search size={18} aria-hidden="true" />
+              <input type="search" placeholder="ชื่อสำนักงาน จังหวัด IP หรือ up / down" value={searchTerm}
+                onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }} />
+            </div>
+          </label>
+          <label className="devices-field">
+            <span>ประเภทสำนักงาน</span>
+            <select value={selectedType} onChange={e => { setSelectedType(e.target.value); setCurrentPage(1); }}>
+              {selectedType !== 'All' && !peaTypes.includes(selectedType) && <option value={selectedType}>{selectedType}</option>}
+              {peaTypes.map(type => <option key={type} value={type}>{type === 'All' ? 'ทุกประเภท' : type}</option>)}
+            </select>
+          </label>
+          <button className="devices-button" onClick={clearFilters} disabled={!hasFilters}>ล้างตัวกรอง</button>
+        </div>
+
+        <div className="devices-result-info">
+          <span role="status">{lastUpdated ? `พบ ${sortedDevices.length.toLocaleString('th-TH')} จาก ${devices.length.toLocaleString('th-TH')} รายการ` : loading ? 'กำลังโหลดรายการอุปกรณ์…' : 'ยังไม่มีข้อมูลที่โหลดสำเร็จ'}</span>
+          <span>{lastUpdated && `อัปเดตล่าสุด ${lastUpdated.toLocaleTimeString('th-TH')}`}{!sortConfig.key && ' · แสดงอุปกรณ์ที่ขัดข้องก่อน'}</span>
+        </div>
+        <div id="devices-table-container" className="devices-table-scroll" role="region" aria-label="ตารางอุปกรณ์ เลื่อนแนวนอนเพื่อดูทุกคอลัมน์" tabIndex={0} aria-busy={loading}>
+          <table className="devices-table">
+            <caption className="devices-sr-only">อุปกรณ์เครือข่าย กดชื่อสำนักงานเพื่อเปิดรายละเอียด</caption>
+            <thead><tr>
+              <th scope="col">ลำดับ</th>
+              {columns.map(([key, label]) => (
+                <th key={key} scope="col" aria-sort={sortConfig.key === key ? (sortConfig.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                  <button className="devices-sort" onClick={() => requestSort(key)}>
+                    {label}
+                    {sortConfig.key === key ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />) : <ArrowUpDown size={14} aria-hidden="true" />}
+                  </button>
+                </th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {!lastUpdated ? (
+                <tr><td colSpan={7} className="devices-empty">{loading ? 'กำลังโหลดข้อมูลอุปกรณ์…' : 'โหลดข้อมูลไม่สำเร็จ กด “ลองใหม่” เพื่อโหลดอีกครั้ง'}</td></tr>
+              ) : currentItems.length === 0 ? (
+                <tr><td colSpan={7} className="devices-empty">
+                  <strong>{hasFilters ? 'ไม่พบอุปกรณ์ที่ตรงกับตัวกรอง' : 'ยังไม่มีอุปกรณ์ในระบบ'}</strong>
+                  <p>{hasFilters ? 'ลองเปลี่ยนคำค้น หรือเลือกประเภทสำนักงานอื่น' : 'รายการจะแสดงเมื่อมีข้อมูลอุปกรณ์'}</p>
+                  {hasFilters && <button className="devices-button" onClick={clearFilters}>ล้างตัวกรอง</button>}
+                </td></tr>
+              ) : currentItems.map((d, index) => (
+                <tr key={d.id} className={d.status === 'down' ? 'devices-row-down' : ''}>
+                  <td>{indexOfFirstItem + index + 1}</td>
+                  <td><a className="devices-name" href={`/device/${d.device_id || d.id}`} onClick={e => {
+                    if (onDeviceClick && e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
+                      e.preventDefault();
+                      onDeviceClick(d.device_id || d.id);
+                    }
+                  }}>{d.device?.pea_name || 'ดูรายละเอียดอุปกรณ์'}</a></td>
+                  <td>{d.device?.province || '—'}</td>
+                  <td className={user ? 'devices-ip' : 'devices-muted'}>{user ? (d.device?.gateway || '—') : 'เข้าสู่ระบบเพื่อดู IP'}</td>
+                  <td className="devices-number">{Number.isFinite(d.latency_ms) ? d.latency_ms.toFixed(2) : '—'}</td>
+                  <td className="devices-number">{d.packet_loss ?? '—'}</td>
+                  <td><span className={`devices-status devices-status-${d.status === 'up' ? 'up' : d.status === 'down' ? 'down' : 'unknown'}`}>
+                    {d.status === 'up' ? <CheckCircle size={15} aria-hidden="true" /> : <AlertCircle size={15} aria-hidden="true" />}
+                    {d.status === 'up' ? 'ออนไลน์' : d.status === 'down' ? 'ขัดข้อง' : 'ไม่ทราบสถานะ'}
+                  </span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <footer className="devices-footer">
+          <label className="devices-page-size">แสดง
+            <select value={itemsPerPage} onChange={e => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
+              {[10, 25, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
+            </select>รายการต่อหน้า
+          </label>
+          <span className="devices-muted">{sortedDevices.length ? `${indexOfFirstItem + 1}–${Math.min(indexOfFirstItem + itemsPerPage, sortedDevices.length)} จาก ${sortedDevices.length}` : '0 รายการ'}</span>
+          <nav className="devices-pagination" aria-label="แบ่งหน้ารายการอุปกรณ์">
+            <button className="devices-button" disabled={visiblePage === 1 || !lastUpdated} onClick={() => setCurrentPage(visiblePage - 1)}>ก่อนหน้า</button>
+            <label>หน้า <select value={visiblePage} onChange={e => setCurrentPage(Number(e.target.value))} disabled={!lastUpdated}>
+              {Array.from({ length: totalPages }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
+            </select> / {totalPages}</label>
+            <button className="devices-button" disabled={visiblePage === totalPages || !lastUpdated} onClick={() => setCurrentPage(visiblePage + 1)}>ถัดไป</button>
+          </nav>
+        </footer>
+      </section>
+    </div>
   );
 };
 
