@@ -23,6 +23,20 @@ import JobReportDetails from './components/JobReportDetails';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { useEffect } from 'react';
+import { APP_NAME } from './config/branding';
+
+// "ชื่อหน้า | NE2 LDAP" per tab -- detail/edit pages use their page TYPE as
+// the title (not the specific record's name), which is an acceptable
+// fallback per the plan rather than fetching just for the title.
+const PAGE_TITLES = {
+  dashboard: 'แผนที่', 'network-devices': 'ภาพรวมเครือข่าย', devices: 'อุปกรณ์เครือข่าย',
+  deviceDetails: 'รายละเอียดอุปกรณ์เครือข่าย', analytics: 'ตรวจสอบการเชื่อมต่อ', settings: 'การตั้งค่าระบบ',
+  'downtime-history': 'ประวัติการขัดข้อง', 'down-devices': 'อุปกรณ์ที่ขัดข้อง',
+  'equipment-borrow': 'ยืมอุปกรณ์', 'equipment-loans': 'ประวัติการยืม', 'equipment-search': 'ค้นหาอุปกรณ์',
+  equipmentDetails: 'รายละเอียดอุปกรณ์', equipmentEdit: 'แก้ไขอุปกรณ์',
+  'report-issue': 'แจ้งปัญหา', jobDetails: 'รายละเอียดงานแจ้งปัญหา',
+  budget: 'งบประมาณ', management: 'การจัดการ', about: 'เกี่ยวกับระบบและคู่มือ', login: 'เข้าสู่ระบบ',
+};
 
 // Idle session timeout: also used to detect a session that expired while the
 // tab was closed (see the localStorage restore effect below).
@@ -318,6 +332,12 @@ function App() {
     return () => window.removeEventListener('popstate', applyPath);
   }, []);
 
+  // Keeps the browser tab title in sync with the current page -- index.html
+  // has a static "NE2 LDAP" fallback for before this runs.
+  useEffect(() => {
+    document.title = PAGE_TITLES[activeTab] ? `${PAGE_TITLES[activeTab]} | ${APP_NAME}` : APP_NAME;
+  }, [activeTab]);
+
   // Site Statistics Tracking
   useEffect(() => {
     // 1. Initialize Session
@@ -597,6 +617,24 @@ function App() {
     navigate('deviceDetails', { deviceId: id });
   };
 
+  // Keeps the main content area out of the Tab order (and off-limits to
+  // assistive tech) while the mobile drawer covers it, so a keyboard/screen
+  // reader user can't accidentally interact with page content sitting
+  // behind the overlay. Never applied on desktop, where the sidebar is a
+  // normal persistent panel beside the content, not an overlay.
+  const mainContentRef = useRef(null);
+  useEffect(() => {
+    const apply = () => {
+      const isMobileDrawer = isSidebarOpen && window.innerWidth <= 1024;
+      if (!mainContentRef.current) return;
+      if (isMobileDrawer) mainContentRef.current.setAttribute('inert', '');
+      else mainContentRef.current.removeAttribute('inert');
+    };
+    apply();
+    window.addEventListener('resize', apply);
+    return () => window.removeEventListener('resize', apply);
+  }, [isSidebarOpen]);
+
   return (
     <div className={`dashboard-container ${!isSidebarOpen ? 'sidebar-closed' : ''}`}>
       <Toaster position="top-right" reverseOrder={false} />
@@ -606,6 +644,9 @@ function App() {
         <button
           onClick={() => setIsSidebarOpen(true)}
           title="แสดงเมนู"
+          aria-label="แสดงเมนู"
+          aria-expanded={isSidebarOpen}
+          aria-controls="app-sidebar-nav"
           className="glass"
           style={{
             position: 'fixed',
@@ -635,7 +676,7 @@ function App() {
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
       />
-      <main className="main-content">
+      <main className="main-content" ref={mainContentRef}>
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' ? (
             <SitesMap onDeviceClick={handleDeviceClick} />

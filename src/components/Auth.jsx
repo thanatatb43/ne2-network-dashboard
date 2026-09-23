@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Lock, ArrowRight, ArrowLeft, Loader2, ShieldCheck, KeyRound } from 'lucide-react';
+import { APP_NAME, APP_NAME_TH } from '../config/branding';
 
 const Auth = ({ onAuthSuccess }) => {
   const [screen, setScreen] = useState('sso'); // 'sso' (primary) or 'local' (username/password form)
@@ -96,7 +97,7 @@ const Auth = ({ onAuthSuccess }) => {
               เข้าสู่ระบบ
             </h1>
             <p style={{ margin: '0.5rem 0 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-              ระบบตรวจสอบสถานะอุปกรณ์เครือข่าย กฟฉ.2
+              {APP_NAME} · {APP_NAME_TH}
             </p>
           </div>
 

@@ -5,6 +5,7 @@ import {
   BookOpen, Map, Network, Boxes, ChevronDown, ClipboardList
 } from 'lucide-react';
 import peaLogo from '../assets/logo/pea_logo.png';
+import { APP_NAME, APP_NAME_TH } from '../config/branding';
 
 // Mirrors the sidebar's menu groups (see Sidebar.jsx) so the guide stays a
 // straightforward walkthrough of "what's in the menu" rather than a separate
@@ -81,7 +82,7 @@ const GUIDE_SECTIONS = [
         name: 'อุปกรณ์ทั้งหมด',
         desc: 'รายการอุปกรณ์เครือข่ายทั้งหมด พร้อมค่า latency และ packet loss',
         steps: [
-          'เปิดเมนู "อุปกรณ์ทั้งหมด"',
+          'เปิดเมนู "อุปกรณ์เครือข่าย" (ชื่อเดิม "อุปกรณ์ทั้งหมด")',
           'เลือกประเภทสำนักงาน สถานะ (ทุกสถานะ/ออนไลน์/ขัดข้อง/ไม่ทราบสถานะ) หรือค้นหาด้วยชื่อสำนักงาน จังหวัด IP หรือ up / down และกด "ล้างตัวกรอง" เพื่อดูทั้งหมด',
           'คลิกหัวตารางเพื่อเรียงลำดับ เช่น latency, packet loss, สถานะ',
           'กดปุ่ม "ส่งออกทั้งหมด (Excel)" เพื่อดาวน์โหลดอุปกรณ์ทั้งหมด ไม่จำกัดตามตัวกรองหรือหน้าตาราง โดยแสดง IP เฉพาะผู้ที่เข้าสู่ระบบ',
@@ -297,9 +298,9 @@ const About = () => {
       style={{ paddingBottom: '3rem' }}
     >
       <header style={{ marginBottom: '2.5rem' }}>
-        <h1 className="krub-bold" style={{ margin: 0, fontSize: '2rem', fontWeight: 700 }}>About This Project</h1>
+        <h1 className="krub-bold" style={{ margin: 0, fontSize: '2rem', fontWeight: 700 }}>เกี่ยวกับระบบ {APP_NAME}</h1>
         <p className="krub-regular" style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }}>
-          ระบบตรวจสอบ LAN Devices
+          {APP_NAME_TH}
         </p>
       </header>
 
