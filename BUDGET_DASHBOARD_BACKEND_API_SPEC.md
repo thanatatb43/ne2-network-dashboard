@@ -1,7 +1,18 @@
 # API Contract สำหรับปรับปรุง Budget Dashboard
 
 วันที่จัดทำ: 23 กันยายน 2026  
-สถานะ: ข้อกำหนดเสนอสำหรับทีม Backend ก่อนเริ่มพัฒนา Frontend
+สถานะ: ข้อกำหนดเดิม พร้อมข้อยืนยันจาก Backend สำหรับ frontend รุ่นใหม่
+
+## ข้อยืนยันที่ใช้แทนข้อเสนอเดิม (23 กันยายน 2026)
+
+- `fiscal_year` เป็นปีปฏิทิน ม.ค.–ธ.ค.; ตัวอย่างช่วง ต.ค.–ก.ย. ด้านล่างเป็นข้อเสนอเดิมที่ยกเลิก
+- `account_code` และ `cost_center` เป็น field เดียวกัน ใช้ account_code เป็นหลัก
+- amount บวก = debit (จ่าย), ลบ = credit (กลับรายการ); spent = net
+- ทุก endpoint อ่านงบประมาณเป็น public; upload คงต้อง auth
+- transaction_id เป็น string ตัวเลข; linked jobs ยังไม่รองรับ ห้ามตีความ linked_job_count: 0 ว่าไม่มีงานจริง
+- selectors ไม่ส่ง field ยังคง legacy response รวม year; ส่ง field จึงใช้ value/label
+- aggregates เมื่อระบุปีเติม 12 เดือน รวมปีที่ไม่มีรายการ
+- ตรวจ API จริงแล้ว q ยังถูกละเลย: frontend จึงโหลดครบทุกหน้าตาม filter เมื่อใช้ค้นหาข้ามคอลัมน์ แล้วคำนวณยอดด้วย integer cents ก่อนแบ่งหน้า ควรเพิ่ม q ที่มีความหมายเดียวกันใน list/aggregates เพื่อลดการโหลดข้อมูลในอนาคต
 
 เอกสารนี้ต่อยอดจาก [BUDGET_DASHBOARD_IMPROVEMENT_PLAN.md](BUDGET_DASHBOARD_IMPROVEMENT_PLAN.md) และตั้งใจให้คง feature ปัจจุบันทั้งหมด โดยเฉพาะการคลิกการ์ด/แท่งกราฟเพื่อเปิดรายการธุรกรรมที่กรองตามบริบทนั้น
 
@@ -388,4 +399,3 @@ GET /api/budgets/transactions/selectors?fiscal_year=2026&q=comm&limit=20
 4. Budget/transaction เป็นข้อมูล public ตามหน้าปัจจุบันหรือจำกัดตาม role/สำนักงาน/หน่วยงาน
 5. `username`, description และเลขเอกสาร ส่งให้ผู้ใช้ทุก role ได้หรือจำเป็นต้อง redact
 6. สเกลข้อมูลสูงสุดต่อปี, database/index ที่มีอยู่, รอบ import และความสดข้อมูลที่สัญญาได้ เพื่อยืนยัน target latency/cache
-

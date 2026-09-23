@@ -1,7 +1,13 @@
 # แผนปรับปรุง Budget Dashboard
 
 วันที่จัดทำ: 23 กันยายน 2026  
-สถานะ: แผนสำหรับพัฒนา ยังไม่ได้เปลี่ยนโค้ดหน้าจริง
+สถานะ: พัฒนา frontend รุ่น API ใหม่แล้ว (23 กันยายน 2026)
+
+ผลส่งมอบ: responsive desktop/mobile, คลิกแท่งบัญชี/ผู้ใช้และจุดเดือนเปิดรายละเอียด, URL filters และ Back/Forward/refresh, รายการแบ่งหน้าจาก backend, ค้นหาข้ามคอลัมน์ทุกหน้า, รายละเอียดข้อความเต็ม และ error/retry
+
+ข้อปรับจากแผนเดิม: ปีข้อมูลเป็น ม.ค.–ธ.ค.; account_code กับ cost_center เป็นฟิลด์เดียว; spent เป็นสุทธิ; ยังไม่รองรับ linked jobs; API ยังไม่ใช้ q จึงโหลดรายการครบทุกหน้าภายใต้ filter เฉพาะเมื่อใช้ค้นหาในผลลัพธ์ (อาจช้าสำหรับข้อมูลจำนวนมาก)
+
+ผลตรวจจริง: summary ไม่ล้นจอ 360/390/768/1280/1440px, search ไม่ล้น 360/768/1280px, dark mobile, คลิกกราฟบัญชี/ผู้ใช้/จุดเดือน, refresh รายละเอียด, Back, คำค้นไม่พบทุกหน้า, API 503 และ retry ผ่าน; lint และ production build ผ่าน ยังไม่ได้ตรวจ screen reader และ zoom 200% แบบ manual
 
 อ้างอิง: `src/components/BudgetDashboard.jsx`, `src/App.jsx`, `DESIGN_STANDARDS.md` และพฤติกรรมจากโค้ดปัจจุบัน
 
