@@ -206,14 +206,14 @@ const JobReport = ({ token, user, onRequireLogin, onJobClick }) => {
 
       <section className="list-panel" aria-label="ค้นหาและกรองรายการแจ้งปัญหา">
         <div className="job-report-filters">
-          <label className="list-field job-report-search-filter">
+          <label className={`list-field job-report-search-filter${inputs.search ? ' is-active' : ''}`}>
             <span>ค้นหา</span>
             <div className="list-search-input">
               <Search size={18} aria-hidden="true" />
               <input type="search" placeholder="ชื่องาน หรือรายละเอียด" value={inputs.search} onChange={(e) => change('search', e.target.value)} />
             </div>
           </label>
-          <label className="list-field">
+          <label className={`list-field${inputs.site ? ' is-active' : ''}`}>
             <span>สำนักงาน</span>
             <SearchableDropdown
               label="สำนักงาน"
@@ -224,21 +224,21 @@ const JobReport = ({ token, user, onRequireLogin, onJobClick }) => {
               options={[...new Set(sites.map(siteLabel))]}
             />
           </label>
-          <label className="list-field">
+          <label className={`list-field${inputs.status ? ' is-active' : ''}`}>
             <span>สถานะ</span>
             <select value={inputs.status} onChange={(e) => change('status', e.target.value)}>
               <option value="">ทั้งหมด</option>
               {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </label>
-          <label className="list-field">
+          <label className={`list-field${inputs.jobType ? ' is-active' : ''}`}>
             <span>ประเภทงาน</span>
             <select value={inputs.jobType} onChange={(e) => change('jobType', e.target.value)}>
               <option value="">ทั้งหมด</option>
               {JOB_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </label>
-          <label className="list-field">
+          <label className={`list-field${inputs.priority ? ' is-active' : ''}`}>
             <span>ความสำคัญ</span>
             <select value={inputs.priority} onChange={(e) => change('priority', e.target.value)}>
               <option value="">ทั้งหมด</option>

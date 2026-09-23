@@ -18,6 +18,18 @@
 .list-search { flex: 1 1 300px; }
 .list-page select { min-height: 44px; padding: 8px 12px; border: 1px solid var(--input-border); border-radius: 8px; color: var(--text-primary); background: var(--input-bg); }
 .list-page option { background: var(--bg-color); color: var(--text-primary); }
+/* Highlights a filter field once it actually holds a value the user typed
+   or picked -- added as .is-active on the .list-field wrapper. !important
+   because several pages' own CSS (loaded after this file) sets a plain
+   border/background on the same input/select at equal class-specificity,
+   which would otherwise win the cascade tie by source order and silently
+   cancel the highlight. */
+.list-field.is-active input,
+.list-field.is-active select,
+.list-field.is-active .searchable-dropdown input {
+  border-color: var(--list-action) !important;
+  background: var(--bg-accent-subtle) !important;
+}
 .list-search-input { display: flex; align-items: center; position: relative; }
 .list-search-input svg { position: absolute; left: 12px; color: var(--text-secondary); pointer-events: none; }
 .list-search-input input { min-width: 0; width: 100%; min-height: 44px; padding: 10px 12px 10px 40px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); }

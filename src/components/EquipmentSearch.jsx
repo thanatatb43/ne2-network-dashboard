@@ -247,9 +247,9 @@ const EquipmentSearch = ({ token, onEquipmentClick }) => {
       {error && <div className="list-error" role="alert"><AlertCircle size={20} aria-hidden="true" /><div><strong>{error}</strong>{shown && <p>แสดงผลจากการค้นหาครั้งก่อน ข้อมูลอาจเปลี่ยนแปลงแล้ว</p>}</div><button className="list-button" disabled={loading} onClick={() => setRetry(n => n + 1)}>ลองใหม่</button></div>}
       <section className="list-panel" aria-label="ค้นหาและกรองอุปกรณ์">
         <div className="equipment-filters">
-          <label className="list-field equipment-name-filter"><span>ชื่ออุปกรณ์</span><div className="list-search-input"><Search size={18} aria-hidden="true" /><input type="search" placeholder="พิมพ์ชื่ออุปกรณ์" value={inputs.name} onChange={e => change('name', e.target.value)} /></div></label>
-          {PRIMARY_FIELDS.map(([key, label, options]) => <label className="list-field" key={key}><span>{label}</span><SearchableDropdown label={label} placeholder="ทั้งหมด" value={inputs.primary[key]} onChange={value => changeField('primary', key, value)} options={options} /></label>)}
-          <label className="list-field equipment-site-filter"><span>สำนักงาน</span><SearchableDropdown label="สำนักงาน" placeholder={sitesLoading ? 'กำลังโหลดสำนักงาน…' : 'พิมพ์แล้วเลือกสำนักงาน'} value={inputs.site} onChange={value => change('site', value)} describedBy="equipment-site-help" options={[...new Set(sites.map(siteLabel))]} /></label>
+          <label className={`list-field equipment-name-filter${inputs.name ? ' is-active' : ''}`}><span>ชื่ออุปกรณ์</span><div className="list-search-input"><Search size={18} aria-hidden="true" /><input type="search" placeholder="พิมพ์ชื่ออุปกรณ์" value={inputs.name} onChange={e => change('name', e.target.value)} /></div></label>
+          {PRIMARY_FIELDS.map(([key, label, options]) => <label className={`list-field${inputs.primary[key] ? ' is-active' : ''}`} key={key}><span>{label}</span><SearchableDropdown label={label} placeholder="ทั้งหมด" value={inputs.primary[key]} onChange={value => changeField('primary', key, value)} options={options} /></label>)}
+          <label className={`list-field equipment-site-filter${inputs.site ? ' is-active' : ''}`}><span>สำนักงาน</span><SearchableDropdown label="สำนักงาน" placeholder={sitesLoading ? 'กำลังโหลดสำนักงาน…' : 'พิมพ์แล้วเลือกสำนักงาน'} value={inputs.site} onChange={value => change('site', value)} describedBy="equipment-site-help" options={[...new Set(sites.map(siteLabel))]} /></label>
         </div>
         <div className="equipment-filter-help" id="equipment-site-help">
           {sitesError ? <span role="alert">โหลดรายชื่อสำนักงานไม่สำเร็จ <button className="list-button" onClick={() => setSiteRetry(n => n + 1)}>โหลดสำนักงานใหม่</button></span> : inputs.site && !siteInputMatches && !sitesLoading ? <span className="list-filter-warning">ยังไม่ได้กรองสำนักงาน กรุณาเลือกชื่อให้ตรงกับรายการแนะนำ</span> : 'สำนักงานต้องเลือกชื่อให้ตรงกับรายการแนะนำ ส่วนตัวกรองอื่นพิมพ์บางส่วนได้'}
@@ -260,7 +260,7 @@ const EquipmentSearch = ({ token, onEquipmentClick }) => {
           <span className="list-muted">ค้นหาอัตโนมัติ · ใช้ทุกเงื่อนไขร่วมกัน</span>
         </div>
         <div id="equipment-advanced" className="equipment-advanced" hidden={!showAdvanced}>
-          {ADVANCED_FIELDS.map(({ key, label }) => <label className="list-field" key={key}><span>{label}</span><input value={inputs.advanced[key]} onChange={e => changeField('advanced', key, e.target.value)} /></label>)}
+          {ADVANCED_FIELDS.map(({ key, label }) => <label className={`list-field${inputs.advanced[key] ? ' is-active' : ''}`} key={key}><span>{label}</span><input value={inputs.advanced[key]} onChange={e => changeField('advanced', key, e.target.value)} /></label>)}
         </div>
         <div className="list-result-info"><span role="status">{error ? 'ค้นหาไม่สำเร็จ' : pending ? 'กำลังค้นหา…' : `พบ ${shown?.total.toLocaleString('th-TH') ?? 0} รายการ`}</span><span>{shown && `อัปเดตล่าสุด ${shown.updated.toLocaleTimeString('th-TH')}`}</span></div>
         {!shown || !shown.equipment.length ? <div className="equipment-empty">

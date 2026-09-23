@@ -413,7 +413,7 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
 
       <section className="list-panel" aria-label="ค้นหาและกรองอุปกรณ์ที่ยืมได้">
         <div className="equipment-borrow-filters">
-          <label className="list-field equipment-borrow-search-filter">
+          <label className={`list-field equipment-borrow-search-filter${inputs.search ? ' is-active' : ''}`}>
             <span>ค้นหา</span>
             <div className="list-search-input">
               <Search size={18} aria-hidden="true" />
@@ -421,12 +421,12 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
             </div>
           </label>
           {PRIMARY_FIELDS.map(([key, label, options]) => (
-            <label className="list-field" key={key}>
+            <label className={`list-field${inputs.primary[key] ? ' is-active' : ''}`} key={key}>
               <span>{label}</span>
               <SearchableDropdown label={label} placeholder="ทั้งหมด" value={inputs.primary[key]} onChange={(value) => changeField(key, value)} options={options} />
             </label>
           ))}
-          <label className="list-field">
+          <label className={`list-field${inputs.site ? ' is-active' : ''}`}>
             <span>สำนักงาน</span>
             <SearchableDropdown
               label="สำนักงาน"

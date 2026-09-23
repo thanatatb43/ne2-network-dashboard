@@ -245,7 +245,7 @@ const Devices = ({ onDeviceClick, user, initialStatus, onInitialStatusConsumed }
 
       <section className="list-panel" aria-label="รายการอุปกรณ์เครือข่าย">
         <div className="list-toolbar">
-          <label className="list-field list-search">
+          <label className={`list-field list-search${searchTerm ? ' is-active' : ''}`}>
             <span>ค้นหาอุปกรณ์</span>
             <div className="list-search-input">
               <Search size={18} aria-hidden="true" />
@@ -253,14 +253,14 @@ const Devices = ({ onDeviceClick, user, initialStatus, onInitialStatusConsumed }
                 onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }} />
             </div>
           </label>
-          <label className="list-field">
+          <label className={`list-field${selectedType !== 'All' ? ' is-active' : ''}`}>
             <span>ประเภทสำนักงาน</span>
             <select value={selectedType} onChange={e => { setSelectedType(e.target.value); setCurrentPage(1); }}>
               {selectedType !== 'All' && !peaTypes.includes(selectedType) && <option value={selectedType}>{selectedType}</option>}
               {peaTypes.map(type => <option key={type} value={type}>{type === 'All' ? 'ทุกประเภท' : type}</option>)}
             </select>
           </label>
-          <label className="list-field">
+          <label className={`list-field${statusFilter !== 'All' ? ' is-active' : ''}`}>
             <span>สถานะ</span>
             <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setCurrentPage(1); }}>
               {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
