@@ -1,0 +1,54 @@
+.network-overview-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+.network-overview-header h1 { margin: 0; font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 700; line-height: 1.4; }
+.network-overview-header p { margin: 8px 0 0; }
+.network-overview-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.network-feed-indicator { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: var(--card-bg); border: 1px solid var(--border-subtle); font-size: .875rem; font-weight: 600; white-space: nowrap; }
+.network-feed-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.network-feed-indicator.is-ok { color: var(--list-success); }
+.network-feed-indicator.is-ok .network-feed-dot { background: var(--list-success); }
+.network-feed-indicator.is-down { color: var(--list-danger); }
+.network-feed-indicator.is-down .network-feed-dot { background: var(--list-danger); }
+
+.network-stats { margin-bottom: 24px; }
+.network-stat-card { display: flex; align-items: center; gap: 16px; padding: 20px; border-radius: 16px; background: var(--card-bg); border: 1px solid var(--border-subtle); text-align: left; width: 100%; }
+button.network-stat-card { cursor: pointer; }
+button.network-stat-card:hover { background: var(--bg-accent-subtle); }
+.network-stat-icon { flex-shrink: 0; padding: 12px; border-radius: 12px; display: flex; }
+.network-stat-accent .network-stat-icon { background: var(--bg-accent-subtle); color: var(--accent-primary); }
+.network-stat-success .network-stat-icon { background: var(--bg-success-subtle); color: var(--accent-success); }
+.network-stat-danger .network-stat-icon { background: var(--bg-danger-subtle); color: var(--accent-danger); }
+.network-stat-warning .network-stat-icon { background: var(--bg-secondary-subtle); color: var(--accent-warning); }
+.network-stat-body { min-width: 0; }
+.network-stat-label { margin: 0; color: var(--text-secondary); font-size: .875rem; }
+.network-stat-value { margin: 2px 0 0; font-size: 1.5rem; font-weight: 700; }
+.network-stat-detail { margin: 4px 0 0; font-size: .8125rem; color: var(--text-secondary); }
+
+.network-quality-row { display: flex; flex-wrap: wrap; gap: 12px 24px; padding: 16px 4px 0; font-size: .875rem; color: var(--text-secondary); }
+.network-quality-item { display: flex; align-items: center; gap: 8px; }
+.network-quality-item strong { color: var(--text-primary); font-weight: 600; }
+
+.network-attention-panel { margin-bottom: 24px; }
+.network-attention-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; padding: 20px 20px 12px; }
+.network-attention-head h2 { margin: 0; font-size: 1.125rem; font-weight: 700; }
+.network-attention-head p { margin: 4px 0 0; }
+.network-attention-empty { padding: 48px 20px; text-align: center; color: var(--text-secondary); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+
+.network-charts-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; margin-bottom: 24px; }
+.network-chart-card { padding: 20px; border-radius: 16px; background: var(--card-bg); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; min-width: 0; }
+.network-chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.network-chart-head h3 { margin: 0; font-size: 1rem; font-weight: 700; }
+.network-chart-body { height: 260px; }
+.network-chart-empty { height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--text-secondary); text-align: center; }
+.network-chart-tooltip { background: var(--tooltip-bg); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 6px 10px; font-size: .8125rem; color: var(--text-primary); }
+.network-chart-stale-note { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; font-size: .8125rem; color: var(--text-secondary); }
+
+@media (max-width: 900px) {
+  .network-charts-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .network-chart-body, .network-chart-empty { height: 220px; }
+  .network-attention-head { padding: 16px 16px 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .network-overview .animate-spin { animation: none; }
+}

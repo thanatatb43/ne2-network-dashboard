@@ -32,6 +32,9 @@
 .list-name { min-width: 0; color: var(--list-action); font-weight: 600; text-decoration: none; border-radius: 4px; }
 .list-name:hover { background: var(--bg-accent-subtle); }
 .list-name { display: block; max-width: 20rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.list-name-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.list-name-cell .list-name { flex: 1; }
+.list-name-cell img { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; flex-shrink: 0; border: 1px solid var(--border-subtle); }
 .list-number { font-variant-numeric: tabular-nums; }
 .list-ip { font-family: ui-monospace, monospace; white-space: nowrap; }
 .list-muted { color: var(--text-secondary); font-size: .8125rem; }

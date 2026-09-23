@@ -9,9 +9,6 @@
 .equipment-advanced { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding: 20px; margin-bottom: 20px; border-block: 1px solid var(--border-subtle); background: var(--glass-bg-subtle); }
 .equipment-advanced[hidden] { display: none; }
 .equipment-empty { padding: 48px 20px; text-align: center; border-top: 1px solid var(--border-subtle); color: var(--text-secondary); }
-.equipment-name-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.equipment-name-cell .list-name { flex: 1; }
-.equipment-name-cell img { width: 40px; height: 40px; object-fit: cover; border-radius: 8px; flex-shrink: 0; border: 1px solid var(--border-subtle); }
 .equipment-search-page .list-table { table-layout: fixed; min-width: 1000px; }
 .equipment-search-page .list-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .equipment-search-page .list-table th:nth-child(1) { width: 24%; }

@@ -1,0 +1,98 @@
+/* List page (JobReport.jsx) */
+.job-report-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; padding: 20px 20px 12px; }
+.job-report-search-filter { grid-column: span 2; min-width: 260px; }
+.job-report-page .list-panel { overflow: visible; }
+.job-report-page .list-field select, .job-report-page .list-field input, .job-report-page .list-pagination select {
+  font-size: .875rem; font-weight: 400; line-height: 1.5; min-height: 44px;
+}
+.job-report-page .list-field input { min-width: 0; width: 100%; padding: 10px 12px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); }
+.job-report-page .list-search-input input { padding-left: 40px; }
+.job-report-filter-help { padding: 0 20px 16px; font-size: .8125rem; color: var(--text-secondary); }
+.job-report-filter-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 0 20px 20px; }
+.job-report-empty { padding: 48px 20px; text-align: center; border-top: 1px solid var(--border-subtle); color: var(--text-secondary); }
+
+.job-report-page .list-table { table-layout: fixed; min-width: 1000px; }
+.job-report-page .list-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-report-page .list-table th:nth-child(1) { width: 22%; }
+.job-report-page .list-table th:nth-child(2) { width: 14%; }
+.job-report-page .list-table th:nth-child(3) { width: 12%; }
+.job-report-page .list-table th:nth-child(4) { width: 10%; }
+.job-report-page .list-table th:nth-child(5) { width: 18%; }
+.job-report-page .list-table th:nth-child(6) { width: 14%; }
+.job-report-page .list-table th:nth-child(7) { width: 10%; }
+
+/* Detail page (JobReportDetails.jsx) */
+.job-report-details-back { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+.job-report-details-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.job-report-details-header h1 { margin: 0 0 8px; font-size: clamp(1.35rem, 2.6vw, 1.75rem); font-weight: 700; line-height: 1.4; word-break: break-word; }
+.job-report-details-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.job-report-details-meta { font-size: .8125rem; color: var(--text-secondary); display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.job-report-details-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+
+.job-report-details-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start; }
+.job-report-details-main, .job-report-details-side { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+
+.job-report-panel { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 20px; min-width: 0; }
+.job-report-panel h2 { margin: 0 0 12px; font-size: 1rem; font-weight: 700; }
+.job-report-panel-body { font-size: .875rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.job-report-field-list { display: flex; flex-direction: column; gap: 8px; font-size: .875rem; }
+.job-report-field-list dt { color: var(--text-secondary); display: inline; }
+.job-report-field-list dd { display: inline; margin: 0 0 0 4px; }
+.job-report-field-row { margin: 0; }
+
+.job-report-subsection { padding: 14px 16px; border-radius: 12px; background: var(--glass-bg-subtle); }
+.job-report-subsection + .job-report-subsection { margin-top: 12px; }
+.job-report-subsection-title { font-size: .8125rem; font-weight: 700; margin-bottom: 8px; }
+.job-report-equipment-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 10px; background: var(--glass-bg-subtle); font-size: .875rem; }
+.job-report-equipment-row + .job-report-equipment-row { margin-top: 8px; }
+.job-report-equipment-link { color: var(--list-action, var(--accent-primary)); font-weight: 600; text-decoration: none; }
+.job-report-equipment-link:hover { text-decoration: underline; }
+
+.job-report-doc-preview { display: block; text-align: left; padding: 0; border: none; background: none; cursor: pointer; font: inherit; color: inherit; width: 100%; }
+.job-report-doc-preview img { max-width: 100%; max-height: 320px; border-radius: 10px; border: 1px solid var(--border-subtle); display: block; }
+.job-report-doc-card { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 10px; border: 1px solid var(--border-subtle); }
+.job-report-doc-icon { background: var(--bg-accent-subtle); color: var(--accent-primary); padding: 10px; border-radius: 8px; display: flex; flex-shrink: 0; }
+.job-report-doc-title { font-size: .875rem; font-weight: 600; }
+.job-report-doc-hint { font-size: .75rem; color: var(--text-secondary); }
+.job-report-doc-newtab { display: inline-flex; align-items: center; gap: 4px; font-size: .8125rem; color: var(--accent-primary); margin-top: 8px; }
+.job-report-doc-block + .job-report-doc-block { margin-top: 16px; }
+
+.job-report-photos-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.job-report-photo-button { padding: 0; border: 1px solid var(--border-subtle); border-radius: 10px; overflow: hidden; cursor: pointer; width: 96px; height: 96px; flex-shrink: 0; }
+.job-report-photo-button img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.job-report-tx-scroll { overflow-x: auto; }
+.job-report-tx-table { width: 100%; border-collapse: collapse; text-align: left; font-size: .8125rem; min-width: 480px; }
+.job-report-tx-table th { padding: 8px 12px; color: var(--text-secondary); font-weight: 600; border-bottom: 1px solid var(--border-subtle); }
+.job-report-tx-table td { padding: 8px 12px; border-top: 1px solid var(--border-subtle); }
+.job-report-tx-table td:last-child, .job-report-tx-table th:last-child { text-align: right; }
+
+.job-report-details-state { padding: 64px 20px; text-align: center; color: var(--text-secondary); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+
+/* Accessible lightbox reused from EquipmentBorrow.jsx's pattern */
+.job-report-lightbox-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.9); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 24px; }
+.job-report-lightbox-panel { position: relative; max-width: 100%; max-height: 100%; display: flex; align-items: center; justify-content: center; }
+.job-report-lightbox-panel img { max-width: 100%; max-height: 85dvh; object-fit: contain; border-radius: 8px; }
+.job-report-lightbox-panel iframe { width: 90vw; height: 85dvh; max-width: 1000px; border: none; border-radius: 8px; background: #fff; }
+.job-report-lightbox-close, .job-report-lightbox-nav { background: rgba(255, 255, 255, 0.12); border: none; color: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+/* Fixed to the viewport (not the panel) so it's always reachable -- with
+   the panel's own top edge (e.g. a tall PDF iframe) this used to sit above
+   the panel via a negative offset, which pushed it off-screen entirely on
+   short viewports (checked at 360x640: top landed at -4px). */
+.job-report-lightbox-close { position: fixed; top: max(16px, env(safe-area-inset-top, 0px)); right: 16px; width: 44px; height: 44px; z-index: 1; }
+.job-report-lightbox-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; }
+.job-report-lightbox-nav.is-prev { left: 16px; }
+.job-report-lightbox-nav.is-next { right: 16px; }
+.job-report-lightbox-counter { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(255, 255, 255, 0.12); color: #fff; font-size: .8125rem; padding: 6px 14px; border-radius: 999px; }
+
+@media (max-width: 1000px) {
+  .job-report-details-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .job-report-filter-help, .job-report-filter-actions { padding-left: 16px; padding-right: 16px; }
+  .job-report-panel { padding: 16px; }
+  .job-report-details-actions { width: 100%; justify-content: flex-end; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .job-report-page .animate-spin, .job-report-details .animate-spin { animation: none; }
+}

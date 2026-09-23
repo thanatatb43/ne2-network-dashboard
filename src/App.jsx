@@ -1,8 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import Sidebar from './components/Sidebar';
-import StatsGrid from './components/StatsGrid';
-import NetworkChart from './components/NetworkChart';
-import DeviceTable from './components/DeviceTable';
+import NetworkOverview from './components/NetworkOverview';
 import Devices from './components/Devices';
 import Analytics from './components/Analytics';
 import DeviceDetails from './components/DeviceDetails';
@@ -21,7 +19,7 @@ import EquipmentBorrow from './components/EquipmentBorrow';
 import EquipmentLoanHistory from './components/EquipmentLoanHistory';
 import EquipmentSearch from './components/EquipmentSearch';
 import JobReport from './components/JobReport';
-import { useNetworkData } from './hooks/useNetworkData';
+import JobReportDetails from './components/JobReportDetails';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { useEffect } from 'react';
@@ -79,6 +77,9 @@ const pathToRoute = (pathname) => {
   const deviceMatch = pathname.match(/^\/device\/([^/]+)$/);
   if (deviceMatch) return { tab: 'deviceDetails', deviceId: deviceMatch[1] };
 
+  const jobMatch = pathname.match(/^\/report-issue\/([^/]+)$/);
+  if (jobMatch) return { tab: 'jobDetails', jobId: jobMatch[1] };
+
   const equipmentEditMatch = pathname.match(/^\/equipment\/([^/]+)\/edit$/);
   if (equipmentEditMatch) return { tab: 'equipmentEdit', equipmentId: equipmentEditMatch[1] };
 
@@ -99,7 +100,6 @@ const pathToRoute = (pathname) => {
 };
 
 function App() {
-  const { metrics, history } = useNetworkData();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const [selectedEquipmentId, setSelectedEquipmentId] = useState(null);
@@ -107,17 +107,30 @@ function App() {
   // pre-select a site -- not part of the URL since it's just a convenience
   // default, not something a deep link needs to reproduce.
   const [newEquipmentDefaultSiteId, setNewEquipmentDefaultSiteId] = useState(null);
+  // One-shot hint from a NetworkOverview stat card ("ออนไลน์") to pre-filter
+  // Devices.jsx on the next mount -- Devices.jsx clears it back to null once
+  // applied, so it doesn't stick around and reapply on a later, unrelated
+  // visit to the same page (e.g. via the sidebar).
+  const [devicesInitialStatus, setDevicesInitialStatus] = useState(null);
+  const [selectedJobId, setSelectedJobId] = useState(null);
   const [budgetView, setBudgetView] = useState('summary');
   const [mgmtView, setMgmtView] = useState('overview');
   const [mgmtSiteId, setMgmtSiteId] = useState(null);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // True right after navigate('jobDetails', ...) pushed a new entry on top
+  // of the report-issue list (i.e. the list is genuinely the previous
+  // history entry) -- lets the detail page's "back" button call
+  // history.back() so a browser Back afterwards can't re-open the same
+  // detail (see navigate()/popstate below for where this gets reset).
+  const cameFromJobListRef = useRef(false);
 
   const applyRoute = (route) => {
     setActiveTab(route.tab);
     setSelectedDeviceId(route.tab === 'deviceDetails' ? route.deviceId : null);
     setSelectedEquipmentId(route.tab === 'equipmentDetails' || route.tab === 'equipmentEdit' ? route.equipmentId : null);
+    setSelectedJobId(route.tab === 'jobDetails' ? route.jobId : null);
     setBudgetView(route.tab === 'budget' ? (route.budgetView || 'summary') : 'summary');
     setMgmtView(route.tab === 'management' ? (route.mgmtView || 'overview') : 'overview');
     setMgmtSiteId(route.tab === 'management' ? (route.mgmtSiteId || null) : null);
@@ -129,6 +142,8 @@ function App() {
     let path;
     if (tab === 'deviceDetails') {
       path = `/device/${opts.deviceId}`;
+    } else if (tab === 'jobDetails') {
+      path = `/report-issue/${opts.jobId}`;
     } else if (tab === 'equipmentDetails') {
       path = `/equipment/${opts.equipmentId}`;
     } else if (tab === 'equipmentEdit') {
@@ -143,6 +158,11 @@ function App() {
     } else {
       path = TAB_PATHS[tab] || '/';
     }
+
+    // Only a genuine navigate('jobDetails', ...) call -- i.e. clicking a job
+    // from the list -- means the list is truly the previous history entry.
+    // Any other in-app navigation invalidates that shortcut.
+    cameFromJobListRef.current = tab === 'jobDetails';
 
     applyRoute({ tab, ...opts });
     if (window.location.pathname !== path) {
@@ -287,7 +307,11 @@ function App() {
   // back/forward (popstate). Does NOT call pushState here -- popstate means
   // the browser already changed the URL, we just need to follow it.
   useEffect(() => {
-    const applyPath = () => applyRoute(pathToRoute(window.location.pathname));
+    // A real popstate (or the initial load) means we can no longer trust
+    // that the report-issue list is "one history.back() away" -- the user
+    // may have navigated anywhere. Reset the shortcut; JobReportDetails'
+    // back button falls back to a normal push-navigate in that case.
+    const applyPath = () => { cameFromJobListRef.current = false; applyRoute(pathToRoute(window.location.pathname)); };
 
     applyPath();
     window.addEventListener('popstate', applyPath);
@@ -623,20 +647,11 @@ function App() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
             >
-              <header className="dashboard-header-title-wrap" style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
-                <div>
-                  <h1 className="dashboard-header-title" style={{ margin: 0, fontWeight: 700 }}>ระบบตรวจสอบสถานะอุปกรณ์เครือข่ายภายในสำนักงาน กฟฉ.2</h1>
-                  <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }}>แผนกคอมพิวเตอร์และเครือข่าย กดส.ฉ.2</p>
-                </div>
-                <div className="glass" style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
-                  <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--accent-success)' }} />
-                  <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>Live Feed</span>
-                </div>
-              </header>
-
-              <StatsGrid metrics={metrics} onCardClick={() => navigate('devices')} />
-              <NetworkChart history={history} />
-              <DeviceTable onViewAll={() => navigate('devices')} onDeviceClick={handleDeviceClick} user={user} />
+              <NetworkOverview
+                onDeviceClick={handleDeviceClick}
+                onNavigateDevices={(status) => { setDevicesInitialStatus(status); navigate('devices'); }}
+                onNavigateDown={() => navigate('down-devices')}
+              />
             </motion.div>
           ) : activeTab === 'devices' ? (
             <motion.div
@@ -646,7 +661,12 @@ function App() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
             >
-              <Devices onDeviceClick={handleDeviceClick} user={user} />
+              <Devices
+                onDeviceClick={handleDeviceClick}
+                user={user}
+                initialStatus={devicesInitialStatus}
+                onInitialStatusConsumed={() => setDevicesInitialStatus(null)}
+              />
             </motion.div>
           ) : activeTab === 'deviceDetails' ? (
             <DeviceDetails
@@ -753,6 +773,22 @@ function App() {
               token={token}
               user={user}
               onRequireLogin={() => requireLoginFor('/report-issue')}
+              onJobClick={(id) => navigate('jobDetails', { jobId: id })}
+            />
+          ) : activeTab === 'jobDetails' ? (
+            <JobReportDetails
+              jobId={selectedJobId}
+              token={token}
+              onBack={() => {
+                // When the list is genuinely the previous history entry,
+                // go back to that same entry instead of pushing a new one --
+                // otherwise a browser Back afterwards would re-open this
+                // same detail page. Direct links / refreshes / anywhere else
+                // fall back to a normal push so "back" still always works.
+                if (cameFromJobListRef.current) window.history.back();
+                else navigate('report-issue');
+              }}
+              onEquipmentClick={(id) => navigate('equipmentDetails', { equipmentId: id })}
             />
           ) : activeTab === 'about' ? (
             <About />

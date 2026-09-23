@@ -5,12 +5,14 @@ import toast from 'react-hot-toast';
 import './Devices.css';
 
 const VIEW_KEY = 'network-devices:view:v1';
+const STATUS_OPTIONS = ['All', 'up', 'down', 'unknown'];
 const readView = () => {
   try {
     const saved = JSON.parse(sessionStorage.getItem(VIEW_KEY)) || {};
     return {
       searchTerm: typeof saved.searchTerm === 'string' ? saved.searchTerm : '',
       selectedType: typeof saved.selectedType === 'string' ? saved.selectedType : 'All',
+      statusFilter: STATUS_OPTIONS.includes(saved.statusFilter) ? saved.statusFilter : 'All',
       currentPage: Number.isSafeInteger(saved.currentPage) && saved.currentPage > 0 ? saved.currentPage : 1,
       itemsPerPage: [10, 25, 50, 100].includes(saved.itemsPerPage) ? saved.itemsPerPage : 10,
       sortConfig: ['pea_name', 'province', 'gateway', 'latency_ms', 'packet_loss', 'status'].includes(saved.sortConfig?.key) && ['asc', 'desc'].includes(saved.sortConfig?.direction) ? saved.sortConfig : { key: null, direction: 'asc' },
@@ -18,7 +20,7 @@ const readView = () => {
   } catch { return {}; }
 };
 
-const Devices = ({ onDeviceClick, user }) => {
+const Devices = ({ onDeviceClick, user, initialStatus, onInitialStatusConsumed }) => {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savedView] = useState(readView);
@@ -27,15 +29,29 @@ const Devices = ({ onDeviceClick, user }) => {
   const [itemsPerPage, setItemsPerPage] = useState(savedView.itemsPerPage || 10);
   const [sortConfig, setSortConfig] = useState(savedView.sortConfig || { key: null, direction: 'asc' });
   const [selectedType, setSelectedType] = useState(savedView.selectedType || 'All');
+  // A stat card can deep-link straight into a status (NetworkOverview's
+  // "ออนไลน์" card -> 'up') -- that one-shot intent takes priority over a
+  // status remembered from a previous visit, since it reflects what the
+  // user just clicked, not stale browsing state.
+  const [statusFilter, setStatusFilter] = useState(() => (
+    STATUS_OPTIONS.includes(initialStatus) ? initialStatus : (savedView.statusFilter || 'All')
+  ));
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
   const requestRef = useRef(null);
 
   useEffect(() => {
+    if (initialStatus && onInitialStatusConsumed) onInitialStatusConsumed();
+    // Runs once on mount only -- consuming the deep-link intent so a later
+    // remount (e.g. navigating here again from the sidebar) doesn't reapply it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     try {
-      sessionStorage.setItem(VIEW_KEY, JSON.stringify({ searchTerm, currentPage, itemsPerPage, sortConfig, selectedType }));
+      sessionStorage.setItem(VIEW_KEY, JSON.stringify({ searchTerm, currentPage, itemsPerPage, sortConfig, selectedType, statusFilter }));
     } catch { /* Browsing still works when browser storage is unavailable. */ }
-  }, [searchTerm, currentPage, itemsPerPage, sortConfig, selectedType]);
+  }, [searchTerm, currentPage, itemsPerPage, sortConfig, selectedType, statusFilter]);
   const peaTypes = React.useMemo(() => {
     const types = new Set();
     devices.forEach(d => {
@@ -89,8 +105,11 @@ const Devices = ({ onDeviceClick, user }) => {
     
     const dType = d.device?.pea_type || d.pea_type;
     const matchesType = selectedType === 'All' || dType === selectedType;
-    
-    return matchesSearch && matchesType;
+
+    const matchesStatus = statusFilter === 'All'
+      || (statusFilter === 'unknown' ? d.status !== 'up' && d.status !== 'down' : d.status === statusFilter);
+
+    return matchesSearch && matchesType && matchesStatus;
   });
 
   const requestSort = (key) => {
@@ -161,12 +180,14 @@ const Devices = ({ onDeviceClick, user }) => {
   const visiblePage = Math.min(currentPage, totalPages);
   const indexOfFirstItem = (visiblePage - 1) * itemsPerPage;
   const currentItems = sortedDevices.slice(indexOfFirstItem, indexOfFirstItem + itemsPerPage);
-  const hasFilters = Boolean(searchTerm || selectedType !== 'All');
+  const hasFilters = Boolean(searchTerm || selectedType !== 'All' || statusFilter !== 'All');
   const clearFilters = () => {
     setSearchTerm('');
     setSelectedType('All');
+    setStatusFilter('All');
     setCurrentPage(1);
   };
+  const STATUS_LABELS = { All: 'ทุกสถานะ', up: 'ออนไลน์', down: 'ขัดข้อง', unknown: 'ไม่ทราบสถานะ' };
   const columns = [
     ['pea_name', 'สำนักงาน'], ['province', 'จังหวัด'], ['gateway', 'Gateway IP'],
     ['latency_ms', 'Latency (ms)'], ['packet_loss', 'Packet loss (%)'], ['status', 'สถานะ'],
@@ -237,6 +258,12 @@ const Devices = ({ onDeviceClick, user }) => {
             <select value={selectedType} onChange={e => { setSelectedType(e.target.value); setCurrentPage(1); }}>
               {selectedType !== 'All' && !peaTypes.includes(selectedType) && <option value={selectedType}>{selectedType}</option>}
               {peaTypes.map(type => <option key={type} value={type}>{type === 'All' ? 'ทุกประเภท' : type}</option>)}
+            </select>
+          </label>
+          <label className="list-field">
+            <span>สถานะ</span>
+            <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setCurrentPage(1); }}>
+              {STATUS_OPTIONS.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
             </select>
           </label>
           <button className="list-button" onClick={clearFilters} disabled={!hasFilters}>ล้างตัวกรอง</button>

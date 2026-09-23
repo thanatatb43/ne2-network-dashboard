@@ -4,7 +4,7 @@ import {
   Search, Loader2, RefreshCw, AlertCircle, ShoppingCart, X, Plus, Check,
   CheckCircle2, XCircle
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as Motion, AnimatePresence } from 'framer-motion';
 import './ListPage.css';
 import './EquipmentBorrow.css';
 import SearchableDropdown from './SearchableDropdown';
@@ -54,21 +54,66 @@ const toBangkokIso = (datetimeLocalValue) => {
   return `${datetimeLocalValue}:00+07:00`;
 };
 
+// Same read/save session-storage convention EquipmentSearch.jsx and
+// StockManagement.jsx already use -- kept local rather than shared since
+// neither of those extracted it either.
+const read = (key, fallback = '') => {
+  try { return sessionStorage.getItem(key) ?? fallback; } catch { return fallback; }
+};
+const save = (key, value) => {
+  try { sessionStorage.setItem(key, value); } catch { /* Storage is optional. */ }
+};
+const readFields = (key, defaults) => {
+  try {
+    const value = JSON.parse(read(key, '{}'));
+    return Object.fromEntries(Object.entries(defaults).map(([k, v]) => [k, typeof value?.[k] === 'string' ? value[k] : v]));
+  } catch { return defaults; }
+};
+const readPage = () => {
+  const page = Number(read('eq_borrow_page', '1'));
+  return Number.isSafeInteger(page) && page > 0 ? page : 1;
+};
+// Cart is namespaced per user (not just per tab) so switching accounts in
+// the same browser never shows one user's picks to another.
+const readCart = (userKey) => {
+  if (!userKey) return [];
+  try {
+    const value = JSON.parse(read(`eq_borrow_cart_${userKey}`, '[]'));
+    return Array.isArray(value) ? value : [];
+  } catch { return []; }
+};
+
 // Basic modal accessibility (name via aria-labelledby, aria-modal, initial
 // focus, Tab trap, and returning focus to the opener on close) -- there is
 // no shared Modal component yet (see DESIGN_STANDARDS.md section 12), so
 // this is a small local implementation reused across this page's 3 dialogs.
-const useModalA11y = (open, containerRef, onEscape) => {
+// `stackRef` is a stack of open dialogs shared across every useModalA11y
+// call on the page (cart drawer -> confirm -> response can all be mounted
+// at once): only the dialog on top of the stack reacts to Escape/Tab, so a
+// single keypress can't reach past a modal stacked on top of it. `onEscape`
+// is read from a ref that's refreshed every render (not just when `open`
+// flips), so a stale closure -- e.g. one that captured `submitting` from
+// before the confirm request started -- can never let Escape close a dialog
+// mid-submit.
+const useModalA11y = (open, containerRef, onEscape, stackRef) => {
   const openerRef = useRef(null);
+  const idRef = useRef(null);
+  if (idRef.current == null) { idRef.current = {}; }
+  const onEscapeRef = useRef(onEscape);
+  useEffect(() => { onEscapeRef.current = onEscape; });
+
   useEffect(() => {
     if (!open) return;
+    const id = idRef.current;
+    stackRef.current.push(id);
     openerRef.current = document.activeElement;
     const getFocusable = () => Array.from(
       containerRef.current?.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])') || []
     ).filter(el => !el.disabled);
     (getFocusable()[0] || containerRef.current)?.focus();
     const onKeyDown = (e) => {
-      if (e.key === 'Escape') { onEscape?.(); return; }
+      if (stackRef.current[stackRef.current.length - 1] !== id) return;
+      if (e.key === 'Escape') { onEscapeRef.current?.(); return; }
       if (e.key !== 'Tab') return;
       const items = getFocusable();
       if (!items.length) return;
@@ -80,17 +125,26 @@ const useModalA11y = (open, containerRef, onEscape) => {
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('keydown', onKeyDown);
+      stackRef.current = stackRef.current.filter((x) => x !== id);
       openerRef.current?.focus?.();
     };
+    // containerRef and stackRef are refs (stable identity) -- omitted deliberately.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 };
 
 const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
   const itemsPerPage = 10;
-  const [inputs, setInputs] = useState({ search: '', site: '', primary: emptyPrimary });
+  // Filters, page and cart survive navigating to an equipment's detail page
+  // and back (e.g. via browser Back) since that fully unmounts this page --
+  // same sessionStorage convention EquipmentSearch.jsx uses.
+  const [inputs, setInputs] = useState(() => ({
+    search: read('eq_borrow_search'),
+    site: read('eq_borrow_site_input'),
+    primary: readFields('eq_borrow_primary', emptyPrimary),
+  }));
   const [filters, setFilters] = useState(inputs);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(readPage);
   const [sites, setSites] = useState([]);
   const [sitesLoading, setSitesLoading] = useState(true);
   const [sitesError, setSitesError] = useState(false);
@@ -100,21 +154,57 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
 
+  // Namespaced per user so switching accounts never shows a stale cart.
+  const userKey = user?.id ?? user?.username ?? null;
   const [cart, setCart] = useState([]); // array of equipment objects
+  // `user` (and so `userKey`) loads asynchronously after mount -- reading
+  // the cart once via a useState initializer would run before it's ready
+  // and always land on the empty-cart fallback. Tracked separately from
+  // `userKey` itself so the load effect only fires once per user, and
+  // `skipNextPersistRef` stops the very next persist-effect run from saving
+  // that still-being-loaded cart back over the value it just read.
+  const cartLoadedForRef = useRef(null);
+  const skipNextPersistRef = useRef(false);
   const [showCart, setShowCart] = useState(false);
   const [borrowerName, setBorrowerName] = useState('');
+  const [borrowerNameError, setBorrowerNameError] = useState('');
   const [borrowerEmpId, setBorrowerEmpId] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [revalidating, setRevalidating] = useState(false);
   const [responseModal, setResponseModal] = useState(null); // { type: 'success' | 'error', message: string }
 
   const cartRef = useRef(null);
   const confirmRef = useRef(null);
   const responseRef = useRef(null);
-  useModalA11y(showCart, cartRef, () => setShowCart(false));
-  useModalA11y(showConfirm, confirmRef, () => { if (!submitting) setShowConfirm(false); });
-  useModalA11y(Boolean(responseModal), responseRef, () => setResponseModal(null));
+  const borrowerNameInputRef = useRef(null);
+  // Shared stack so only the topmost open dialog reacts to Escape/Tab --
+  // the cart drawer, confirm dialog and response dialog can all be mounted
+  // at the same time (e.g. the confirm dialog stays open behind the
+  // response dialog after a failed submit).
+  const modalStackRef = useRef([]);
+  useModalA11y(showCart, cartRef, () => setShowCart(false), modalStackRef);
+  useModalA11y(showConfirm, confirmRef, () => { if (!submitting) setShowConfirm(false); }, modalStackRef);
+  useModalA11y(Boolean(responseModal), responseRef, () => setResponseModal(null), modalStackRef);
+
+  useEffect(() => {
+    save('eq_borrow_search', inputs.search);
+    save('eq_borrow_site_input', inputs.site);
+    save('eq_borrow_primary', JSON.stringify(inputs.primary));
+  }, [inputs]);
+  useEffect(() => { save('eq_borrow_page', String(currentPage)); }, [currentPage]);
+  useEffect(() => {
+    if (!userKey || cartLoadedForRef.current === userKey) return;
+    cartLoadedForRef.current = userKey;
+    skipNextPersistRef.current = true;
+    setCart(readCart(userKey));
+  }, [userKey]);
+  useEffect(() => {
+    if (!userKey || cartLoadedForRef.current !== userKey) return;
+    if (skipNextPersistRef.current) { skipNextPersistRef.current = false; return; }
+    save(`eq_borrow_cart_${userKey}`, JSON.stringify(cart));
+  }, [cart, userKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -220,10 +310,40 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
     setShowCart(true);
   };
 
-  const handleBorrowClick = () => {
+  // Re-checks every cart item against the server right before confirming --
+  // the cart can be minutes (or, since it's now persisted, days) old by the
+  // time the user gets here, and someone else may have borrowed an item in
+  // the meantime. Items no longer borrowable are dropped from the cart
+  // instead of silently sent to borrow-batch.
+  const revalidateCart = async () => {
+    const checks = await Promise.all(cart.map(async (item) => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${item.id}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success || !data.data) return { item, stillValid: true }; // can't verify -- don't block on it
+        return { item: data.data, stillValid: !isBorrowed(data.data) };
+      } catch { return { item, stillValid: true }; }
+    }));
+    const removed = checks.filter(c => !c.stillValid).map(c => c.item);
+    if (removed.length) setCart(checks.filter(c => c.stillValid).map(c => c.item));
+    return removed;
+  };
+
+  const handleBorrowClick = async () => {
     if (cart.length === 0) return;
     if (!borrowerName.trim()) {
-      toast.error('กรุณากรอกชื่อผู้ยืม');
+      setBorrowerNameError('กรุณากรอกชื่อผู้ยืม');
+      borrowerNameInputRef.current?.focus();
+      return;
+    }
+    setBorrowerNameError('');
+    setRevalidating(true);
+    const removed = await revalidateCart();
+    setRevalidating(false);
+    if (removed.length) {
+      toast.error(`อุปกรณ์ ${removed.map(r => r.name || 'ที่เลือกไว้').join(', ')} ถูกยืมไปแล้ว จึงถูกนำออกจากตระกร้า`);
       return;
     }
     setShowConfirm(true);
@@ -361,7 +481,7 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
                   return (
                     <tr key={item.id}>
                       <td>
-                        <div className="equipment-name-cell">
+                        <div className="list-name-cell">
                           {item.photos?.[0] && <img src={buildImageUrl(item.photos[0])} alt="" loading="lazy" />}
                           <a
                             className="list-name"
@@ -423,14 +543,14 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
       {/* Cart drawer */}
       <AnimatePresence>
         {showCart && (
-          <motion.div
+          <Motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'flex-end', zIndex: 9998 }}
             onClick={() => setShowCart(false)}
           >
-            <motion.div
+            <Motion.div
               ref={cartRef}
               role="dialog"
               aria-modal="true"
@@ -441,8 +561,8 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
               exit={{ x: 400 }}
               transition={{ type: 'spring', damping: 28, stiffness: 260 }}
               onClick={(e) => e.stopPropagation()}
-              className="card glass"
-              style={{ width: '100%', maxWidth: '420px', height: '100%', overflowY: 'auto', padding: '1.5rem', borderRadius: 0 }}
+              className="equipment-borrow-panel"
+              style={{ width: '100%', maxWidth: '420px', height: '100%', overflowY: 'auto', padding: '1.5rem' }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <h2 id="equipment-borrow-cart-heading" style={{ margin: 0, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -477,7 +597,19 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
                     <div className="equipment-borrow-field">
                       <label htmlFor="equipment-borrow-name">ชื่อผู้ยืม <span style={{ color: 'var(--accent-danger)' }}>*</span></label>
-                      <input id="equipment-borrow-name" type="text" required aria-required="true" value={borrowerName} onChange={(e) => setBorrowerName(e.target.value)} placeholder="ชื่อ-นามสกุลผู้ยืม" />
+                      <input
+                        id="equipment-borrow-name"
+                        ref={borrowerNameInputRef}
+                        type="text"
+                        required
+                        aria-required="true"
+                        aria-invalid={Boolean(borrowerNameError)}
+                        aria-describedby={borrowerNameError ? 'equipment-borrow-name-error' : undefined}
+                        value={borrowerName}
+                        onChange={(e) => { setBorrowerName(e.target.value); if (borrowerNameError) setBorrowerNameError(''); }}
+                        placeholder="ชื่อ-นามสกุลผู้ยืม"
+                      />
+                      {borrowerNameError && <span id="equipment-borrow-name-error" role="alert" className="equipment-borrow-field-error">{borrowerNameError}</span>}
                     </div>
                     <div className="equipment-borrow-field">
                       <label htmlFor="equipment-borrow-emp-id">รหัสพนักงานผู้ยืม</label>
@@ -488,28 +620,29 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
                       <input id="equipment-borrow-due-date" type="datetime-local" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
                     </div>
 
-                    <button type="button" className="list-button list-button-primary" style={{ marginTop: '0.5rem', minHeight: '44px' }} onClick={handleBorrowClick}>
-                      <ShoppingCart size={16} aria-hidden="true" /> ยืมอุปกรณ์ {cart.length} รายการ
+                    <button type="button" className="list-button list-button-primary" disabled={revalidating} style={{ marginTop: '0.5rem', minHeight: '44px' }} onClick={handleBorrowClick}>
+                      {revalidating ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <ShoppingCart size={16} aria-hidden="true" />}
+                      {revalidating ? 'กำลังตรวจสอบสถานะ…' : `ยืมอุปกรณ์ ${cart.length} รายการ`}
                     </button>
                   </div>
                 </>
               )}
-            </motion.div>
-          </motion.div>
+            </Motion.div>
+          </Motion.div>
         )}
       </AnimatePresence>
 
       {/* Confirm borrow modal */}
       <AnimatePresence>
         {showConfirm && (
-          <motion.div
+          <Motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem' }}
             onClick={() => !submitting && setShowConfirm(false)}
           >
-            <motion.div
+            <Motion.div
               ref={confirmRef}
               role="dialog"
               aria-modal="true"
@@ -519,7 +652,7 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
               onClick={(e) => e.stopPropagation()}
-              className="card glass"
+              className="equipment-borrow-panel equipment-borrow-dialog"
               style={{ padding: '2rem', maxWidth: '400px', width: '90%', textAlign: 'center' }}
             >
               <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'var(--bg-accent-subtle)', color: 'var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem' }}>
@@ -539,22 +672,22 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
                   {submitting ? 'กำลังบันทึก…' : 'ยืนยัน'}
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </Motion.div>
+          </Motion.div>
         )}
       </AnimatePresence>
 
       {/* Response modal */}
       <AnimatePresence>
         {responseModal && (
-          <motion.div
+          <Motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000 }}
             onClick={() => setResponseModal(null)}
           >
-            <motion.div
+            <Motion.div
               ref={responseRef}
               role="dialog"
               aria-modal="true"
@@ -564,7 +697,7 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.9, y: 20 }}
               onClick={(e) => e.stopPropagation()}
-              className="card glass"
+              className="equipment-borrow-panel equipment-borrow-dialog"
               style={{ padding: '2.5rem', maxWidth: '420px', width: '90%', textAlign: 'center' }}
             >
               <div style={{
@@ -580,8 +713,8 @@ const EquipmentBorrow = ({ token, user, onRequireLogin, onEquipmentClick }) => {
               <button type="button" onClick={() => setResponseModal(null)} className="list-button list-button-primary" style={{ padding: '0.75rem 2rem' }}>
                 ตกลง
               </button>
-            </motion.div>
-          </motion.div>
+            </Motion.div>
+          </Motion.div>
         )}
       </AnimatePresence>
     </div>

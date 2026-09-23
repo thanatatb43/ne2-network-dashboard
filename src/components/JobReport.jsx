@@ -1,390 +1,146 @@
-import React, { useState, useEffect } from 'react';
-import { toast } from 'react-hot-toast';
-import {
-  Plus, Search, Loader2, ChevronLeft, ChevronRight, ArrowLeft, FileText, ExternalLink, X
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, useRef } from 'react';
+import { Plus, Search, RefreshCw, AlertCircle } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
 import JobFormModal from './JobFormModal';
+import SearchableDropdown from './SearchableDropdown';
+import { siteLabel, jobStatusTone } from './jobReportShared';
+import './ListPage.css';
+import './JobReport.css';
 
 const STATUS_OPTIONS = ['เปิดงาน', 'ระหว่างดำเนินการ', 'เสร็จงาน', 'ยกเลิก'];
 const JOB_TYPE_OPTIONS = ['แจ้งซ่อม', 'ขออุปกรณ์ใหม่', 'ขอเปลี่ยนอุปกรณ์', 'แจ้งระบบใช้งานไม่ได้'];
 const PRIORITY_OPTIONS = ['ปกติ', 'เร่งด่วน'];
 
-const buildDocUrl = (path) => path ? `${import.meta.env.VITE_API_BASE_URL}${path}` : null;
-const isImagePath = (path) => /\.(jpe?g|png|webp|gif)$/i.test(path || '');
+const priorityTone = (priority) => (priority === 'เร่งด่วน' ? 'down' : 'unknown');
 
-const formatDateTime = (value) => {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? value : d.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+// Same read/save session-storage convention EquipmentSearch.jsx and
+// EquipmentBorrow.jsx already use -- lets the list survive navigating into
+// a job's detail route and back (that unmounts this page) without losing
+// the search/filters/page the user had set.
+const read = (key, fallback = '') => {
+  try { return sessionStorage.getItem(key) ?? fallback; } catch { return fallback; }
+};
+const save = (key, value) => {
+  try { sessionStorage.setItem(key, value); } catch { /* Storage is optional. */ }
+};
+const readPage = () => {
+  const page = Number(read('job_report_page', '1'));
+  return Number.isSafeInteger(page) && page > 0 ? page : 1;
 };
 
-const DetailRow = ({ label, value }) => {
-  if (!value) return null;
-  return (
-    <div style={{ fontSize: '0.85rem' }}>
-      <span style={{ color: 'var(--text-secondary)' }}>{label}:</span> {value}
-    </div>
-  );
-};
-
-// Full status-driven detail block, shown regardless of the job's CURRENT
-// status -- e.g. assignee info stays visible even after the job moves on to
-// เสร็จงาน, since it's already been through ระหว่างดำเนินการ. Each block only
-// renders when its underlying fields actually have data, not by matching
-// the exact status string (more robust than "only show if status === X").
-const JobStatusDetails = ({ job }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-      <div>เปิดงานเมื่อ: {formatDateTime(job.createdAt) || '-'}</div>
-      {job.updatedAt && job.updatedAt !== job.createdAt && <div>อัปเดตล่าสุดเมื่อ: {formatDateTime(job.updatedAt)}</div>}
-    </div>
-
-    {((job.assignees && job.assignees.length > 0) || job.assignee_name || job.assignee_emp_id || job.work_order_no || job.progress_notes) && (
-      <div className="glass" style={{ padding: '0.9rem 1.1rem', borderRadius: '0.5rem' }}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--accent-warning)' }}>ข้อมูลการดำเนินการ</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-          {job.assignees && job.assignees.length > 0 ? (
-            <div style={{ fontSize: '0.85rem' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>ผู้รับผิดชอบ:</span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem', marginTop: '0.15rem' }}>
-                {job.assignees.map((a, i) => (
-                  <div key={i}>{a.assignee_name || a.name || '-'}{(a.assignee_emp_id || a.emp_id) ? ` (${a.assignee_emp_id || a.emp_id})` : ''}</div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <>
-              <DetailRow label="ผู้รับผิดชอบ" value={job.assignee_name} />
-              <DetailRow label="รหัสพนักงานผู้รับผิดชอบ" value={job.assignee_emp_id} />
-            </>
-          )}
-          <DetailRow label="เลขที่คำสั่งปฏิบัติงาน" value={job.work_order_no} />
-          <DetailRow label="หมายเหตุ" value={job.progress_notes} />
-        </div>
-      </div>
-    )}
-
-    {job.closing_notes && (
-      <div className="glass" style={{ padding: '0.9rem 1.1rem', borderRadius: '0.5rem', background: 'var(--bg-accent-subtle)' }}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--accent-success)' }}>หมายเหตุปิดงาน</div>
-        <div style={{ fontSize: '0.85rem' }}>{job.closing_notes}</div>
-      </div>
-    )}
-
-    {job.cancelled_reason && (
-      <div className="glass" style={{ padding: '0.9rem 1.1rem', borderRadius: '0.5rem', background: 'rgba(239, 68, 68, 0.1)' }}>
-        <div style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--accent-danger)' }}>เหตุผลที่ยกเลิก</div>
-        <div style={{ fontSize: '0.85rem' }}>{job.cancelled_reason}</div>
-      </div>
-    )}
-  </div>
-);
-
-// Renders an attached doc inline -- an <img> for images, a small clickable
-// preview block for PDFs. Shared by the notification doc (attached when the
-// job is opened) and the completion report (attached when the job is
-// closed) -- same shape, different label. Either one opens the in-page
-// lightbox (onOpen) instead of a new tab -- a full-size 520px <iframe> sitting
-// inline used to dominate the page for PDFs, so that's now just a compact
-// preview card that expands full-screen on click, same as the image case.
-const NotificationDocPreview = ({ path, label = 'ไฟล์หนังสือแจ้ง', onOpen }) => {
-  if (!path) return null;
-  const url = buildDocUrl(path);
-  return (
-    <div style={{ marginBottom: '1.5rem' }}>
-      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-        <FileText size={14} /> {label}
-      </div>
-      {isImagePath(path) ? (
-        <img
-          src={url}
-          alt={label}
-          onClick={onOpen}
-          style={{ maxWidth: '100%', maxHeight: '420px', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', display: 'block', cursor: 'pointer' }}
-        />
-      ) : (
-        <>
-          <div
-            onClick={onOpen}
-            className="glass"
-            style={{
-              display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.9rem 1.1rem',
-              borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', cursor: 'pointer', maxWidth: '320px'
-            }}
-          >
-            <div style={{ background: 'var(--bg-accent-subtle)', color: 'var(--accent-primary)', padding: '0.6rem', borderRadius: '0.5rem', display: 'flex' }}>
-              <FileText size={20} />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>ไฟล์ PDF</div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>คลิกเพื่อดูแบบเต็มจอ</div>
-            </div>
-          </div>
-          <a href={url} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem', color: 'var(--accent-primary)', marginTop: '0.5rem' }}>
-            เปิดในแท็บใหม่ <ExternalLink size={12} />
-          </a>
-        </>
-      )}
-    </div>
-  );
-};
-
-// Grid of after-work photo thumbnails -- clicking one opens the in-page
-// lightbox (onPhotoClick) with next/prev browsing across the whole set,
-// instead of opening a new tab.
-const AfterPhotosGallery = ({ paths, onPhotoClick }) => {
-  if (!paths || paths.length === 0) return null;
-  return (
-    <div>
-      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-        <FileText size={14} /> รูปหลังดำเนินการ
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
-        {paths.map((path, i) => (
-          <img
-            key={i}
-            src={buildDocUrl(path)}
-            alt={`รูปหลังดำเนินการ ${i + 1}`}
-            onClick={() => onPhotoClick(i)}
-            style={{ width: '110px', height: '110px', objectFit: 'cover', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', cursor: 'pointer' }}
-          />
-        ))}
-      </div>
-    </div>
-  );
-};
-
-// In-page viewer -- replaces new-tab links for the notification-doc/
-// completion-report previews (image or PDF) and the after-photos gallery,
-// so viewing never leaves the job report page. type='pdf' renders a
-// full-size <iframe> instead of <img> -- PDFs are always a single item
-// (never a multi-page gallery here), so prev/next just don't render for them.
-const ImageLightbox = ({ images, index, onClose, onNavigate, type = 'image' }) => {
-  useEffect(() => {
-    const onKeyDown = (e) => {
-      if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowLeft' && images.length > 1) onNavigate((index - 1 + images.length) % images.length);
-      else if (e.key === 'ArrowRight' && images.length > 1) onNavigate((index + 1) % images.length);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [index, images.length, onClose, onNavigate]);
-
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.9)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1.5rem'
-      }}
-      onClick={onClose}
-    >
-      <button
-        onClick={onClose}
-        style={{
-          position: 'absolute', top: '1rem', right: '1rem', background: 'rgba(255,255,255,0.1)',
-          border: 'none', color: '#fff', borderRadius: '50%', width: '2.5rem', height: '2.5rem',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
-        }}
-      >
-        <X size={20} />
-      </button>
-
-      {images.length > 1 && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onNavigate((index - 1 + images.length) % images.length); }}
-          style={{
-            position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)',
-            background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '50%',
-            width: '2.75rem', height: '2.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
-          }}
-        >
-          <ChevronLeft size={24} />
-        </button>
-      )}
-
-      {type === 'pdf' ? (
-        <iframe
-          src={images[index]}
-          title={`เอกสาร ${index + 1}`}
-          onClick={(e) => e.stopPropagation()}
-          style={{ width: '90vw', height: '85vh', maxWidth: '1000px', border: 'none', borderRadius: '0.5rem', background: '#fff' }}
-        />
-      ) : (
-        <img
-          src={images[index]}
-          alt={`รูปที่ ${index + 1}`}
-          onClick={(e) => e.stopPropagation()}
-          style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain', borderRadius: '0.5rem' }}
-        />
-      )}
-
-      {images.length > 1 && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onNavigate((index + 1) % images.length); }}
-          style={{
-            position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)',
-            background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', borderRadius: '50%',
-            width: '2.75rem', height: '2.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
-          }}
-        >
-          <ChevronRight size={24} />
-        </button>
-      )}
-
-      {images.length > 1 && (
-        <div style={{
-          position: 'absolute', bottom: '1.25rem', left: '50%', transform: 'translateX(-50%)',
-          background: 'rgba(255,255,255,0.1)', color: '#fff', fontSize: '0.8rem',
-          padding: '0.3rem 0.8rem', borderRadius: '1rem'
-        }}>
-          {index + 1} / {images.length}
-        </div>
-      )}
-    </motion.div>
-  );
-};
-
-// Same badge convention as EquipmentSearch.jsx's statusColor -- color +
-// 15%-alpha background pill.
-const jobStatusColor = (status) => {
-  const s = (status || '').trim();
-  if (s === 'เปิดงาน') return 'var(--text-secondary)';
-  if (s === 'ระหว่างดำเนินการ') return 'var(--accent-warning)';
-  if (s === 'เสร็จงาน') return 'var(--accent-success)';
-  if (s === 'ยกเลิก') return 'var(--accent-danger)';
-  return 'var(--text-secondary)';
-};
-
-const StatusBadge = ({ status }) => (
-  <span style={{
-    display: 'inline-block', padding: '0.2rem 0.6rem', borderRadius: '1rem',
-    fontSize: '0.75rem', fontWeight: 600,
-    color: jobStatusColor(status), background: `${jobStatusColor(status)}15`
-  }}>
-    {status || '-'}
-  </span>
-);
-
-const JobReport = ({ token, user, onRequireLogin }) => {
-  const [jobs, setJobs] = useState([]);
-  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, totalPages: 1 });
-  const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
+const JobReport = ({ token, user, onRequireLogin, onJobClick }) => {
   const itemsPerPage = 10;
-
-  const [searchInput, setSearchInput] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  // สำนักงาน filter is a typeable <input list> + <datalist> combo (like
-  // EquipmentSearch.jsx's site filter) instead of a plain <select> -- only an
-  // exact match against a known site's label resolves to the id actually
-  // sent as ?pea_site_id=; partial typing just leaves the filter unset.
-  const [siteInput, setSiteInput] = useState('');
-  const [siteFilter, setSiteFilter] = useState('');
-  const siteLabel = (s) => `${s.pea_name}${s.pea_province ? ` (${s.pea_province})` : ''}`;
-  const [statusFilter, setStatusFilter] = useState('');
-  const [jobTypeFilter, setJobTypeFilter] = useState('');
-  const [priorityFilter, setPriorityFilter] = useState('');
+  const [inputs, setInputs] = useState(() => ({
+    search: read('job_report_search'),
+    site: read('job_report_site_input'),
+    status: read('job_report_status'),
+    jobType: read('job_report_type'),
+    priority: read('job_report_priority'),
+  }));
+  const [filters, setFilters] = useState(inputs);
+  const [currentPage, setCurrentPage] = useState(readPage);
   const [sites, setSites] = useState([]);
-
+  const [sitesLoading, setSitesLoading] = useState(true);
+  const [sitesError, setSitesError] = useState(false);
+  const [siteRetry, setSiteRetry] = useState(0);
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
   const [showFormModal, setShowFormModal] = useState(false);
 
-  const [selectedJobId, setSelectedJobId] = useState(null);
-  const [jobDetails, setJobDetails] = useState(null);
-  const [loadingJob, setLoadingJob] = useState(false);
-
-  // In-page viewer -- shared by the notification-doc/completion-report
-  // previews and the after-photos gallery, each opening with its own images
-  // array so browsing stays scoped to that one gallery. type is 'pdf' for
-  // the doc/report previews when the attached file isn't an image.
-  const [lightboxImages, setLightboxImages] = useState(null);
-  const [lightboxIndex, setLightboxIndex] = useState(0);
-  const [lightboxType, setLightboxType] = useState('image');
-  const openLightbox = (images, index, type = 'image') => {
-    setLightboxImages(images);
-    setLightboxIndex(index);
-    setLightboxType(type);
-  };
-
-  const fetchSites = async () => {
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/sites`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      const result = await response.json();
-      const list = result.data || result || [];
-      setSites(Array.isArray(list) ? list : []);
-    } catch (error) {
-      console.error('Error fetching PEA sites:', error);
-    }
-  };
-
-  const fetchJobs = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      params.append('page', String(currentPage));
-      params.append('limit', String(itemsPerPage));
-      if (searchTerm.trim()) params.append('search', searchTerm.trim());
-      if (siteFilter) params.append('pea_site_id', siteFilter);
-      if (statusFilter) params.append('status', statusFilter);
-      if (jobTypeFilter) params.append('job_type', jobTypeFilter);
-      if (priorityFilter) params.append('priority', priorityFilter);
-
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs?${params.toString()}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      const result = await response.json();
-      if (result.success) {
-        setJobs(result.data || []);
-        if (result.pagination) setPagination(result.pagination);
-      } else {
-        setJobs(Array.isArray(result) ? result : []);
-      }
-    } catch (error) {
-      console.error('Error fetching jobs:', error);
-      toast.error('ไม่สามารถโหลดรายการแจ้งปัญหาได้');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    save('job_report_search', inputs.search);
+    save('job_report_site_input', inputs.site);
+    save('job_report_status', inputs.status);
+    save('job_report_type', inputs.jobType);
+    save('job_report_priority', inputs.priority);
+  }, [inputs]);
+  useEffect(() => { save('job_report_page', String(currentPage)); }, [currentPage]);
 
   useEffect(() => {
-    fetchSites();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (inputs === filters) return;
+    const timer = setTimeout(() => { setFilters(inputs); setCurrentPage(1); }, 400);
+    return () => clearTimeout(timer);
+  }, [inputs, filters]);
 
   useEffect(() => {
-    fetchJobs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, currentPage, searchTerm, siteFilter, statusFilter, jobTypeFilter, priorityFilter]);
+    const controller = new AbortController();
+    let active = true;
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const load = async () => {
+      setSitesLoading(true);
+      setSitesError(false);
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/sites`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal,
+        });
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        const list = data.data || data;
+        if (!Array.isArray(list)) throw new Error();
+        if (active) setSites(list);
+      } catch { if (active) setSitesError(true); }
+      finally { clearTimeout(timer); if (active) setSitesLoading(false); }
+    };
+    load();
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [token, siteRetry]);
+
+  // สำนักงาน only resolves to a real pea_site_id once the typed text exactly
+  // matches a known site's label -- partial text just leaves it unset.
+  const site = sites.find((s) => siteLabel(s) === filters.site);
+  const siteInputMatches = sites.some((s) => siteLabel(s) === inputs.site);
+  const waitingForSite = Boolean(filters.site && sitesLoading);
+  const requestParams = (() => {
+    const params = new URLSearchParams();
+    params.set('page', String(currentPage));
+    params.set('limit', String(itemsPerPage));
+    if (filters.search.trim()) params.set('search', filters.search.trim());
+    if (filters.status) params.set('status', filters.status);
+    if (filters.jobType) params.set('job_type', filters.jobType);
+    if (filters.priority) params.set('priority', filters.priority);
+    if (site) params.set('pea_site_id', String(site.id));
+    return params;
+  })();
+  const requestKey = requestParams.toString();
+  const pending = inputs !== filters || waitingForSite || loading || result?.key !== requestKey || result?.token !== token;
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setSearchTerm(searchInput);
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [searchInput]);
+    if (waitingForSite) return;
+    const controller = new AbortController();
+    let active = true;
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const load = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs?${requestKey}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal,
+        });
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        if (!data.success || !Array.isArray(data.data)) throw new Error();
+        if (!active) return;
+        const total = Number(data.pagination?.total ?? data.data.length);
+        const totalPages = Math.max(1, Number(data.pagination?.totalPages) || Math.ceil(total / itemsPerPage));
+        if (currentPage > totalPages) { setCurrentPage(totalPages); return; }
+        setResult({ jobs: data.data, total, totalPages, page: currentPage, key: requestKey, token, updated: new Date() });
+      } catch { if (active) setError('ไม่สามารถโหลดรายการแจ้งปัญหาได้ กรุณาลองใหม่'); }
+      finally { clearTimeout(timer); if (active) setLoading(false); }
+    };
+    load();
+    return () => { active = false; clearTimeout(timer); controller.abort(); };
+  }, [requestKey, token, retry, waitingForSite, currentPage]);
 
-  // Only resolves to a real pea_site_id once the typed text exactly matches
-  // a known site's label (i.e. the user picked a datalist suggestion or
-  // typed the full name) -- partial text just leaves the site filter unset.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const match = sites.find(s => siteLabel(s) === siteInput);
-      setSiteFilter(match ? String(match.id) : '');
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [siteInput, sites]);
-
-  const handleFilterChange = (setter) => (value) => {
-    setter(value);
-    setCurrentPage(1);
+  // Only show rows matching this page's current filters/auth context, so an
+  // in-flight response for a stale search never overwrites a newer one.
+  const shown = result?.key === requestKey && result?.token === token ? result : null;
+  const anyFilterActive = Boolean(inputs.search || inputs.site || inputs.status || inputs.jobType || inputs.priority);
+  const change = (key, value) => setInputs((prev) => ({ ...prev, [key]: value }));
+  const clearAllFilters = () => {
+    const cleared = { search: '', site: '', status: '', jobType: '', priority: '' };
+    setInputs(cleared); setFilters(cleared); setCurrentPage(1);
   };
 
   const handleNewReportClick = () => {
@@ -392,350 +148,185 @@ const JobReport = ({ token, user, onRequireLogin }) => {
     setShowFormModal(true);
   };
 
-  const handleRowClick = async (jobId) => {
-    setSelectedJobId(jobId);
-    setLoadingJob(true);
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/${jobId}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      });
-      const result = await response.json();
-      setJobDetails(result.data || result);
-    } catch (error) {
-      console.error('Error fetching job details:', error);
-      toast.error('ไม่สามารถโหลดรายละเอียดของงานนี้ได้');
-    } finally {
-      setLoadingJob(false);
+  // Restores scroll/focus to the job link the user clicked into, once this
+  // page's data has loaded back in after returning from the detail route
+  // (this component fully unmounts/remounts, so plain React state can't
+  // carry it -- sessionStorage does). Falls back to the results summary if
+  // that job isn't in the current (possibly re-filtered) results. Runs at
+  // most once per mount, not on every later auto-refresh.
+  const resultInfoRef = useRef(null);
+  const restoreAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (!shown || restoreAttemptedRef.current) return;
+    const pendingId = read('job_report_return_focus_id');
+    if (!pendingId) return;
+    restoreAttemptedRef.current = true;
+    save('job_report_return_focus_id', '');
+    const link = document.querySelector(`a.list-name[data-job-id="${pendingId}"]`);
+    if (link) {
+      link.scrollIntoView({ block: 'center' });
+      link.focus();
+    } else {
+      resultInfoRef.current?.focus();
     }
+  }, [shown]);
+
+  const handleJobLinkClick = (id) => {
+    save('job_report_return_focus_id', String(id));
+    onJobClick && onJobClick(id);
   };
 
-  const anyFilterActive = !!(searchInput || siteFilter || statusFilter || jobTypeFilter || priorityFilter);
-
-  // ----------------------------------------------------
-  // Read-only job detail view
-  // ----------------------------------------------------
-  if (selectedJobId) {
-    return (
-      <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-        <div style={{ marginBottom: '1.5rem' }}>
-          <button
-            onClick={() => { setSelectedJobId(null); setJobDetails(null); }}
-            className="glass"
-            style={{ padding: '0.5rem 1rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-          >
-            <ArrowLeft size={16} /> กลับไปยัง รายการแจ้งปัญหา
+  return (
+    <div className="list-page job-report-page">
+      <header className="list-header">
+        <div>
+          <h1>แจ้งปัญหา</h1>
+          <p className="list-muted">แจ้งและติดตามปัญหาอุปกรณ์หรือระบบของสำนักงาน</p>
+        </div>
+        <div className="list-actions">
+          <button className="list-button" disabled={loading || waitingForSite} onClick={() => setRetry((n) => n + 1)}>
+            <RefreshCw size={18} aria-hidden="true" className={loading ? 'animate-spin' : ''} />รีเฟรช
+          </button>
+          <button className="list-button list-button-primary" onClick={handleNewReportClick}>
+            <Plus size={18} aria-hidden="true" /> แจ้งปัญหาใหม่
           </button>
         </div>
+      </header>
 
-        {loadingJob ? (
-          <div className="card glass" style={{ padding: '4rem', textAlign: 'center' }}>
-            <Loader2 className="animate-spin" style={{ margin: '0 auto', color: 'var(--accent-primary)' }} />
-            <p style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>กำลังโหลดรายละเอียด...</p>
+      {error && (
+        <div className="list-error" role="alert">
+          <AlertCircle size={20} aria-hidden="true" />
+          <div>
+            <strong>{error}</strong>
+            {shown && <p>แสดงรายการจากการโหลดครั้งก่อน ข้อมูลอาจเปลี่ยนแปลงแล้ว</p>}
           </div>
-        ) : !jobDetails ? (
-          <div className="card glass" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-            ไม่พบรายละเอียดของงานนี้
+          <button className="list-button" disabled={loading} onClick={() => setRetry((n) => n + 1)}>ลองใหม่</button>
+        </div>
+      )}
+
+      <section className="list-panel" aria-label="ค้นหาและกรองรายการแจ้งปัญหา">
+        <div className="job-report-filters">
+          <label className="list-field job-report-search-filter">
+            <span>ค้นหา</span>
+            <div className="list-search-input">
+              <Search size={18} aria-hidden="true" />
+              <input type="search" placeholder="ชื่องาน หรือรายละเอียด" value={inputs.search} onChange={(e) => change('search', e.target.value)} />
+            </div>
+          </label>
+          <label className="list-field">
+            <span>สำนักงาน</span>
+            <SearchableDropdown
+              label="สำนักงาน"
+              placeholder={sitesLoading ? 'กำลังโหลดสำนักงาน…' : 'ทั้งหมด'}
+              value={inputs.site}
+              onChange={(value) => change('site', value)}
+              describedBy="job-report-site-help"
+              options={[...new Set(sites.map(siteLabel))]}
+            />
+          </label>
+          <label className="list-field">
+            <span>สถานะ</span>
+            <select value={inputs.status} onChange={(e) => change('status', e.target.value)}>
+              <option value="">ทั้งหมด</option>
+              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
+          <label className="list-field">
+            <span>ประเภทงาน</span>
+            <select value={inputs.jobType} onChange={(e) => change('jobType', e.target.value)}>
+              <option value="">ทั้งหมด</option>
+              {JOB_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+          <label className="list-field">
+            <span>ความสำคัญ</span>
+            <select value={inputs.priority} onChange={(e) => change('priority', e.target.value)}>
+              <option value="">ทั้งหมด</option>
+              {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="job-report-filter-help" id="job-report-site-help">
+          {sitesError ? (
+            <span role="alert">โหลดรายชื่อสำนักงานไม่สำเร็จ <button className="list-button" onClick={() => setSiteRetry((n) => n + 1)}>โหลดสำนักงานใหม่</button></span>
+          ) : inputs.site && !siteInputMatches && !sitesLoading ? (
+            <span className="list-filter-warning">ยังไม่ได้กรองสำนักงาน กรุณาเลือกชื่อให้ตรงกับรายการแนะนำ</span>
+          ) : 'สำนักงานต้องเลือกชื่อให้ตรงกับรายการแนะนำ ส่วนตัวกรองอื่นเลือกจากรายการแนะนำ'}
+        </div>
+        <div className="job-report-filter-actions">
+          <button className="list-button" disabled={!anyFilterActive} onClick={clearAllFilters}>ล้างตัวกรอง</button>
+          <span className="list-muted">ค้นหาอัตโนมัติ · ใช้ทุกเงื่อนไขร่วมกัน</span>
+        </div>
+
+        <div className="list-result-info">
+          {/* tabIndex + ref: fallback focus target when returning from a job
+              that's no longer in the current (possibly re-filtered) results. */}
+          <span role="status" ref={resultInfoRef} tabIndex={-1}>{error ? 'โหลดไม่สำเร็จ' : pending ? 'กำลังโหลด…' : `พบ ${shown?.total.toLocaleString('th-TH') ?? 0} รายการ`}</span>
+          <span>{shown && `อัปเดตล่าสุด ${shown.updated.toLocaleTimeString('th-TH')}`}</span>
+        </div>
+
+        {!shown || !shown.jobs.length ? (
+          <div className="job-report-empty">
+            <strong>{error ? 'ไม่สามารถแสดงรายการล่าสุด' : pending ? 'กำลังโหลดรายการ…' : anyFilterActive ? 'ไม่พบรายการที่ตรงกับเงื่อนไข' : 'ยังไม่มีรายการแจ้งปัญหา'}</strong>
+            {!pending && !error && anyFilterActive && (
+              <>
+                <p>ลองเปลี่ยนคำค้น หรือล้างตัวกรองเพื่อดูรายการทั้งหมด</p>
+                <button className="list-button" onClick={clearAllFilters}>ล้างตัวกรอง</button>
+              </>
+            )}
           </div>
         ) : (
-          <div className="card glass" style={{ padding: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
-              <div>
-                <h2 style={{ margin: '0 0 0.5rem', fontSize: '1.5rem' }} className="krub-bold">{jobDetails.job_name}</h2>
-                <p style={{ margin: 0, color: 'var(--text-secondary)' }}>{jobDetails.job_description || '-'}</p>
-              </div>
-              <StatusBadge status={jobDetails.status} />
-            </div>
-
-            <JobStatusDetails job={jobDetails} />
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem', fontSize: '0.85rem' }}>
-              <div><span style={{ color: 'var(--text-secondary)' }}>สำนักงาน:</span> {jobDetails.pea_site?.pea_name || '-'}</div>
-              <div><span style={{ color: 'var(--text-secondary)' }}>จังหวัด:</span> {jobDetails.pea_site?.pea_province || '-'}</div>
-              <div><span style={{ color: 'var(--text-secondary)' }}>ประเภทงาน:</span> {jobDetails.job_type || '-'}</div>
-              <div><span style={{ color: 'var(--text-secondary)' }}>ความสำคัญ:</span> {jobDetails.priority || '-'}</div>
-              <div><span style={{ color: 'var(--text-secondary)' }}>แผนก:</span> {jobDetails.department || '-'}</div>
-              <div><span style={{ color: 'var(--text-secondary)' }}>ผู้แจ้ง:</span> {jobDetails.requester_name || '-'}</div>
-              <div><span style={{ color: 'var(--text-secondary)' }}>รหัสพนักงานผู้แจ้ง:</span> {jobDetails.requester_emp_id || '-'}</div>
-              <div><span style={{ color: 'var(--text-secondary)' }}>เบอร์ติดต่อ:</span> {jobDetails.requester_contact || '-'}</div>
-            </div>
-
-            <NotificationDocPreview
-              path={jobDetails.notification_doc_file}
-              onOpen={() => openLightbox([buildDocUrl(jobDetails.notification_doc_file)], 0, isImagePath(jobDetails.notification_doc_file) ? 'image' : 'pdf')}
-            />
-            <NotificationDocPreview
-              path={jobDetails.completion_report_file}
-              label="รายงานผลการดำเนินการ"
-              onOpen={() => openLightbox([buildDocUrl(jobDetails.completion_report_file)], 0, isImagePath(jobDetails.completion_report_file) ? 'image' : 'pdf')}
-            />
-
-            <div style={{ marginBottom: (jobDetails.equipment || []).length > 0 ? '1.5rem' : 0 }}>
-              <div style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.75rem' }}>อุปกรณ์ที่มีปัญหา</div>
-              {(jobDetails.problem_equipment || []).length === 0 ? (
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>ไม่มีอุปกรณ์ที่ระบุ</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {jobDetails.problem_equipment.map(item => (
-                    <div key={item.id} className="glass" style={{ padding: '0.6rem 1rem', borderRadius: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
-                      <span>{item.name || '-'} <span style={{ color: 'var(--text-secondary)' }}>({item.equipment_type || '-'})</span></span>
-                      {item.status && <StatusBadge status={item.status} />}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {(jobDetails.equipment || []).length > 0 && (
-              <div style={{ marginBottom: '1.5rem' }}>
-                <div style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.75rem' }}>อุปกรณ์ที่ใช้ดำเนินการ</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {jobDetails.equipment.map(item => (
-                    <div key={item.id} className="glass" style={{ padding: '0.6rem 1rem', borderRadius: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
-                      <span>{item.name || '-'} <span style={{ color: 'var(--text-secondary)' }}>({item.equipment_type || '-'})</span></span>
-                      {item.status && <StatusBadge status={item.status} />}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(jobDetails.after_photos || []).length > 0 && (
-              <div style={{ marginBottom: '1.5rem' }}>
-                <AfterPhotosGallery
-                  paths={jobDetails.after_photos}
-                  onPhotoClick={(i) => openLightbox(jobDetails.after_photos.map(p => buildDocUrl(p)), i)}
-                />
-              </div>
-            )}
-
-            {(jobDetails.transactions || []).length > 0 && (
-              <div>
-                <div style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.75rem' }}>ธุรกรรมงบประมาณที่ผูกไว้</div>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
-                    <thead>
-                      <tr style={{ background: 'var(--glass-bg-subtle)' }}>
-                        <th style={{ padding: '0.6rem 0.9rem', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.8rem' }}>วันที่ผ่านรายการ</th>
-                        <th style={{ padding: '0.6rem 0.9rem', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.8rem' }}>เลขที่เอกสาร</th>
-                        <th style={{ padding: '0.6rem 0.9rem', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.8rem' }}>รายละเอียด</th>
-                        <th style={{ padding: '0.6rem 0.9rem', color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.8rem', textAlign: 'right' }}>จำนวนเงิน</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {jobDetails.transactions.map((t, idx) => (
-                        <tr key={t.id || idx} style={{ borderTop: '1px solid var(--border-subtle)' }}>
-                          <td style={{ padding: '0.6rem 0.9rem' }}>{t.posting_date || '-'}</td>
-                          <td style={{ padding: '0.6rem 0.9rem', fontFamily: 'monospace' }}>{t.reference_doc_no || '-'}</td>
-                          <td style={{ padding: '0.6rem 0.9rem', color: 'var(--text-secondary)', maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.description}>{t.description || '-'}</td>
-                          <td style={{ padding: '0.6rem 0.9rem', textAlign: 'right', fontWeight: 700, color: parseFloat(t.value_co_curr || 0) < 0 ? 'var(--accent-success)' : 'var(--accent-warning)' }}>
-                            ฿{parseFloat(t.value_co_curr || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* In-page viewer -- notification doc / completion report previews
-            and the after-photos gallery all open here instead of a new tab. */}
-        <AnimatePresence>
-          {lightboxImages && (
-            <ImageLightbox
-              images={lightboxImages}
-              index={lightboxIndex}
-              type={lightboxType}
-              onNavigate={setLightboxIndex}
-              onClose={() => setLightboxImages(null)}
-            />
-          )}
-        </AnimatePresence>
-      </motion.div>
-    );
-  }
-
-  // ----------------------------------------------------
-  // Main list view
-  // ----------------------------------------------------
-  return (
-    <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
-      <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 700 }}>แจ้งปัญหา</h1>
-          <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }}>แจ้งปัญหาอุปกรณ์หรือระบบให้ทีมงานดำเนินการแก้ไข และติดตามสถานะงานที่แจ้งไว้</p>
-        </div>
-        <button
-          onClick={handleNewReportClick}
-          style={{
-            display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.7rem 1.4rem',
-            background: 'var(--accent-primary)', color: '#fff', border: 'none', borderRadius: '0.5rem',
-            fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap'
-          }}
-        >
-          <Plus size={18} /> แจ้งปัญหาใหม่
-        </button>
-      </div>
-
-      <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', flex: '1 1 220px' }}>
-            <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-            <input
-              type="text"
-              placeholder="ค้นหาชื่องาน หรือรายละเอียด..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              style={{
-                width: '100%', padding: '0.6rem 0.6rem 0.6rem 2.5rem', borderRadius: '0.5rem', color: 'var(--text-primary)', outline: 'none',
-                border: searchInput ? '1px solid var(--accent-primary)' : '1px solid var(--input-border)',
-                background: searchInput ? 'var(--bg-accent-subtle)' : 'var(--input-bg)'
-              }}
-            />
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: siteInput ? '1px solid var(--accent-primary)' : undefined,
-            background: siteInput ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สำนักงาน:</span>
-            <input
-              type="text"
-              list="job-report-site-options"
-              placeholder="ทั้งหมด"
-              value={siteInput}
-              onChange={(e) => setSiteInput(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '180px' }}
-            />
-            <datalist id="job-report-site-options">
-              {sites.map(s => <option key={s.id} value={siteLabel(s)} />)}
-            </datalist>
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: statusFilter ? '1px solid var(--accent-primary)' : undefined,
-            background: statusFilter ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สถานะ:</span>
-            <select value={statusFilter} onChange={(e) => handleFilterChange(setStatusFilter)(e.target.value)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-              <option value="">ทั้งหมด</option>
-              {STATUS_OPTIONS.map(s => <option key={s} value={s} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{s}</option>)}
-            </select>
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: jobTypeFilter ? '1px solid var(--accent-primary)' : undefined,
-            background: jobTypeFilter ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภทงาน:</span>
-            <select value={jobTypeFilter} onChange={(e) => handleFilterChange(setJobTypeFilter)(e.target.value)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-              <option value="">ทั้งหมด</option>
-              {JOB_TYPE_OPTIONS.map(t => <option key={t} value={t} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{t}</option>)}
-            </select>
-          </div>
-
-          <div className="glass" style={{
-            display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-            border: priorityFilter ? '1px solid var(--accent-primary)' : undefined,
-            background: priorityFilter ? 'var(--bg-accent-subtle)' : undefined
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ความสำคัญ:</span>
-            <select value={priorityFilter} onChange={(e) => handleFilterChange(setPriorityFilter)(e.target.value)} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-              <option value="">ทั้งหมด</option>
-              {PRIORITY_OPTIONS.map(p => <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{p}</option>)}
-            </select>
-          </div>
-
-          <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
-            พบ <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.total}</span> รายการ
-          </div>
-        </div>
-
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ background: 'var(--glass-bg-subtle)' }}>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ชื่องาน</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ประเภทงาน</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>สถานะ</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>สำนักงาน</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ผู้แจ้ง</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>วันที่สร้าง</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
+          <div className="list-table-scroll" tabIndex={0} role="region" aria-label="ตารางรายการแจ้งปัญหา เลื่อนแนวนอนเพื่อดูทุกคอลัมน์" aria-busy={pending}>
+            <table className="list-table">
+              <caption className="list-sr-only">รายการแจ้งปัญหา กดชื่องานเพื่อเปิดรายละเอียด</caption>
+              <thead>
                 <tr>
-                  <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-primary)' }}>
-                    <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto' }} />
-                    <p style={{ marginTop: '1rem' }}>กำลังโหลดรายการ...</p>
-                  </td>
+                  {['ชื่องาน', 'ประเภทงาน', 'สถานะ', 'ความสำคัญ', 'สำนักงาน', 'ผู้แจ้ง', 'วันที่แจ้ง'].map((label) => <th scope="col" key={label}>{label}</th>)}
                 </tr>
-              ) : jobs.length === 0 ? (
-                <tr>
-                  <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                    {anyFilterActive ? 'ไม่พบรายการที่ตรงกับเงื่อนไข' : 'ยังไม่มีรายการแจ้งปัญหา'}
-                  </td>
-                </tr>
-              ) : (
-                jobs.map(item => (
-                  <tr
-                    key={item.id}
-                    onClick={() => handleRowClick(item.id)}
-                    className="table-row-hover"
-                    style={{ borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer' }}
-                    title="คลิกเพื่อดูรายละเอียด"
-                  >
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', fontWeight: 600 }}>{item.job_name}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{item.job_type || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}><StatusBadge status={item.status} /></td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>
-                      {item.pea_site ? `${item.pea_site.pea_name}${item.pea_site.pea_province ? ` (${item.pea_site.pea_province})` : ''}` : '-'}
+              </thead>
+              <tbody>
+                {shown.jobs.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <a
+                        className="list-name"
+                        data-job-id={item.id}
+                        title={item.job_name || 'ดูรายละเอียด'}
+                        href={`/report-issue/${item.id}`}
+                        onClick={(e) => {
+                          if (onJobClick && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                            e.preventDefault();
+                            handleJobLinkClick(item.id);
+                          }
+                        }}
+                      >
+                        {item.job_name || 'ดูรายละเอียด'}
+                      </a>
                     </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.requester_name || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                      {item.createdAt ? new Date(item.createdAt).toLocaleString('th-TH') : '-'}
-                    </td>
+                    <td title={item.job_type || '—'}>{item.job_type || '—'}</td>
+                    <td title={item.status || 'ไม่ทราบสถานะ'}><span className={`list-status list-status-${jobStatusTone(item.status)}`}>{item.status || 'ไม่ทราบสถานะ'}</span></td>
+                    <td title={item.priority || '—'}>{item.priority ? <span className={`list-status list-status-${priorityTone(item.priority)}`}>{item.priority}</span> : '—'}</td>
+                    <td title={item.pea_site ? siteLabel(item.pea_site) : '—'}>{item.pea_site ? siteLabel(item.pea_site) : '—'}</td>
+                    <td title={item.requester_name || '—'}>{item.requester_name || '—'}</td>
+                    <td className="list-muted">{item.createdAt ? new Date(item.createdAt).toLocaleString('th-TH') : '—'}</td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {!loading && pagination.totalPages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', padding: '1.5rem', borderTop: '1px solid var(--border-subtle)' }}>
-            <button
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(prev => prev - 1)}
-              style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.3 : 1 }}
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <select
-              value={currentPage}
-              onChange={(e) => setCurrentPage(Number(e.target.value))}
-              style={{ padding: '0.5rem 0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', color: 'var(--text-primary)', fontSize: '0.9rem', cursor: 'pointer', outline: 'none' }}
-            >
-              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map(p => (
-                <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>หน้า {p} จาก {pagination.totalPages}</option>
-              ))}
-            </select>
-            <button
-              disabled={currentPage === pagination.totalPages}
-              onClick={() => setCurrentPage(prev => prev + 1)}
-              style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === pagination.totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === pagination.totalPages ? 0.3 : 1 }}
-            >
-              <ChevronRight size={20} />
-            </button>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
-      </div>
+
+        <footer className="list-footer">
+          <span className="list-muted">{shown?.total ? `${(shown.page - 1) * itemsPerPage + 1}–${(shown.page - 1) * itemsPerPage + shown.jobs.length} จาก ${shown.total} รายการ` : '—'} · {itemsPerPage} รายการต่อหน้า</span>
+          <nav className="list-pagination" aria-label="แบ่งหน้ารายการแจ้งปัญหา">
+            <button className="list-button" disabled={pending || Boolean(error) || currentPage <= 1} onClick={() => setCurrentPage((p) => p - 1)}>ก่อนหน้า</button>
+            <label>หน้า <select value={shown?.page || currentPage} disabled={pending || Boolean(error)} onChange={(e) => setCurrentPage(Number(e.target.value))}>
+              {Array.from({ length: Math.max(currentPage, shown?.totalPages || 1) }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
+            </select> / {shown?.totalPages || '—'}</label>
+            <button className="list-button" disabled={pending || Boolean(error) || !shown || currentPage >= shown.totalPages} onClick={() => setCurrentPage((p) => p + 1)}>ถัดไป</button>
+          </nav>
+        </footer>
+      </section>
 
       <AnimatePresence>
         {showFormModal && (
@@ -744,11 +335,11 @@ const JobReport = ({ token, user, onRequireLogin }) => {
             sites={sites}
             token={token}
             onClose={() => setShowFormModal(false)}
-            onSuccess={() => { setCurrentPage(1); fetchJobs(); }}
+            onSuccess={() => { setCurrentPage(1); setRetry((n) => n + 1); }}
           />
         )}
       </AnimatePresence>
-    </motion.div>
+    </div>
   );
 };
 

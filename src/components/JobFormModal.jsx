@@ -1,8 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-hot-toast';
 import { X, Loader2, Paperclip, FileText, ExternalLink } from 'lucide-react';
 import { motion } from 'framer-motion';
 import EquipmentPicker from './EquipmentPicker';
+
+// Basic modal accessibility (aria-modal, initial focus, Tab trap, Escape,
+// return focus to opener) -- same small local implementation used in
+// EquipmentBorrow.jsx / JobReportDetails.jsx; there's no shared Modal
+// component yet.
+const useModalA11y = (open, containerRef, onEscape) => {
+  const openerRef = useRef(null);
+  const onEscapeRef = useRef(onEscape);
+  useEffect(() => { onEscapeRef.current = onEscape; });
+  useEffect(() => {
+    if (!open) return;
+    openerRef.current = document.activeElement;
+    const getFocusable = () => Array.from(
+      containerRef.current?.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])') || []
+    ).filter((el) => !el.disabled);
+    (getFocusable()[0] || containerRef.current)?.focus();
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') { onEscapeRef.current?.(); return; }
+      if (e.key !== 'Tab') return;
+      const items = getFocusable();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      openerRef.current?.focus?.();
+    };
+    // containerRef is a ref (stable identity) -- omitted deliberately.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+};
 
 const JOB_TYPE_OPTIONS = ['แจ้งซ่อม', 'ขออุปกรณ์ใหม่', 'ขอเปลี่ยนอุปกรณ์', 'แจ้งระบบใช้งานไม่ได้'];
 const PRIORITY_OPTIONS = ['ปกติ', 'เร่งด่วน'];
@@ -114,6 +149,13 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
 
   const [submitting, setSubmitting] = useState(false);
 
+  const panelRef = useRef(null);
+  // Escape doesn't close the dialog while a save/upload is genuinely in
+  // flight -- same reasoning as EquipmentBorrow.jsx's confirm dialog: the
+  // handler reads `submitting`/`uploadingDoc` fresh on every render via the
+  // hook's ref, not a closure captured when the dialog opened.
+  useModalA11y(true, panelRef, () => { if (!submitting && !uploadingDoc) onClose(); });
+
   const handleDocFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -221,6 +263,11 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
       <motion.div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="job-form-modal-title"
+        tabIndex={-1}
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
@@ -228,13 +275,14 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
         style={{ maxWidth: '820px', width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '2rem', position: 'relative' }}
       >
         <button
-          onClick={onClose}
+          onClick={() => { if (!submitting && !uploadingDoc) onClose(); }}
+          aria-label="ปิด"
           style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', outline: 'none' }}
         >
-          <X size={20} />
+          <X size={20} aria-hidden="true" />
         </button>
 
-        <h2 style={{ margin: '0 0 1.5rem 0', fontSize: '1.4rem' }} className="krub-bold">
+        <h2 id="job-form-modal-title" style={{ margin: '0 0 1.5rem 0', fontSize: '1.4rem' }} className="krub-bold">
           {isEdit ? 'แก้ไขข้อมูลงาน' : 'แจ้งปัญหาใหม่'}
         </h2>
 
@@ -242,12 +290,13 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
           <FormSection title="ข้อมูลงาน">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div>
-                <label style={labelStyle}>ชื่องาน *</label>
-                <input type="text" required value={jobName} onChange={(e) => setJobName(e.target.value)} placeholder="เช่น เครื่องพิมพ์เสีย ชั้น 2" style={inputStyle} />
+                <label style={labelStyle} htmlFor="job-form-name">ชื่องาน *</label>
+                <input id="job-form-name" type="text" required value={jobName} onChange={(e) => setJobName(e.target.value)} placeholder="เช่น เครื่องพิมพ์เสีย ชั้น 2" style={inputStyle} />
               </div>
               <div>
-                <label style={labelStyle}>สำนักงาน *</label>
+                <label style={labelStyle} htmlFor="job-form-site">สำนักงาน *</label>
                 <input
+                  id="job-form-site"
                   type="text"
                   required
                   disabled={!canEditSite}
@@ -263,50 +312,50 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
                 </datalist>
               </div>
               <div>
-                <label style={labelStyle}>ประเภทงาน</label>
-                <select value={jobType} onChange={(e) => setJobType(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
+                <label style={labelStyle} htmlFor="job-form-type">ประเภทงาน</label>
+                <select id="job-form-type" value={jobType} onChange={(e) => setJobType(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
                   {JOB_TYPE_OPTIONS.map(t => <option key={t} value={t} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{t}</option>)}
                 </select>
               </div>
               <div>
-                <label style={labelStyle}>ความสำคัญ</label>
-                <select value={priority} onChange={(e) => setPriority(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
+                <label style={labelStyle} htmlFor="job-form-priority">ความสำคัญ</label>
+                <select id="job-form-priority" value={priority} onChange={(e) => setPriority(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
                   {PRIORITY_OPTIONS.map(p => <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{p}</option>)}
                 </select>
               </div>
               <div>
-                <label style={labelStyle}>แผนก</label>
-                <input type="text" value={department} onChange={(e) => setDepartment(e.target.value)} style={inputStyle} />
+                <label style={labelStyle} htmlFor="job-form-department">แผนก</label>
+                <input id="job-form-department" type="text" value={department} onChange={(e) => setDepartment(e.target.value)} style={inputStyle} />
               </div>
             </div>
             <div>
-              <label style={labelStyle}>รายละเอียดงาน *</label>
-              <textarea required value={jobDescription} onChange={(e) => setJobDescription(e.target.value)} rows={3} placeholder="อธิบายปัญหาที่พบ" style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+              <label style={labelStyle} htmlFor="job-form-description">รายละเอียดงาน *</label>
+              <textarea id="job-form-description" required value={jobDescription} onChange={(e) => setJobDescription(e.target.value)} rows={3} placeholder="อธิบายปัญหาที่พบ" style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
             </div>
           </FormSection>
 
           <FormSection title="ผู้แจ้ง">
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div>
-                <label style={labelStyle}>ชื่อผู้แจ้ง</label>
-                <input type="text" value={requesterName} onChange={(e) => setRequesterName(e.target.value)} style={inputStyle} />
+                <label style={labelStyle} htmlFor="job-form-requester-name">ชื่อผู้แจ้ง</label>
+                <input id="job-form-requester-name" type="text" value={requesterName} onChange={(e) => setRequesterName(e.target.value)} style={inputStyle} />
               </div>
               <div>
-                <label style={labelStyle}>รหัสพนักงานผู้แจ้ง</label>
-                <input type="text" value={requesterEmpId} onChange={(e) => setRequesterEmpId(e.target.value)} style={inputStyle} />
+                <label style={labelStyle} htmlFor="job-form-requester-emp-id">รหัสพนักงานผู้แจ้ง</label>
+                <input id="job-form-requester-emp-id" type="text" value={requesterEmpId} onChange={(e) => setRequesterEmpId(e.target.value)} style={inputStyle} />
               </div>
               <div>
-                <label style={labelStyle}>เบอร์ติดต่อ</label>
-                <input type="text" value={requesterContact} onChange={(e) => setRequesterContact(e.target.value)} style={inputStyle} />
+                <label style={labelStyle} htmlFor="job-form-requester-contact">เบอร์ติดต่อ</label>
+                <input id="job-form-requester-contact" type="text" value={requesterContact} onChange={(e) => setRequesterContact(e.target.value)} style={inputStyle} />
               </div>
               <div>
-                <label style={labelStyle}>เลขที่หนังสือแจ้ง</label>
-                <input type="text" value={notificationDocNo} onChange={(e) => setNotificationDocNo(e.target.value)} style={inputStyle} />
+                <label style={labelStyle} htmlFor="job-form-doc-no">เลขที่หนังสือแจ้ง</label>
+                <input id="job-form-doc-no" type="text" value={notificationDocNo} onChange={(e) => setNotificationDocNo(e.target.value)} style={inputStyle} />
               </div>
             </div>
 
             <div>
-              <label style={labelStyle}>ไฟล์หนังสือแจ้ง (รูปภาพ/PDF ไม่เกิน 5MB)</label>
+              <div style={labelStyle}>ไฟล์หนังสือแจ้ง (รูปภาพ/PDF ไม่เกิน 5MB)</div>
               {job?.notification_doc_file && !notificationDocFile && (
                 <a
                   href={buildDocUrl(job.notification_doc_file)}
@@ -328,7 +377,9 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
                 {notificationDocFile && (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                     {notificationDocFile.name}
-                    <X size={12} style={{ cursor: 'pointer' }} onClick={() => setNotificationDocFile(null)} />
+                    <button type="button" onClick={() => setNotificationDocFile(null)} aria-label="เอาไฟล์ที่เลือกออก" style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', display: 'flex', padding: 0 }}>
+                      <X size={12} aria-hidden="true" />
+                    </button>
                   </span>
                 )}
               </div>
@@ -346,36 +397,36 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
               </p>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={labelStyle}>สถานะ</label>
-                  <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
+                  <label style={labelStyle} htmlFor="job-form-status">สถานะ</label>
+                  <select id="job-form-status" value={status} onChange={(e) => setStatus(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
                     {STATUS_OPTIONS.map(s => <option key={s} value={s} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{s}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={labelStyle}>เลขที่คำสั่งปฏิบัติงาน</label>
-                  <input type="text" value={workOrderNo} onChange={(e) => setWorkOrderNo(e.target.value)} style={inputStyle} />
+                  <label style={labelStyle} htmlFor="job-form-work-order">เลขที่คำสั่งปฏิบัติงาน</label>
+                  <input id="job-form-work-order" type="text" value={workOrderNo} onChange={(e) => setWorkOrderNo(e.target.value)} style={inputStyle} />
                 </div>
               </div>
               <div>
-                <label style={labelStyle}>หมายเหตุความคืบหน้า</label>
-                <textarea value={progressNotes} onChange={(e) => setProgressNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+                <label style={labelStyle} htmlFor="job-form-progress-notes">หมายเหตุความคืบหน้า</label>
+                <textarea id="job-form-progress-notes" value={progressNotes} onChange={(e) => setProgressNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
               </div>
               <div>
-                <label style={labelStyle}>หมายเหตุปิดงาน</label>
-                <textarea value={closingNotes} onChange={(e) => setClosingNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+                <label style={labelStyle} htmlFor="job-form-closing-notes">หมายเหตุปิดงาน</label>
+                <textarea id="job-form-closing-notes" value={closingNotes} onChange={(e) => setClosingNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
               </div>
               <div>
-                <label style={labelStyle}>เหตุผลที่ยกเลิก</label>
-                <textarea value={cancelledReason} onChange={(e) => setCancelledReason(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
+                <label style={labelStyle} htmlFor="job-form-cancelled-reason">เหตุผลที่ยกเลิก</label>
+                <textarea id="job-form-cancelled-reason" value={cancelledReason} onChange={(e) => setCancelledReason(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
-                  <label style={labelStyle}>ไฟล์หนังสือแจ้ง (path ไฟล์โดยตรง)</label>
-                  <input type="text" value={notificationDocFilePath} onChange={(e) => setNotificationDocFilePath(e.target.value)} placeholder="/uploads/pea-jobs/..." style={inputStyle} />
+                  <label style={labelStyle} htmlFor="job-form-doc-path">ไฟล์หนังสือแจ้ง (path ไฟล์โดยตรง)</label>
+                  <input id="job-form-doc-path" type="text" value={notificationDocFilePath} onChange={(e) => setNotificationDocFilePath(e.target.value)} placeholder="/uploads/pea-jobs/..." style={inputStyle} />
                 </div>
                 <div>
-                  <label style={labelStyle}>รายงานผลการดำเนินการ (path ไฟล์โดยตรง)</label>
-                  <input type="text" value={completionReportFilePath} onChange={(e) => setCompletionReportFilePath(e.target.value)} placeholder="/uploads/pea-jobs/..." style={inputStyle} />
+                  <label style={labelStyle} htmlFor="job-form-report-path">รายงานผลการดำเนินการ (path ไฟล์โดยตรง)</label>
+                  <input id="job-form-report-path" type="text" value={completionReportFilePath} onChange={(e) => setCompletionReportFilePath(e.target.value)} placeholder="/uploads/pea-jobs/..." style={inputStyle} />
                 </div>
               </div>
             </FormSection>
@@ -384,6 +435,7 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '1.5rem' }}>
             <button
               type="button"
+              disabled={submitting || uploadingDoc}
               onClick={onClose}
               className="glass"
               style={{ padding: '0.6rem 1.5rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', borderRadius: '0.5rem', fontWeight: 600 }}
