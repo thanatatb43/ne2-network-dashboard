@@ -17,7 +17,7 @@ const formatDateTime = (value) => {
 // component (see the plan's section 6.2 on not conflating the two).
 const equipmentStatusTone = (status) => {
   if (status === 'ใช้งาน') return 'up';
-  if (['รอปรับปรุง', 'รอจำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน'].includes(status)) return 'warning';
+  if (['รอปรับปรุง', 'รอจำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน', 'รอส่งคืน'].includes(status)) return 'warning';
   if (['เลิกใช้งาน', 'จำหน่าย'].includes(status)) return 'down';
   if (status === 'ถูกยืม') return 'borrowed';
   return 'unknown';

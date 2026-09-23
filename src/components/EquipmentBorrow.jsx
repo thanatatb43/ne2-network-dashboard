@@ -22,7 +22,7 @@ const DEPARTMENT_OPTIONS = [
 // "ถูกยืม" isn't one of the record's own lifecycle statuses -- it's what the
 // API reports when an item currently has an open loan -- but it's still a
 // valid filter value, so it's listed separately from the fixed lifecycle list.
-const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน', 'ถูกยืม'];
+const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน', 'รอส่งคืน', 'ถูกยืม'];
 const PRIMARY_FIELDS = [
   ['equipment_type', 'ประเภท', EQUIPMENT_TYPE_OPTIONS],
   ['department', 'แผนก', DEPARTMENT_OPTIONS],
@@ -39,7 +39,7 @@ const siteLabel = (s) => `${s.pea_name}${s.pea_province || s.province ? ` (${s.p
 // the API-derived loan status this page cares about.
 const statusTone = (status) => {
   if (status === 'ใช้งาน') return 'up';
-  if (['รอปรับปรุง', 'รอจำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน'].includes(status)) return 'warning';
+  if (['รอปรับปรุง', 'รอจำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน', 'รอส่งคืน'].includes(status)) return 'warning';
   if (['เลิกใช้งาน', 'จำหน่าย'].includes(status)) return 'down';
   if (status === 'ถูกยืม') return 'borrowed';
   return 'unknown';

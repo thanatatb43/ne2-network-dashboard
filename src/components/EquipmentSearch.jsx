@@ -16,7 +16,7 @@ const DEPARTMENT_OPTIONS = [
   'ผสน', 'ผบร', 'ผบส', 'ผปบ', 'ผกส', 'ผมต', 'ผคพ (แยกจากวงสำนักงาน)',
   'ผู้บริหาร + บุคลากรอื่นๆ', 'กฟส (ผปร)', 'กฟส (ผบค)', 'กฟส (ผบง)'
 ];
-const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'ถูกยืม', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน'];
+const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'ถูกยืม', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน', 'รอส่งคืน'];
 
 // Advanced (less commonly used) text filters -- sent as-is in the POST body,
 // substring-matched server-side. Kept separate from the primary filter row
@@ -59,7 +59,7 @@ const readPage = () => {
 const siteLabel = s => `${s.pea_name}${s.pea_province ? ` (${s.pea_province})` : ''}`;
 const statusTone = status => {
   if (status === 'ใช้งาน') return 'up';
-  if (['รอปรับปรุง', 'รอจำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน'].includes(status)) return 'warning';
+  if (['รอปรับปรุง', 'รอจำหน่าย', 'รอจ่ายคืน', 'รอแจกคืน', 'รอรับโอน', 'รอส่งคืน'].includes(status)) return 'warning';
   if (['เลิกใช้งาน', 'จำหน่าย'].includes(status)) return 'down';
   if (status === 'ถูกยืม') return 'borrowed';
   return 'unknown';
