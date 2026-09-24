@@ -139,6 +139,10 @@ function App() {
   // history.back() so a browser Back afterwards can't re-open the same
   // detail (see navigate()/popstate below for where this gets reset).
   const cameFromJobListRef = useRef(false);
+  // Same idea for device details opened from the home map: the map (with its
+  // filters in the URL) is the previous history entry, so Back should return
+  // to it rather than always jumping to the devices list.
+  const cameFromMapRef = useRef(false);
 
   const applyRoute = (route) => {
     setActiveTab(route.tab);
@@ -325,7 +329,7 @@ function App() {
     // that the report-issue list is "one history.back() away" -- the user
     // may have navigated anywhere. Reset the shortcut; JobReportDetails'
     // back button falls back to a normal push-navigate in that case.
-    const applyPath = () => { cameFromJobListRef.current = false; applyRoute(pathToRoute(window.location.pathname)); };
+    const applyPath = () => { cameFromJobListRef.current = false; cameFromMapRef.current = false; applyRoute(pathToRoute(window.location.pathname)); };
 
     applyPath();
     window.addEventListener('popstate', applyPath);
@@ -614,7 +618,9 @@ function App() {
 
 
   const handleDeviceClick = (id) => {
+    const fromMap = activeTab === 'dashboard';
     navigate('deviceDetails', { deviceId: id });
+    cameFromMapRef.current = fromMap;
   };
 
   // Keeps the main content area out of the Tab order (and off-limits to
@@ -712,7 +718,10 @@ function App() {
           ) : activeTab === 'deviceDetails' ? (
             <DeviceDetails
               deviceId={selectedDeviceId}
-              onBack={() => navigate('devices')}
+              onBack={() => {
+                if (cameFromMapRef.current) window.history.back();
+                else navigate('devices');
+              }}
               onManageSiteEquipment={(siteId) => navigate('management', { mgmtView: 'computer_management', mgmtSiteId: siteId })}
               user={user}
               token={token}
