@@ -3,7 +3,7 @@ import { ChevronDown } from 'lucide-react';
 import './SearchableDropdown.css';
 
 // Free text remains valid; callers decide whether a value must match an option.
-export default function SearchableDropdown({ value, onChange, options, label, placeholder, describedBy }) {
+export default function SearchableDropdown({ value, onChange, options, label, placeholder, describedBy, inputId, required = false, disabled = false, title }) {
   const id = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -21,7 +21,7 @@ export default function SearchableDropdown({ value, onChange, options, label, pl
     <div className="searchable-dropdown" onBlur={event => {
       if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setActive(-1); }
     }}>
-      <input role="combobox" aria-label={label} aria-expanded={open} aria-controls={`${id}-options`}
+      <input id={inputId} required={required} disabled={disabled} title={title} role="combobox" aria-label={label} aria-expanded={open && !disabled} aria-controls={`${id}-options`}
         aria-autocomplete="list" aria-describedby={describedBy}
         aria-activedescendant={open && active >= 0 && active < matches.length ? `${id}-${active}` : undefined}
         autoComplete="off" placeholder={placeholder} value={value}
@@ -39,7 +39,7 @@ export default function SearchableDropdown({ value, onChange, options, label, pl
           } else if (event.key === 'Tab') { setOpen(false); setActive(-1); }
         }} />
       <ChevronDown size={16} className="searchable-dropdown-chevron" aria-hidden="true" />
-      <div id={`${id}-options`} role="listbox" aria-label={label} className="searchable-dropdown-options" hidden={!open}>
+      <div id={`${id}-options`} role="listbox" aria-label={label} className="searchable-dropdown-options" hidden={!open || disabled}>
         {matches.map((option, index) => (
           <div key={option} id={`${id}-${index}`} role="option" aria-selected={value === option}
             className={`searchable-dropdown-option${active === index ? ' is-active' : ''}`}

@@ -10,6 +10,7 @@ import './BudgetDashboard.css';
 const labels={fiscal_year:'ปีข้อมูล',account_code:'รหัสบัญชี',clearing_account_name:'บัญชีหักล้าง',username:'ผู้ใช้',reference_doc_no:'เลขที่เอกสาร',description:'รายละเอียด',posting_month:'เดือน',amount_direction:'ประเภทรายการ',q:'ค้นหาในผลลัพธ์'};
 const selectorFields={account_code:'account',clearing_account_name:'clearing_account',username:'username',reference_doc_no:'reference_doc',description:'description'};
 const fields=Object.keys(selectorFields);
+const fieldClass=value=>`list-field${String(value??'').trim()&&value!=='all'?' budget-field-filled':''}`;
 const colors={debit:'var(--budget-debit)',credit:'var(--budget-credit)',net:'var(--budget-net)',allocated:'var(--budget-allocated)',spent:'var(--budget-spent)'};
 const payload=value=>value?.payload||value;
 const chartNumbers=rows=>rows.map(r=>Object.fromEntries(Object.entries(r).map(([k,v])=>[k,['allocated','spent','debit','credit','net'].includes(k)?(v==null?null:Number(v)):v])));
@@ -30,7 +31,7 @@ function Suggestion({field,value,onChange,year}){
   const options=resource.data?.data?.options||[];
   // Preserve free-text searching; account suggestions submit their code.
   const display=options.map(o=>field==='account_code'?`${o.value} — ${o.label.replace(`${o.value} — `,'')}`:String(o.value));
-  return <div className="list-field"><span>{labels[field]}</span><SearchableDropdown label={labels[field]} value={value} onChange={v=>onChange(field==='account_code'?v.split(' — ')[0]:v)} options={display} placeholder={`ค้นหา${labels[field]}…`}/>{resource.error&&<button type="button" className="budget-link" onClick={()=>setRetry(n=>n+1)}>โหลดตัวเลือกใหม่ (ยังพิมพ์ค้นหาได้)</button>}</div>;
+  return <div className={fieldClass(value)}><span>{labels[field]}</span><SearchableDropdown label={labels[field]} value={value} onChange={v=>onChange(field==='account_code'?v.split(' — ')[0]:v)} options={display} placeholder={`ค้นหา${labels[field]}…`}/>{resource.error&&<button type="button" className="budget-link" onClick={()=>setRetry(n=>n+1)}>โหลดตัวเลือกใหม่ (ยังพิมพ์ค้นหาได้)</button>}</div>;
 }
 function Graph({children,label}){return <div className="budget-chart" role="group" aria-label={label}><ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer></div>;}
 const grid=<CartesianGrid stroke="var(--border-subtle)" strokeDasharray="3 3" vertical={false}/>;
@@ -93,14 +94,14 @@ export default function BudgetDashboard(){
     </>}</>:<>
       <details className="budget-filter-section" open={!query.account_code&&!query.username&&!query.posting_month}><summary>เงื่อนไขค้นหา — กดเพื่อแก้ไขตัวกรอง</summary>
       <form className="list-panel budget-filters" onSubmit={e=>{e.preventDefault();navigate({...query,...draft,page:1,transaction_id:''});}}>
-        <label className="list-field">ปีข้อมูล<select value={draft.fiscal_year} onChange={e=>setDraft({...draft,fiscal_year:e.target.value,posting_month:''})}><option value="">ทุกปี</option>{years.map(y=><option key={y} value={y}>{displayYear(y)}</option>)}</select></label>
+        <label className={fieldClass(draft.fiscal_year)}>ปีข้อมูล<select value={draft.fiscal_year} onChange={e=>setDraft({...draft,fiscal_year:e.target.value,posting_month:''})}><option value="">ทุกปี</option>{years.map(y=><option key={y} value={y}>{displayYear(y)}</option>)}</select></label>
         {fields.map(field=><Suggestion key={field} field={field} year={draft.fiscal_year} value={draft[field]} onChange={v=>setDraft({...draft,[field]:v})}/>)}
-        <label className="list-field">เดือน<input type="month" value={draft.posting_month} min={draft.fiscal_year?`${draft.fiscal_year}-01`:undefined} max={draft.fiscal_year?`${draft.fiscal_year}-12`:undefined} onChange={e=>setDraft({...draft,posting_month:e.target.value})}/></label>
-        <label className="list-field">ประเภทรายการ<select value={draft.amount_direction} onChange={e=>setDraft({...draft,amount_direction:e.target.value})}><option value="">ทั้งหมด</option><option value="debit">จ่าย</option><option value="credit">กลับรายการ</option></select></label>
-        <div className="list-actions budget-filter-actions"><button className="list-button list-button-primary" type="submit">ค้นหา</button><button className="list-button" type="button" onClick={()=>navigate({...readQuery(),...Object.fromEntries([...filterKeys,'q','transaction_id'].map(k=>[k,''])),page:1})}>ล้างทั้งหมด</button></div>
+        <label className={fieldClass(draft.posting_month)}>เดือน<input type="month" value={draft.posting_month} min={draft.fiscal_year?`${draft.fiscal_year}-01`:undefined} max={draft.fiscal_year?`${draft.fiscal_year}-12`:undefined} onChange={e=>setDraft({...draft,posting_month:e.target.value})}/></label>
+        <label className={fieldClass(draft.amount_direction)}>ประเภทรายการ<select value={draft.amount_direction} onChange={e=>setDraft({...draft,amount_direction:e.target.value})}><option value="">ทั้งหมด</option><option value="debit">จ่าย</option><option value="credit">กลับรายการ</option></select></label>
+        <div className="list-actions budget-filter-actions"><button className="list-button list-button-primary" type="submit">ค้นหา</button><button className="list-button" type="button" onClick={()=>{const cleared={...readQuery(),...Object.fromEntries([...filterKeys,'q','transaction_id'].map(k=>[k,''])),page:1};setDraft(cleared);setLocalSearch('');navigate(cleared);}}>ล้างทั้งหมด</button></div>
       </form></details>
       <div className="list-actions budget-chips" aria-label="ตัวกรองที่ใช้">{[...filterKeys,'q'].filter(k=>query[k]).map(k=><button key={k} className="list-button" onClick={()=>navigate({...query,[k]:'',page:1,transaction_id:'',...(k==='fiscal_year'?{posting_month:''}:{})})}>{labels[k]}: {query[k]} <X size={14} aria-label="ล้างตัวกรอง"/></button>)}</div>
-      <form className="budget-local-search" onSubmit={e=>{e.preventDefault();navigate({...query,q:localSearch,page:1,transaction_id:''});}}><label className="list-field">ค้นหาในผลลัพธ์ทั้งหมด<input type="search" value={localSearch} onChange={e=>setLocalSearch(e.target.value)} placeholder="ค้นหาข้ามคอลัมน์ทุกหน้า"/></label><button className="list-button" type="submit">ค้นหาในผลลัพธ์</button></form>
+      <form className="budget-local-search" onSubmit={e=>{e.preventDefault();navigate({...query,q:localSearch,page:1,transaction_id:''});}}><label className={fieldClass(localSearch)}>ค้นหาในผลลัพธ์ทั้งหมด<input type="search" value={localSearch} onChange={e=>setLocalSearch(e.target.value)} placeholder="ค้นหาข้ามคอลัมน์ทุกหน้า"/></label><button className="list-button" type="submit">ค้นหาในผลลัพธ์</button></form>
       <State resource={results} retry={retryAll}/>
       {result&&<>
         <p role="status">พบ {result.pagination.total_items.toLocaleString()} รายการ · <span className="list-muted">ยอดรวมตามตัวกรองทั้งหมด ไม่ใช่เฉพาะหน้านี้</span></p>

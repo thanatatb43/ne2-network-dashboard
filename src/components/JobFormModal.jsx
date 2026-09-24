@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from 'react-hot-toast';
 import { X, Loader2, Paperclip, FileText, ExternalLink } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import EquipmentPicker from './EquipmentPicker';
+import SearchableDropdown from './SearchableDropdown';
+import './JobFormModal.css';
 
 // Basic modal accessibility (aria-modal, initial focus, Tab trap, Escape,
 // return focus to opener) -- same small local implementation used in
@@ -73,10 +75,10 @@ const labelStyle = { display: 'block', fontSize: '0.85rem', color: 'var(--text-s
 
 // Same grouped-section wrapper convention as EquipmentEdit.jsx's FormSection.
 const FormSection = ({ title, children }) => (
-  <div className="card glass" style={{ padding: '1rem 1.25rem', marginBottom: '1rem' }}>
-    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-primary)', marginBottom: '0.75rem' }}>{title}</div>
+  <section className="job-form-section">
+    <h3>{title}</h3>
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>{children}</div>
-  </div>
+  </section>
 );
 
 // Job creation is protocol-JSON (needs problem_equipment_ids as a real
@@ -150,6 +152,18 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
   const [submitting, setSubmitting] = useState(false);
 
   const panelRef = useRef(null);
+  // Derive the filled appearance from current controls, including restored
+  // edit values and controls owned by the equipment picker.
+  useEffect(() => {
+    const panel = panelRef.current;
+    const markFilled = () => panel?.querySelectorAll('input, select, textarea').forEach(control => {
+      control.dataset.filled = String(Boolean(control.value.trim()));
+    });
+    markFilled();
+    panel?.addEventListener('input', markFilled);
+    panel?.addEventListener('change', markFilled);
+    return () => { panel?.removeEventListener('input', markFilled); panel?.removeEventListener('change', markFilled); };
+  });
   // Escape doesn't close the dialog while a save/upload is genuinely in
   // flight -- same reasoning as EquipmentBorrow.jsx's confirm dialog: the
   // handler reads `submitting`/`uploadingDoc` fresh on every render via the
@@ -261,8 +275,8 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
-      <motion.div
+    <div className="job-form-backdrop">
+      <Motion.div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
@@ -271,13 +285,12 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="card glass"
-        style={{ maxWidth: '820px', width: '100%', maxHeight: '90vh', overflowY: 'auto', padding: '2rem', position: 'relative' }}
+        className="job-form-dialog"
       >
         <button
           onClick={() => { if (!submitting && !uploadingDoc) onClose(); }}
           aria-label="ปิด"
-          style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', outline: 'none' }}
+          className="job-form-close"
         >
           <X size={20} aria-hidden="true" />
         </button>
@@ -285,31 +298,28 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
         <h2 id="job-form-modal-title" style={{ margin: '0 0 1.5rem 0', fontSize: '1.4rem' }} className="krub-bold">
           {isEdit ? 'แก้ไขข้อมูลงาน' : 'แจ้งปัญหาใหม่'}
         </h2>
+        <p className="job-form-intro">ระบุปัญหาและสำนักงาน จากนั้นเลือกอุปกรณ์ที่เกี่ยวข้อง · ช่องที่มี * จำเป็นต้องกรอก</p>
 
         <form onSubmit={handleSubmit}>
           <FormSection title="ข้อมูลงาน">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div className="job-form-grid">
               <div>
                 <label style={labelStyle} htmlFor="job-form-name">ชื่องาน *</label>
                 <input id="job-form-name" type="text" required value={jobName} onChange={(e) => setJobName(e.target.value)} placeholder="เช่น เครื่องพิมพ์เสีย ชั้น 2" style={inputStyle} />
               </div>
               <div>
                 <label style={labelStyle} htmlFor="job-form-site">สำนักงาน *</label>
-                <input
-                  id="job-form-site"
-                  type="text"
+                <SearchableDropdown
+                  inputId="job-form-site"
+                  label="สำนักงาน"
                   required
                   disabled={!canEditSite}
                   title={!canEditSite ? 'เปลี่ยนสำนักงานได้เฉพาะ super_admin' : undefined}
-                  list="job-form-site-options"
                   placeholder="พิมพ์ชื่อสาขา..."
                   value={siteInput}
-                  onChange={(e) => setSiteInput(e.target.value)}
-                  style={{ ...inputStyle, ...(!canEditSite ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
+                  onChange={setSiteInput}
+                  options={[...new Set(sites.map(siteLabel))]}
                 />
-                <datalist id="job-form-site-options">
-                  {sites.map(s => <option key={s.id} value={siteLabel(s)} />)}
-                </datalist>
               </div>
               <div>
                 <label style={labelStyle} htmlFor="job-form-type">ประเภทงาน</label>
@@ -335,7 +345,7 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
           </FormSection>
 
           <FormSection title="ผู้แจ้ง">
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div className="job-form-grid">
               <div>
                 <label style={labelStyle} htmlFor="job-form-requester-name">ชื่อผู้แจ้ง</label>
                 <input id="job-form-requester-name" type="text" value={requesterName} onChange={(e) => setRequesterName(e.target.value)} style={inputStyle} />
@@ -395,7 +405,7 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
               <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                 ส่วนนี้แก้ไขข้อมูลเบื้องหลังโดยตรง แนะนำให้ใช้ปุ่มดำเนินการ (เริ่มดำเนินการ/ปิดงาน/ยกเลิกงาน) แทนหากทำได้ -- ใช้ส่วนนี้เฉพาะกรณีต้องแก้ไขข้อมูลที่ผิดพลาด
               </p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div className="job-form-grid">
                 <div>
                   <label style={labelStyle} htmlFor="job-form-status">สถานะ</label>
                   <select id="job-form-status" value={status} onChange={(e) => setStatus(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
@@ -419,7 +429,7 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
                 <label style={labelStyle} htmlFor="job-form-cancelled-reason">เหตุผลที่ยกเลิก</label>
                 <textarea id="job-form-cancelled-reason" value={cancelledReason} onChange={(e) => setCancelledReason(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div className="job-form-grid">
                 <div>
                   <label style={labelStyle} htmlFor="job-form-doc-path">ไฟล์หนังสือแจ้ง (path ไฟล์โดยตรง)</label>
                   <input id="job-form-doc-path" type="text" value={notificationDocFilePath} onChange={(e) => setNotificationDocFilePath(e.target.value)} placeholder="/uploads/pea-jobs/..." style={inputStyle} />
@@ -432,7 +442,7 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
             </FormSection>
           )}
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', borderTop: '1px solid var(--border-subtle)', paddingTop: '1.5rem' }}>
+          <div className="job-form-actions">
             <button
               type="button"
               disabled={submitting || uploadingDoc}
@@ -457,7 +467,7 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
             </button>
           </div>
         </form>
-      </motion.div>
+      </Motion.div>
     </div>
   );
 };

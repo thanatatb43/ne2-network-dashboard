@@ -4,8 +4,9 @@ import { motion as Motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronLeft, ChevronRight, Loader2, AlertTriangle, Cpu, Building2, Wifi, Hash,
   Briefcase, Calendar, StickyNote, MapPin, UserCircle, PackageSearch, Pencil,
-  Fingerprint, Tag, User, IdCard, Archive, Router, Repeat, ArrowLeftRight, UserCog, Wrench, X
+  Fingerprint, Tag, User, IdCard, Archive, Router, Repeat, ArrowLeftRight, UserCog, Wrench, X, Printer
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import BorrowReturnModal from './BorrowReturnModal';
 import OwnerHistoryModal from './OwnerHistoryModal';
 
@@ -263,6 +264,47 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [equipmentId]);
 
+  // Opens a one-sticker print window; printing waits for the QR image to
+  // finish loading so a slow response can't print a blank box.
+  const printQr = () => {
+    const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const src = `${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${equipment.id}/qrcode?v=${encodeURIComponent(equipment.updatedAt || '')}`;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('ไม่สามารถเปิดหน้าต่างพิมพ์ได้ กรุณาอนุญาต pop-up สำหรับเว็บไซต์นี้');
+      return;
+    }
+    printWindow.document.open();
+    printWindow.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>พิมพ์ QR Code อุปกรณ์ ${escapeHtml(equipment.id)}</title>
+<style>
+  @page { size: A4; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; }
+  .qr-cell { display: inline-flex; flex-direction: column; align-items: center; border: 1px dashed #999; border-radius: 4mm; padding: 6mm; max-width: 80mm; }
+  .qr-cell img { width: 60mm; height: 60mm; object-fit: contain; }
+  .qr-cell .caption { margin-top: 4mm; font-size: 11pt; color: #333; text-align: center; word-break: break-word; }
+</style>
+</head>
+<body>
+  <div class="qr-cell">
+    <img id="qr" src="${escapeHtml(src)}" alt="QR ${escapeHtml(equipment.id)}" />
+    <div class="caption">ID: ${escapeHtml(equipment.id)}</div>
+    <div class="caption">${escapeHtml(equipment.name)}</div>
+  </div>
+  <script>
+    var img = document.getElementById('qr');
+    function go() { setTimeout(function() { window.print(); }, 200); }
+    if (img.complete) go(); else { img.onload = go; img.onerror = function() { document.body.insertAdjacentHTML('beforeend', '<p>โหลด QR Code ไม่สำเร็จ</p>'); }; }
+  </script>
+</body>
+</html>`);
+    printWindow.document.close();
+  };
+
   const hasContractInfo = equipment && (equipment.vendor || equipment.contract_no || equipment.contract_start_date || equipment.contract_expiry_date);
 
   return (
@@ -377,6 +419,29 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
             }}
           >
             <UserCog size={18} /> ดูประวัติผู้ถือครอง
+          </button>
+
+          <button
+            onClick={printQr}
+            className="glass"
+            style={{
+              width: '100%',
+              padding: '1rem',
+              borderRadius: '0.75rem',
+              background: 'var(--bg-accent-subtle)',
+              color: 'var(--accent-primary)',
+              border: '1px solid var(--accent-primary)',
+              fontWeight: 700,
+              fontSize: '1rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.6rem',
+              marginBottom: '0.75rem'
+            }}
+          >
+            <Printer size={18} /> พิมพ์ QR Code
           </button>
 
           <button

@@ -619,7 +619,9 @@ function App() {
 
   const handleDeviceClick = (id) => {
     const fromMap = activeTab === 'dashboard';
+    const downtimeOrigin = activeTab === 'downtime-history' ? `${window.location.pathname}${window.location.search}` : null;
     navigate('deviceDetails', { deviceId: id });
+    if (downtimeOrigin) window.history.replaceState({ ...window.history.state, downtimeOrigin }, '', window.location.href);
     cameFromMapRef.current = fromMap;
   };
 
@@ -719,7 +721,7 @@ function App() {
             <DeviceDetails
               deviceId={selectedDeviceId}
               onBack={() => {
-                if (cameFromMapRef.current) window.history.back();
+                if (cameFromMapRef.current || window.history.state?.downtimeOrigin?.startsWith('/downtime-history')) window.history.back();
                 else navigate('devices');
               }}
               onManageSiteEquipment={(siteId) => navigate('management', { mgmtView: 'computer_management', mgmtSiteId: siteId })}

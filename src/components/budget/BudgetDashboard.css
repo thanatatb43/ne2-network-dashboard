@@ -37,6 +37,8 @@ button.budget-stat{cursor:pointer}button.budget-stat:hover{border-color:var(--li
 @media(max-width:600px){.budget-filters>.budget-filter-actions>.list-button{flex:1 1 0;min-width:0}}
 .budget-dashboard input{width:100%;min-width:0;min-height:44px;padding:10px 12px;border-radius:8px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-primary)}
 .budget-dashboard .searchable-dropdown input{padding-right:36px}
+.budget-dashboard .budget-field-filled{color:var(--list-action)}
+.budget-dashboard .budget-field-filled :is(input,select){border-color:var(--list-action);background:var(--bg-accent-subtle);box-shadow:inset 3px 0 0 var(--list-action)}
 .budget-chips{margin:16px 0}.budget-chips button{font-size:.8125rem;overflow-wrap:anywhere;max-width:100%;text-align:left}
 .budget-local-search{display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:20px 0}.budget-local-search .list-field{flex:1 1 260px}
 .budget-link{color:var(--list-action);border:0;background:transparent;text-align:left;padding:8px 0;min-height:44px;cursor:pointer;font:inherit;text-decoration:none;overflow-wrap:anywhere}
