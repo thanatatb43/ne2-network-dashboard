@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { withCurrentStatus } from '../components/deviceStatus';
 
 // Attention-list thresholds -- common networking rules of thumb (packet
 // loss >5% and latency >100ms are widely treated as warning signs), not an
@@ -31,7 +32,9 @@ const normalizeDevice = (raw) => ({
   province: raw.device?.province || '',
   peaType: raw.device?.pea_type || '',
   gateway: raw.device?.gateway || '',
-  status: raw.status === 'up' || raw.status === 'down' ? raw.status : 'unknown',
+  // Current state per backend precedence (live_status > alive > status).
+  status: withCurrentStatus(raw).status,
+  stale: raw.stale === true,
   latency: toFiniteNumber(raw.latency_ms),
   packetLoss: toFiniteNumber(raw.packet_loss),
   checkedAt: toValidDate(raw.checked_at),

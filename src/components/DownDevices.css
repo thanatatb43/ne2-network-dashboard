@@ -18,3 +18,4 @@
   .dd-cards { display: block; }
   .dd-page .list-toolbar .list-field, .dd-page .list-toolbar > .list-button { flex: 1 1 100%; }
 }
+.dd-stale-note { margin: -8px 20px 12px; font-size: .8125rem; }

@@ -17,12 +17,14 @@ export default function useBudgetResource(key,loader,retry=0){
 }
 export async function loadResults(query,signal,progress){
   const filters=params(query,filterKeys);
-  if(!query.q.trim()){
-    const [list,aggregate]=await Promise.all([request(`transactions?${filters}&${params(query,['page','page_size','sort','order'])}`,signal),request(`transactions/aggregates?${filters}`,signal)]);
-    if(!Array.isArray(list.data)||!list.pagination||!aggregate.data?.totals||!Array.isArray(aggregate.data.by_month))throw new Error('รูปแบบข้อมูลไม่ถูกต้อง');
-    return {rows:list.data,pagination:list.pagination,aggregate:aggregate.data,meta:list.meta};
-  }
-  // Backend ignores q: search the complete filtered set, never one page.
+  const q=query.q.trim();
+  // Server-side q (literal-v1) covers every filtered record. Its presence is
+  // confirmed from meta.search.version, never from HTTP 200 alone.
+  const serverFilters=q?`${filters}&${params({q},['q'])}`:filters;
+  const [list,aggregate]=await Promise.all([request(`transactions?${serverFilters}&${params(query,['page','page_size','sort','order'])}`,signal),request(`transactions/aggregates?${serverFilters}`,signal)]);
+  if(!Array.isArray(list.data)||!list.pagination||!aggregate.data?.totals||!Array.isArray(aggregate.data.by_month))throw new Error('รูปแบบข้อมูลไม่ถูกต้อง');
+  if(!q||(list.meta?.search?.version==='literal-v1'&&aggregate.meta?.search?.version==='literal-v1'))return {rows:list.data,pagination:list.pagination,aggregate:aggregate.data,meta:list.meta};
+  // Older backend ignores q: search the complete filtered set, never one page.
   let rows=[];let page=1;let pages=1;
   do{const r=await request(`transactions?${filters}&page=${page}&page_size=100&${params(query,['sort','order'])}`,signal);
     if(!Array.isArray(r.data)||!r.pagination)throw new Error('รูปแบบข้อมูลไม่ถูกต้อง');

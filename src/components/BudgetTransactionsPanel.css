@@ -12,3 +12,4 @@
 .bt-sort-idle { opacity: .35; }
 .bt-table:focus-visible { outline: 3px solid var(--list-action); outline-offset: -3px; }
 .bt-table .list-empty { display: table-cell; }
+.bt-hint { margin: -8px 20px 12px; font-size: .8125rem; }

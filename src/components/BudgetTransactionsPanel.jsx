@@ -9,7 +9,8 @@ const STORAGE_KEY = 'budgetManagement.transactions.v1';
 // Server-side filters/sorts only: the API ignores unknown params silently, so
 // nothing here is filtered in the browser on top of a single page.
 const FILTERS = [
-  { key: 'description', label: 'รายละเอียด', placeholder: 'ค้นหาในรายละเอียดรายการ' },
+  { key: 'q', label: 'ค้นหาทุกคอลัมน์', placeholder: 'ข้อความ เลขเอกสาร จำนวนเงิน เช่น 5400.00 หรือวันที่ 2025-01-27', search: true },
+  { key: 'description', label: 'รายละเอียด', placeholder: 'ค้นหาในรายละเอียดรายการ', search: true, fallbackOnly: true },
   { key: 'reference_doc_no', label: 'เลขที่เอกสารอ้างอิง', placeholder: 'เช่น 2000936549' },
   { key: 'username', label: 'ผู้บันทึก', placeholder: 'ชื่อผู้ใช้' }
 ];
@@ -23,7 +24,7 @@ const COLUMNS = [
   { key: 'amount', label: 'จำนวนเงิน (บาท)', numeric: true }
 ];
 
-const defaults = { filters: { description: '', reference_doc_no: '', username: '' }, page: 1, pageSize: 15, sort: 'posting_date', order: 'desc' };
+const defaults = { filters: { q: '', description: '', reference_doc_no: '', username: '' }, page: 1, pageSize: 15, sort: 'posting_date', order: 'desc' };
 
 const readState = () => {
   try {
@@ -56,6 +57,9 @@ export default function BudgetTransactionsPanel({ token, refreshKey, actions }) 
   const [sort, setSort] = useState({ key: initial.sort, order: initial.order });
   const [retry, setRetry] = useState(0);
   const [result, setResult] = useState({ key: '', rows: [], total: 0, totalPages: 1, error: '' });
+  // null until the first response: literal-v1 means the server searches every
+  // filtered record with q; otherwise fall back to the description filter.
+  const [qSupported, setQSupported] = useState(null);
   const tokenRef = useRef(0);
 
   useEffect(() => {
@@ -91,6 +95,7 @@ export default function BudgetTransactionsPanel({ token, refreshKey, actions }) 
         if (id !== tokenRef.current) return;
         const total = Number(body.pagination?.total_items);
         const pages = Number(body.pagination?.total_pages);
+        setQSupported(body.meta?.search?.version === 'literal-v1');
         setResult({ key: fullKey, rows: body.data, total: Number.isFinite(total) ? total : body.data.length, totalPages: Number.isFinite(pages) && pages > 0 ? pages : 1, error: '' });
       })
       .catch(err => {
@@ -116,16 +121,16 @@ export default function BudgetTransactionsPanel({ token, refreshKey, actions }) 
         <div className="bt-head">
           <div>
             <h2 id="bt-title">ข้อมูลการเบิกจ่าย</h2>
-            <p className="list-muted">ค้นหา เรียง และแบ่งหน้าจากข้อมูลทั้งหมดบนเซิร์ฟเวอร์</p>
+            <p className="list-muted">ค้นหา เรียง และแบ่งหน้าจากข้อมูลทั้งหมดบนเซิร์ฟเวอร์ (ไม่ใช่เฉพาะหน้าที่แสดง)</p>
           </div>
           {actions}
         </div>
         <div className="list-toolbar">
-          {FILTERS.map(f => (
-            <label key={f.key} className={`list-field${f.key === 'description' ? ' list-search' : ''}${inputs[f.key] ? ' is-active' : ''}`}>
+          {FILTERS.filter(f => (f.key === 'q' ? qSupported !== false : f.fallbackOnly ? qSupported === false || Boolean(inputs.description) : true)).map(f => (
+            <label key={f.key} className={`list-field${f.search ? ' list-search' : ''}${inputs[f.key] ? ' is-active' : ''}`}>
               <span>{f.label}</span>
-              {f.key === 'description' ? (
-                <div className="list-search-input"><Search size={18} aria-hidden="true" /><input type="search" value={inputs[f.key]} placeholder={f.placeholder} onChange={e => changeInput(f.key, e.target.value)} /></div>
+              {f.search ? (
+                <div className="list-search-input"><Search size={18} aria-hidden="true" /><input type="search" value={inputs[f.key]} placeholder={f.placeholder} maxLength={200} aria-describedby={f.key === 'q' ? 'bt-q-hint' : undefined} onChange={e => changeInput(f.key, e.target.value)} /></div>
               ) : (
                 <input type="search" className="bt-input" value={inputs[f.key]} placeholder={f.placeholder} onChange={e => changeInput(f.key, e.target.value)} />
               )}
@@ -133,6 +138,8 @@ export default function BudgetTransactionsPanel({ token, refreshKey, actions }) 
           ))}
           <button type="button" className="list-button" onClick={clearFilters} disabled={!hasFilter}>ล้างตัวกรอง</button>
         </div>
+        {qSupported !== false && <p id="bt-q-hint" className="list-muted bt-hint">ค้นแบบข้อความตรงตัวในทุกคอลัมน์ ไม่แยกตัวพิมพ์ — % และ _ ถือเป็นตัวอักษร จำนวนเงินใช้รูปแบบ 5400.00 วันที่ใช้ YYYY-MM-DD</p>}
+        {qSupported === false && <p className="list-muted bt-hint">เซิร์ฟเวอร์ยังไม่รองรับการค้นหาทุกคอลัมน์ จึงค้นได้เฉพาะรายละเอียด เลขเอกสาร และผู้บันทึก</p>}
         <div className="list-result-info" role="status">
           <span>{pending ? 'กำลังค้นหา...' : result.error ? '' : result.total ? `แสดง ${first.toLocaleString('th-TH')}–${Math.min(page * pageSize, result.total).toLocaleString('th-TH')} จาก ${result.total.toLocaleString('th-TH')} รายการ` : ''}</span>
         </div>

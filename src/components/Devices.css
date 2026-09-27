@@ -1,2 +1,3 @@
 /* Shared list-page styles; retained as the Devices entry point. */
 @import './ListPage.css';
+.devices-stale { display: block; margin-top: 4px; white-space: nowrap; }

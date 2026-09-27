@@ -3,6 +3,7 @@ import { motion as Motion } from 'framer-motion';
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Search } from 'lucide-react';
 import './ListPage.css';
 import './DownDevices.css';
+import { formatAge, normalizeLiveStatus } from './deviceStatus';
 
 const API = import.meta.env.VITE_API_BASE_URL;
 const REFRESH_MS = 60000;
@@ -19,7 +20,11 @@ const normalize = (item) => ({
   province: item.device?.province || '',
   gateway: item.device?.gateway || '',
   packetLoss: num(item.packet_loss),
-  checkedAt: time(item.checked_at)
+  checkedAt: time(item.checked_at),
+  // This endpoint lists every device whose LAST reading was down; a reading
+  // older than the backend's threshold is "unknown", not currently down.
+  current: normalizeLiveStatus(item).status === 'offline',
+  ageSeconds: num(item.age_seconds)
 });
 
 const DownDevices = ({ onDeviceClick }) => {
@@ -43,7 +48,8 @@ const DownDevices = ({ onDeviceClick }) => {
       if (!res.ok || !body || body.success === false || !Array.isArray(body.data)) throw new Error(body?.message || `เซิร์ฟเวอร์ตอบกลับ HTTP ${res.status}`);
       if (inflight.current !== controller) return;
       lastOk.current = Date.now();
-      setState({ status: 'ready', rows: body.data.filter(Boolean).map(normalize), error: '', loadedAt: new Date(), refreshing: false });
+      const rows = body.data.filter(Boolean).map(normalize).sort((a, b) => Number(b.current) - Number(a.current));
+      setState({ status: 'ready', rows, error: '', loadedAt: new Date(), refreshing: false });
     } catch (err) {
       if (inflight.current !== controller) return;
       const message = timedOut ? 'หมดเวลารอการตอบกลับจากเซิร์ฟเวอร์' : err.message || 'โหลดข้อมูลไม่สำเร็จ';
@@ -74,6 +80,11 @@ const DownDevices = ({ onDeviceClick }) => {
   const q = search.trim().toLocaleLowerCase();
   const filtered = useMemo(() => state.rows.filter(r => !q || `${r.name} ${r.type} ${r.province} ${r.gateway}`.toLocaleLowerCase().includes(q)), [state.rows, q]);
   const hasData = state.status === 'ready' || state.status === 'stale';
+  const currentCount = state.rows.filter(r => r.current).length;
+  const staleCount = state.rows.length - currentCount;
+  const statusPill = (row) => (row.current
+    ? <span className="list-status list-status-down"><span aria-hidden="true">!</span> ขัดข้อง</span>
+    : <span className="list-status list-status-unknown" title={row.ageSeconds !== null ? `วัดล่าสุดเมื่อ ${formatAge(row.ageSeconds)} ก่อน` : undefined}><span aria-hidden="true">?</span> ผลวัดเก่า</span>);
 
   const openDevice = (event, row) => {
     if (!onDeviceClick || row.deviceId == null || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -120,7 +131,8 @@ const DownDevices = ({ onDeviceClick }) => {
           </label>
           <button type="button" className="list-button" onClick={() => setSearch('')} disabled={!search}>ล้างคำค้น</button>
         </div>
-        {hasData && <div className="list-result-info" role="status"><span>{q ? `พบ ${filtered.length} จาก ${state.rows.length} รายการ` : `ขัดข้อง ${state.rows.length} รายการ`}</span></div>}
+        {hasData && <div className="list-result-info" role="status"><span>{q ? `พบ ${filtered.length} จาก ${state.rows.length} รายการ` : `ขัดข้องตอนนี้ ${currentCount} รายการ${staleCount ? ` · ผลวัดเก่า ${staleCount} รายการ` : ''}`}</span></div>}
+        {hasData && staleCount > 0 && <p className="list-muted dd-stale-note">"ผลวัดเก่า" คือผลวัดล่าสุดเป็นขัดข้อง แต่เก่ากว่าเกณฑ์ของระบบ (ช่วง 00:00–05:00 ระบบหยุดตรวจ) จึงยังไม่ถือว่าขัดข้องตอนนี้ — กดชื่อเพื่อสั่งตรวจใหม่</p>}
 
         {state.status === 'loading' ? (
           <div className="dd-state"><Loader2 size={28} className="animate-spin" aria-hidden="true" /> กำลังโหลดข้อมูล...</div>
@@ -135,14 +147,15 @@ const DownDevices = ({ onDeviceClick }) => {
             <div className="list-table-scroll dd-table" tabIndex={0} role="region" aria-label="ตารางอุปกรณ์ที่ขัดข้อง">
               <table className="list-table">
                 <caption className="list-sr-only">อุปกรณ์ที่ขัดข้อง {filtered.length} รายการ</caption>
-                <thead><tr><th scope="col">ชื่ออุปกรณ์</th><th scope="col">ประเภท</th><th scope="col">จังหวัด</th><th scope="col">Gateway IP</th><th scope="col" className="dd-num">Packet Loss</th><th scope="col">ตรวจสอบล่าสุด</th></tr></thead>
+                <thead><tr><th scope="col">ชื่ออุปกรณ์</th><th scope="col">ประเภท</th><th scope="col">จังหวัด</th><th scope="col">Gateway IP</th><th scope="col">สถานะ</th><th scope="col" className="dd-num">Packet Loss</th><th scope="col">ตรวจสอบล่าสุด</th></tr></thead>
                 <tbody>
                   {filtered.map(row => (
-                    <tr key={row.key} className="list-row-down">
+                    <tr key={row.key} className={row.current ? 'list-row-down' : undefined}>
                       <td>{nameCell(row)}</td>
                       <td>{row.type || '—'}</td>
                       <td>{row.province || '—'}</td>
                       <td className="list-ip">{row.gateway || '—'}</td>
+                      <td>{statusPill(row)}</td>
                       <td className="dd-num list-number">{row.packetLoss === null ? '—' : `${row.packetLoss}%`}</td>
                       <td>{row.checkedAt ? row.checkedAt.toLocaleString('th-TH') : '—'}</td>
                     </tr>
@@ -153,7 +166,7 @@ const DownDevices = ({ onDeviceClick }) => {
             <ul className="dd-cards">
               {filtered.map(row => (
                 <li key={row.key}>
-                  <div className="dd-card-name">{nameCell(row)}<span className="list-status list-status-down"><span aria-hidden="true">!</span> ขัดข้อง</span></div>
+                  <div className="dd-card-name">{nameCell(row)}{statusPill(row)}</div>
                   <dl>
                     <div><dt>Gateway IP</dt><dd className="list-ip">{row.gateway || '—'}</dd></div>
                     <div><dt>ประเภท / จังหวัด</dt><dd>{[row.type, row.province].filter(Boolean).join(' · ') || '—'}</dd></div>

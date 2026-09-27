@@ -3,6 +3,7 @@ import { CheckCircle, AlertCircle, Search, RefreshCw, ArrowUpDown, ArrowUp, Arro
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 import './Devices.css';
+import { formatAge, withCurrentStatus } from './deviceStatus';
 
 const VIEW_KEY = 'network-devices:view:v1';
 const STATUS_OPTIONS = ['All', 'up', 'down', 'unknown'];
@@ -73,7 +74,7 @@ const Devices = ({ onDeviceClick, user, initialStatus, onInitialStatusConsumed }
       const result = await response.json();
       if (result.success === false || !Array.isArray(result.data)) throw new Error('Invalid device response');
       if (requestRef.current !== controller) return;
-      setDevices(result.data);
+      setDevices(result.data.map(withCurrentStatus));
       setLastUpdated(new Date());
       setError('');
     } catch {
@@ -312,7 +313,10 @@ const Devices = ({ onDeviceClick, user, initialStatus, onInitialStatusConsumed }
                   <td><span className={`list-status list-status-${d.status === 'up' ? 'up' : d.status === 'down' ? 'down' : 'unknown'}`}>
                     {d.status === 'up' ? <CheckCircle size={15} aria-hidden="true" /> : <AlertCircle size={15} aria-hidden="true" />}
                     {d.status === 'up' ? 'ออนไลน์' : d.status === 'down' ? 'ขัดข้อง' : 'ไม่ทราบสถานะ'}
-                  </span></td>
+                  </span>
+                  {d.status === 'unknown' && d.stale && (d.measured_status === 'up' || d.measured_status === 'down') && (
+                    <span className="list-muted devices-stale">ผลวัดเก่า: {d.measured_status === 'up' ? 'ออนไลน์' : 'ขัดข้อง'}{Number.isFinite(d.age_seconds) && ` เมื่อ ${formatAge(d.age_seconds)} ก่อน`}</span>
+                  )}</td>
                 </tr>
               ))}
             </tbody>

@@ -212,6 +212,8 @@ inline styles ที่เหลือไม่ต้องถูกย้าย
 
 ## 7. API ที่ต้องคุยก่อนดำเนินการ
 
+รายละเอียดสำหรับส่งทีม backend: [REMAINING_UX_UI_BACKEND_API_SPEC.md](REMAINING_UX_UI_BACKEND_API_SPEC.md) ระบุ endpoint, parameters, response, compatibility และเกณฑ์ทดสอบ โดยแยกงานที่ต้องขยาย API เดิมออกจาก API ใหม่ที่เป็นทางเลือก
+
 | ประเด็น | ใช้เดิมได้ / ต้องยืนยัน |
 |---|---|
 | DownDevices error/layout | ใช้ API เดิมได้ทันที |

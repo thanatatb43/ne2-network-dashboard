@@ -32,11 +32,10 @@ const inputStyle = {
   outline: 'none'
 };
 
-// Groups consecutive rows sharing the same batch_id into one card -- the API
-// guarantees rows from the same batch (same borrowed_at, sorted DESC) always
-// land adjacent to each other within a page, so no extra lookups are needed.
-// A row without a batch_id (shouldn't normally happen, but guarded anyway)
-// becomes its own single-item group.
+// Groups consecutive rows sharing the same batch_id into one card. The API
+// pages by loan row (not by batch), sorted borrowed_at DESC, id DESC: rows of
+// a batch are adjacent but a page edge can cut a batch in two. Older loans
+// have no batch_id and are single-item groups.
 const groupByBatch = (loans) => {
   const groups = [];
   loans.forEach((loan) => {
@@ -51,17 +50,34 @@ const groupByBatch = (loans) => {
   return groups;
 };
 
+const VIEW_KEY = 'equipmentLoans.view.v1';
+const readView = () => {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(VIEW_KEY)) || {};
+    return {
+      search: typeof v.search === 'string' ? v.search.slice(0, 200) : '',
+      status: ['open', 'returned'].includes(v.status) ? v.status : '',
+      site: typeof v.site === 'string' ? v.site : '',
+      page: Number.isInteger(v.page) && v.page > 0 ? v.page : 1
+    };
+  } catch {
+    return { search: '', status: '', site: '', page: 1 };
+  }
+};
+
 const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
+  const [view] = useState(readView);
   const [loans, setLoans] = useState([]);
   const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, totalPages: 1 });
   const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [loadError, setLoadError] = useState('');
+  const [currentPage, setCurrentPage] = useState(view.page);
   const itemsPerPage = 20;
 
-  const [searchInput, setSearchInput] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState(''); // '' | 'open' | 'returned'
-  const [siteFilter, setSiteFilter] = useState('');
+  const [searchInput, setSearchInput] = useState(view.search);
+  const [searchTerm, setSearchTerm] = useState(view.search);
+  const [statusFilter, setStatusFilter] = useState(view.status); // '' | 'open' | 'returned'
+  const [siteFilter, setSiteFilter] = useState(view.site);
   const [sites, setSites] = useState([]);
 
   const [returnItem, setReturnItem] = useState(null); // { equipmentId, equipmentName }
@@ -81,6 +97,7 @@ const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
 
   const fetchLoans = async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const params = new URLSearchParams();
       params.append('page', String(currentPage));
@@ -92,13 +109,14 @@ const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
       // Public endpoint -- no Authorization header needed, matching the
       // existing per-equipment /:id/loans convention.
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/loans?${params.toString()}`);
-      const result = await response.json();
-      if (result.success) {
-        setLoans(result.data || []);
-        if (result.pagination) setPagination(result.pagination);
-      }
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success || !Array.isArray(result.data)) throw new Error(`HTTP ${response.status}`);
+      setLoans(result.data);
+      if (result.pagination) setPagination(result.pagination);
     } catch (error) {
       console.error('Error fetching loan history:', error);
+      // Not "no history": the list could not be loaded at all.
+      setLoadError('โหลดประวัติการยืมไม่สำเร็จ');
     } finally {
       setLoading(false);
     }
@@ -118,12 +136,17 @@ const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
   // the page-1 reset so they batch into one re-render instead of racing
   // across two separate effects.
   useEffect(() => {
+    if (searchInput === searchTerm) return undefined;
     const t = setTimeout(() => {
       setSearchTerm(searchInput);
       setCurrentPage(1);
     }, 400);
     return () => clearTimeout(t);
-  }, [searchInput]);
+  }, [searchInput, searchTerm]);
+
+  useEffect(() => {
+    try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ search: searchTerm, status: statusFilter, site: siteFilter, page: currentPage })); } catch { /* not remembered */ }
+  }, [searchTerm, statusFilter, siteFilter, currentPage]);
 
   const handleFilterChange = (setter) => (value) => {
     setter(value);
@@ -162,7 +185,9 @@ const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
           <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
           <input
             type="text"
-            placeholder="ค้นหาชื่อ / รหัสพนักงาน / เบอร์ผู้ยืม..."
+            placeholder="ค้นหาผู้ยืม: ชื่อ รหัสพนักงาน หรือเบอร์ติดต่อ"
+            aria-label="ค้นหาผู้ยืม (ชื่อ รหัสพนักงาน หรือเบอร์ติดต่อ) ไม่ค้นชื่ออุปกรณ์"
+            maxLength={200}
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             style={{
@@ -199,7 +224,7 @@ const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
         </div>
 
         <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
-          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.total}</span> รายการ
+          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.total}</span> รายการ (นับรายชิ้น)
         </div>
       </div>
 
@@ -208,15 +233,23 @@ const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
           <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto' }} />
           <p style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>กำลังโหลดประวัติการยืม...</p>
         </div>
+      ) : loadError ? (
+        <div className="card glass" role="alert" style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--accent-danger)' }}>
+          <p style={{ margin: '0 0 1rem', fontWeight: 600 }}>{loadError}</p>
+          <button type="button" onClick={fetchLoans} className="glass" style={{ minHeight: '44px', padding: '0.6rem 1.25rem', borderRadius: '0.5rem', border: '1px solid var(--input-border)', background: 'var(--input-bg)', color: 'var(--text-primary)', cursor: 'pointer', fontWeight: 600 }}>ลองใหม่</button>
+        </div>
       ) : groups.length === 0 ? (
         <div className="card glass" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
           <History size={40} style={{ opacity: 0.2, margin: '0 auto 1rem' }} />
-          <p>ไม่พบประวัติการยืม</p>
+          <p>{searchTerm || statusFilter || siteFilter ? 'ไม่พบประวัติการยืมตามตัวกรอง' : 'ยังไม่มีประวัติการยืม'}</p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {groups.map((group) => {
+          {groups.map((group, groupIndex) => {
             const first = group.items[0];
+            const isBatch = Boolean(first.batch_id);
+            const maybeEarlier = isBatch && groupIndex === 0 && currentPage > 1;
+            const maybeLater = isBatch && groupIndex === groups.length - 1 && currentPage < pagination.totalPages;
             return (
               <div key={group.key} className="card glass" style={{ padding: '1.25rem 1.5rem', borderRadius: '0.75rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
@@ -230,10 +263,15 @@ const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
                   </div>
                 </div>
 
+                {(maybeEarlier || maybeLater) && (
+                  <p style={{ margin: '0 0 0.75rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    แสดงเฉพาะรายการในหน้านี้ รอบการยืมนี้อาจมีรายการต่อ{maybeEarlier ? 'จากหน้าก่อน' : ''}{maybeEarlier && maybeLater ? ' และ' : ''}{maybeLater ? 'ในหน้าถัดไป' : ''}
+                  </p>
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                   {group.items.map((loan) => {
                     const isOpen = !loan.returned_at;
-                    const equipName = loan.equipment?.name || loan.equipment_name || `อุปกรณ์ #${loan.equipment_id ?? loan.equipment?.id ?? '-'}`;
+                    const equipName = loan.equipment?.name || loan.equipment_name || (loan.equipment === null ? `อุปกรณ์ถูกลบแล้ว (#${loan.equipment_id ?? '-'})` : `อุปกรณ์ #${loan.equipment_id ?? loan.equipment?.id ?? '-'}`);
                     return (
                       <div
                         key={loan.id}
@@ -255,7 +293,7 @@ const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
                             background: isOpen ? 'var(--bg-warning-subtle)' : 'var(--bg-success-subtle)',
                             color: isOpen ? 'var(--accent-warning)' : 'var(--accent-success)'
                           }}>
-                            {isOpen ? 'ยืมอยู่' : `คืนแล้ว ${formatDateTime(loan.returned_at) || ''}`}
+                            {isOpen ? 'ยังไม่คืน' : `คืนแล้ว ${formatDateTime(loan.returned_at) || ''}`}
                           </span>
                           {isOpen && (() => {
                             // Not logged in yet: keep the button active so clicking
@@ -300,6 +338,7 @@ const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
       {!loading && pagination.totalPages > 1 && (
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', padding: '1.5rem' }}>
           <button
+            aria-label="หน้าก่อน"
             disabled={currentPage === 1}
             onClick={() => setCurrentPage(prev => prev - 1)}
             style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.3 : 1 }}
@@ -310,6 +349,7 @@ const EquipmentLoanHistory = ({ token, user, onRequireLogin }) => {
             หน้า <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{currentPage}</span> จาก <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.totalPages}</span>
           </span>
           <button
+            aria-label="หน้าถัดไป"
             disabled={currentPage === pagination.totalPages}
             onClick={() => setCurrentPage(prev => prev + 1)}
             style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === pagination.totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === pagination.totalPages ? 0.3 : 1 }}

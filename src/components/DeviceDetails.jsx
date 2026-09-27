@@ -4,7 +4,7 @@ import toast from 'react-hot-toast';
 import { ChevronLeft, Share2, Globe, Shield, Cpu, Users, ArrowRight, Loader2, Search, RefreshCw, Clock, CalendarDays, CalendarRange, Activity, Calendar, FileSpreadsheet, Boxes, X } from 'lucide-react';
 import AvailabilityHistoryChart from './AvailabilityHistoryChart';
 import * as XLSX from 'xlsx';
-import { normalizeLiveStatus, LIVE_STATUS_META } from './deviceStatus';
+import { normalizeLiveStatus, LIVE_STATUS_META, formatAge } from './deviceStatus';
 import './DeviceDetails.css';
 
 // Matches the status badge colors used in OfficeEquipmentManagement.jsx
@@ -40,6 +40,7 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
   const [refreshingStatus, setRefreshingStatus] = useState(false);
   const [statusError, setStatusError] = useState('');
   const [scanError, setScanError] = useState('');
+  const [probeInfo, setProbeInfo] = useState(null);
   // Live per-IP check results for the client list table, keyed by ip_address.
   // Kept separate from the scanned `last_online` timestamps -- this is an
   // on-demand real-time probe (GET /api/test/check-ip/:ip), not tied to scan freshness.
@@ -126,12 +127,21 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
   const handleManualStatusCheck = async () => {
     setRefreshingStatus(true);
     try {
+      // POST: a check writes the measurement and may alert; GET is deprecated.
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latency/check/${deviceId}`, {
+        method: 'POST',
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      // After checking, re-fetch the latest metrics to update UI
-      if (!(await fetchRealtimeStats())) return;
+      const body = await response.json().catch(() => null);
+      const checked = body?.data && typeof body.data === 'object' ? body.data : null;
+      if (checked && (checked.live_status || typeof checked.alive === 'boolean')) {
+        setStatusError('');
+        setRealtimeStats(normalizeLiveStatus(checked));
+        setProbeInfo({ probedIp: checked.probed_ip || null, attempts: Number.isFinite(Number(checked.attempts)) ? Number(checked.attempts) : null });
+      } else if (!(await fetchRealtimeStats())) {
+        return;
+      }
     } catch (error) {
       console.error('Error checking device status:', error);
       setStatusError('ตรวจสอบสถานะไม่สำเร็จ — แสดงผลเดิม');
@@ -578,7 +588,11 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
               ? <>ตรวจวัดล่าสุด: {new Date(realtimeStats.lastUpdated).toLocaleString('th-TH')}</>
               : realtimeStats.status === 'loading' ? 'กำลังโหลด...' : 'ไม่ทราบเวลาตรวจวัดล่าสุด'}
           </p>
-          {realtimeStats.status === 'unknown' && !statusError && <p className="dd-status-note">ไม่มีผลตรวจล่าสุดของอุปกรณ์นี้ในระบบ จึงยังไม่ระบุว่าออนไลน์หรือขัดข้อง</p>}
+          {realtimeStats.status === 'unknown' && !statusError && (realtimeStats.stale && realtimeStats.lastMeasured
+            ? <p className="dd-status-note">ผลวัดล่าสุดเป็น{realtimeStats.lastMeasured === 'online' ? 'ออนไลน์' : 'ขัดข้อง'}{realtimeStats.ageSeconds !== null && ` เมื่อ ${formatAge(realtimeStats.ageSeconds)} ก่อน`} ซึ่งเก่ากว่าเกณฑ์ของระบบ จึงยังไม่ถือเป็นสถานะปัจจุบัน (ช่วง 00:00–05:00 ระบบหยุดตรวจอัตโนมัติ) — กด "ตรวจสอบสถานะตอนนี้" เพื่อวัดใหม่</p>
+            : <p className="dd-status-note">ไม่มีผลตรวจล่าสุดของอุปกรณ์นี้ในระบบ จึงยังไม่ระบุว่าออนไลน์หรือขัดข้อง</p>)}
+          {probeInfo?.probedIp === 'wan_ip_fgt' && <p className="dd-status-note">ตรวจครั้งนี้ Gateway ไม่ตอบ ระบบจึงวัดผ่าน WAN ของ FortiGate แทน</p>}
+          {probeInfo?.attempts > 1 && <p className="dd-status-note">ตอบในการลองครั้งที่ {probeInfo.attempts}</p>}
           {statusError && <p className="dd-status-error" role="alert">{statusError}</p>}
           <dl className="dd-status-metrics">
             <div><dt>Latency ล่าสุด</dt><dd>{realtimeStats.latency !== null ? `${realtimeStats.latency.toFixed(1)} ms` : '—'}</dd></div>

@@ -126,7 +126,7 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => 
   // "System Status" anymore. null fields (not 0) mean "no data for that
   // count yet", and are rendered as "—", never coerced to 0.
   const [networkStatus, setNetworkStatus] = useState({
-    total: null, online: null, offline: null, loading: true, error: '', lastUpdated: null,
+    total: null, online: null, offline: null, unknown: null, loading: true, error: '', lastUpdated: null,
   });
   const controllerRef = useRef(null);
 
@@ -143,8 +143,14 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => 
       if (!result.success || !result.data) throw new Error('bad shape');
       if (controllerRef.current !== controller) return;
       const toCount = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+      // `live` counts only readings still fresh (older ones are unknown);
+      // the top-level online/offline also count stale readings.
+      const live = result.data.live && typeof result.data.live === 'object' ? result.data.live : null;
       setNetworkStatus({
-        total: toCount(result.data.total), online: toCount(result.data.online), offline: toCount(result.data.offline),
+        total: toCount(result.data.total),
+        online: toCount(live ? live.online : result.data.online),
+        offline: toCount(live ? live.offline : result.data.offline),
+        unknown: live ? toCount(live.unknown) : null,
         loading: false, error: '', lastUpdated: new Date(),
       });
     } catch (err) {
@@ -566,6 +572,9 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => 
                         <span>ขัดข้อง</span>
                       </a>
                     </div>
+                    {networkStatus.unknown > 0 && (
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.4rem' }}>ไม่ทราบสถานะ {fmtCount(networkStatus.unknown)} (ยังไม่มีผลวัดล่าสุด)</div>
+                    )}
                     {networkStatus.error && (
                       <div style={{ fontSize: '0.65rem', color: 'var(--accent-warning)', marginTop: '0.4rem' }}>ข้อมูลจากครั้งก่อน รีเฟรชล่าสุดไม่สำเร็จ</div>
                     )}
