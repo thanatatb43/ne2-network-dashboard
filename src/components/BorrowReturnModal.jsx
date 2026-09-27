@@ -1,21 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { X, Loader2, Repeat, ArrowLeftRight } from 'lucide-react';
+import { ArrowLeftRight, Loader2, Repeat } from 'lucide-react';
+import ModalFrame from './common/ModalFrame.jsx';
+import ConfirmDialog from './equipment-form/ConfirmDialog.jsx';
 
+const API = import.meta.env.VITE_API_BASE_URL;
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
-// due_date is a full timestamp now (not just a date), so it can carry a
-// return TIME too. <input type="datetime-local"> gives back a naive
-// "YYYY-MM-DDTHH:mm" string with no timezone info -- rather than let the
-// browser's own guess decide what that means, treat it explicitly as
-// Thailand local time (+07:00), matching what the backend expects and
-// avoiding a silently-wrong due time on any client whose OS clock isn't
-// set to Asia/Bangkok.
-const toBangkokIso = (datetimeLocalValue) => {
-  if (!datetimeLocalValue) return '';
-  return `${datetimeLocalValue}:00+07:00`;
-};
+// <input type="datetime-local"> has no timezone; the backend expects
+// Thailand local time, so it is sent explicitly as +07:00.
+const toBangkokIso = (value) => (value ? `${value}:00+07:00` : '');
 
 const formatDueDate = (value) => {
   if (!value) return null;
@@ -23,243 +17,171 @@ const formatDueDate = (value) => {
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
 };
 
-const inputStyle = {
-  width: '100%',
-  padding: '0.7rem',
-  borderRadius: '0.5rem',
-  border: '1px solid var(--input-border)',
-  background: 'var(--input-bg)',
-  color: 'var(--text-primary)',
-  fontSize: '0.9rem',
-  outline: 'none'
-};
+const EMPTY_BORROW = { name: '', empId: '', contact: '', due: '', notes: '' };
 
-const fieldWrap = { display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.9rem' };
-const labelStyle = { fontSize: '0.8rem', color: 'var(--text-secondary)' };
-
-// Shared by the equipment list (StockManagement) and the equipment detail
-// page -- fetches whether this item currently has an open loan
-// (returned_at not set) and shows the matching form: borrow if free,
-// return if not. Requires the caller to have already confirmed the user is
-// logged in (both actions need auth); this component doesn't itself
-// redirect to login.
+// Borrow if the item is free, return if it has an open loan. The caller has
+// already confirmed the user is logged in.
 const BorrowReturnModal = ({ equipmentId, equipmentName, token, onClose, onChanged }) => {
-  const [loadingStatus, setLoadingStatus] = useState(true);
-  const [openLoan, setOpenLoan] = useState(null);
+  const id = useId();
+  const [status, setStatus] = useState({ state: 'loading', loan: null });
+  const [attempt, setAttempt] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-
-  const [borrowerName, setBorrowerName] = useState('');
-  const [borrowerEmpId, setBorrowerEmpId] = useState('');
-  const [borrowerContact, setBorrowerContact] = useState('');
-  const [dueDate, setDueDate] = useState('');
-  const [borrowNotes, setBorrowNotes] = useState('');
-
-  const [returnedAt, setReturnedAt] = useState(todayStr());
+  const [borrow, setBorrow] = useState(EMPTY_BORROW);
+  const [returnedAt, setReturnedAt] = useState(todayStr);
   const [returnNotes, setReturnNotes] = useState('');
+  const [errors, setErrors] = useState({});
+  const [submitError, setSubmitError] = useState('');
+  const [confirmClose, setConfirmClose] = useState(false);
+  const bodyRef = useRef(null);
+  const errorRef = useRef(null);
+
+  // Content swaps (loading -> form, submit -> error) would otherwise drop
+  // focus to <body> while the dialog is still open.
+  useEffect(() => {
+    if (status.state === 'ready') bodyRef.current?.querySelector('input, textarea')?.focus();
+  }, [status.state]);
+  useEffect(() => { if (submitError) errorRef.current?.focus(); }, [submitError]);
 
   useEffect(() => {
-    const fetchStatus = async () => {
-      setLoadingStatus(true);
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${equipmentId}/loans`);
-        const result = await res.json();
-        const loans = result.data || result;
-        const open = Array.isArray(loans) ? loans.find(l => !l.returned_at) : null;
-        setOpenLoan(open || null);
-      } catch (err) {
-        console.error('Failed to load loan status:', err);
-        toast.error('ไม่สามารถตรวจสอบสถานะการยืมได้');
-      } finally {
-        setLoadingStatus(false);
-      }
-    };
-    fetchStatus();
-  }, [equipmentId]);
+    const controller = new AbortController();
+    fetch(`${API}/api/office-equipment/${equipmentId}/loans`, { signal: controller.signal })
+      .then(async res => {
+        const body = await res.json().catch(() => null);
+        const loans = Array.isArray(body) ? body : body?.data;
+        if (!res.ok || !Array.isArray(loans)) throw new Error('bad response');
+        setStatus({ state: 'ready', loan: loans.find(l => l && !l.returned_at) || null });
+      })
+      // Unknown loan state must not fall through to the borrow form.
+      .catch(() => { if (!controller.signal.aborted) setStatus({ state: 'error', loan: null }); });
+    return () => controller.abort();
+  }, [equipmentId, attempt]);
 
-  const handleBorrow = async (e) => {
-    e.preventDefault();
-    if (!borrowerName.trim()) {
-      toast.error('กรุณากรอกชื่อผู้ยืม');
-      return;
-    }
+  const recheck = () => { setStatus({ state: 'loading', loan: null }); setSubmitError(''); setAttempt(n => n + 1); };
+  const openLoan = status.loan;
+  const dirty = openLoan
+    ? returnNotes.trim() !== '' || returnedAt !== todayStr()
+    : Object.values(borrow).some(v => v.trim() !== '');
 
+  const requestClose = useCallback(() => {
+    if (submitting) return;
+    if (dirty) setConfirmClose(true); else onClose();
+  }, [submitting, dirty, onClose]);
+
+  const send = async (path, params, successText) => {
     setSubmitting(true);
+    setSubmitError('');
     try {
-      const params = new URLSearchParams();
-      params.append('borrower_name', borrowerName.trim());
-      params.append('borrower_emp_id', borrowerEmpId.trim());
-      params.append('borrower_contact', borrowerContact.trim());
-      params.append('due_date', toBangkokIso(dueDate));
-      params.append('notes', borrowNotes.trim());
-
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${equipmentId}/borrow`, {
+      const res = await fetch(`${API}/api/office-equipment/${equipmentId}/${path}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Bearer ${token}` },
         body: params.toString()
       });
-      const result = await res.json();
-      if (res.ok) {
-        toast.success(result.message || 'บันทึกการยืมสำเร็จ');
-        onChanged && onChanged();
-      } else {
-        toast.error(result.message || result.error || 'บันทึกการยืมไม่สำเร็จ');
+      const body = await res.json().catch(() => null);
+      if (!res.ok || body?.success === false) {
+        const message = res.status === 401 ? 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่' : res.status === 403 ? 'คุณไม่มีสิทธิ์ดำเนินการนี้' : body?.message || body?.error || 'บันทึกไม่สำเร็จ';
+        setSubmitError(message);
+        return;
       }
-    } catch (err) {
-      console.error('Failed to borrow equipment:', err);
-      toast.error('เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์');
+      toast.success(body?.message || successText);
+      onChanged && onChanged();
+    } catch {
+      setSubmitError('ไม่ได้รับคำตอบจากเซิร์ฟเวอร์ ไม่ทราบว่าบันทึกสำเร็จหรือไม่ — กด "ตรวจสอบสถานะอีกครั้ง" ก่อนบันทึกซ้ำ');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleReturn = async (e) => {
+  const handleBorrow = (e) => {
     e.preventDefault();
-    setSubmitting(true);
-    try {
-      const params = new URLSearchParams();
-      params.append('returned_at', returnedAt);
-      params.append('notes', returnNotes.trim());
-
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${equipmentId}/return`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': `Bearer ${token}`
-        },
-        body: params.toString()
-      });
-      const result = await res.json();
-      if (res.ok) {
-        toast.success(result.message || 'บันทึกการคืนสำเร็จ');
-        onChanged && onChanged();
-      } else {
-        // e.g. 400 when there's no open loan (already returned by someone else meanwhile)
-        toast.error(result.message || result.error || 'บันทึกการคืนไม่สำเร็จ');
-      }
-    } catch (err) {
-      console.error('Failed to return equipment:', err);
-      toast.error('เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์');
-    } finally {
-      setSubmitting(false);
-    }
+    if (!borrow.name.trim()) { setErrors({ name: 'กรุณากรอกชื่อผู้ยืม' }); document.getElementById(`${id}-name`)?.focus(); return; }
+    setErrors({});
+    const p = new URLSearchParams();
+    p.append('borrower_name', borrow.name.trim());
+    p.append('borrower_emp_id', borrow.empId.trim());
+    p.append('borrower_contact', borrow.contact.trim());
+    p.append('due_date', toBangkokIso(borrow.due));
+    p.append('notes', borrow.notes.trim());
+    send('borrow', p, 'บันทึกการยืมสำเร็จ');
   };
+
+  const handleReturn = (e) => {
+    e.preventDefault();
+    if (!returnedAt) { setErrors({ returned: 'กรุณาเลือกวันที่คืน' }); document.getElementById(`${id}-returned`)?.focus(); return; }
+    setErrors({});
+    const p = new URLSearchParams();
+    p.append('returned_at', returnedAt);
+    p.append('notes', returnNotes.trim());
+    send('return', p, 'บันทึกการคืนสำเร็จ');
+  };
+
+  const field = (key, label, input, { required, hint } = {}) => (
+    <div className={`mf-field${errors[key] ? ' is-invalid' : ''}`}>
+      <label htmlFor={`${id}-${key}`}>{label}{required && <span aria-hidden="true" className="br-required"> *</span>}{required && <span className="mf-sr-only"> (จำเป็น)</span>}</label>
+      {input}
+      {hint && <p className="mf-meta" id={`${id}-${key}-hint`}>{hint}</p>}
+      {errors[key] && <p className="mf-field-error" id={`${id}-${key}-error`}>{errors[key]}</p>}
+    </div>
+  );
+  const bind = (key) => ({
+    id: `${id}-${key}`,
+    value: borrow[key],
+    onChange: (e) => { setBorrow(prev => ({ ...prev, [key]: e.target.value })); if (errors[key]) setErrors({}); },
+    'aria-invalid': errors[key] ? 'true' : undefined,
+    'aria-describedby': errors[key] ? `${id}-${key}-error` : undefined
+  });
+
+  const title = status.state !== 'ready' ? 'ยืม / คืนอุปกรณ์' : openLoan ? 'คืนอุปกรณ์' : 'ยืมอุปกรณ์';
+  const icon = openLoan ? <ArrowLeftRight size={20} aria-hidden="true" /> : <Repeat size={20} aria-hidden="true" />;
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem'
-      }}
-      onClick={() => !submitting && onClose()}
-    >
-      <motion.div
-        initial={{ scale: 0.9, y: 20 }}
-        animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.9, y: 20 }}
-        onClick={(e) => e.stopPropagation()}
-        className="card glass"
-        style={{ padding: '1.5rem', maxWidth: '380px', width: '100%', borderRadius: '0.75rem', maxHeight: '85vh', overflowY: 'auto' }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-          <h3 style={{ margin: 0, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            {loadingStatus ? <Repeat size={18} /> : openLoan ? <ArrowLeftRight size={18} color="var(--accent-warning)" /> : <Repeat size={18} color="var(--accent-primary)" />}
-            {loadingStatus ? 'กำลังตรวจสอบสถานะ...' : openLoan ? 'คืนอุปกรณ์' : 'ยืมอุปกรณ์'}
-          </h3>
-          <button
-            onClick={onClose}
-            disabled={submitting}
-            className="glass"
-            style={{ padding: '0.4rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-secondary)', cursor: submitting ? 'not-allowed' : 'pointer', display: 'flex' }}
-          >
-            <X size={18} />
-          </button>
+    <ModalFrame title={title} icon={icon} subtitle={equipmentName} busy={submitting} guardClose={dirty} onClose={requestClose}>
+      {status.state === 'loading' ? (
+        <p className="mf-state" role="status"><Loader2 size={18} className="animate-spin" aria-hidden="true" /> กำลังตรวจสอบสถานะการยืม...</p>
+      ) : status.state === 'error' ? (
+        <div className="mf-error" role="alert">
+          <p>ตรวจสอบสถานะการยืมไม่สำเร็จ จึงยังไม่แสดงฟอร์มยืมหรือคืน</p>
+          <button type="button" className="mf-button" onClick={recheck}>ลองใหม่</button>
         </div>
-        {equipmentName && (
-          <p style={{ margin: '0 0 1.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{equipmentName}</p>
-        )}
-
-        {loadingStatus ? (
-          <div style={{ padding: '2rem 0', textAlign: 'center' }}>
-            <Loader2 className="animate-spin" size={28} color="var(--accent-primary)" />
-          </div>
-        ) : openLoan ? (
-          <>
-            <div style={{
-              padding: '0.85rem', borderRadius: '0.5rem', background: 'var(--bg-accent-subtle)',
-              fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '1.25rem'
-            }}>
-              กำลังถูกยืมโดย <strong style={{ color: 'var(--text-primary)' }}>{openLoan.borrower_name || '-'}</strong>
-              {openLoan.due_date && <> · กำหนดคืน {formatDueDate(openLoan.due_date)}</>}
+      ) : (
+        <div ref={bodyRef}>
+          {submitError && (
+            <div className="mf-error br-submit-error" role="alert" tabIndex={-1} ref={errorRef}>
+              <p>{submitError}</p>
+              <button type="button" className="mf-button" onClick={recheck} disabled={submitting}>ตรวจสอบสถานะอีกครั้ง</button>
             </div>
-            <form onSubmit={handleReturn}>
-              <div style={fieldWrap}>
-                <label style={labelStyle}>วันที่คืน</label>
-                <input type="date" value={returnedAt} onChange={(e) => setReturnedAt(e.target.value)} style={inputStyle} />
+          )}
+          {openLoan ? (
+            <form onSubmit={handleReturn} noValidate>
+              <p className="br-loan">กำลังถูกยืมโดย <strong>{openLoan.borrower_name || '—'}</strong>{openLoan.due_date && <> · กำหนดคืน {formatDueDate(openLoan.due_date)}</>}</p>
+              {field('returned', 'วันที่คืน', <input type="date" id={`${id}-returned`} value={returnedAt} onChange={e => { setReturnedAt(e.target.value); setErrors({}); }} aria-invalid={errors.returned ? 'true' : undefined} aria-describedby={errors.returned ? `${id}-returned-error` : undefined} />, { required: true })}
+              {field('rnotes', 'หมายเหตุ (ถ้ามี)', <textarea id={`${id}-rnotes`} rows={2} value={returnNotes} onChange={e => setReturnNotes(e.target.value)} />)}
+              <div className="mf-actions">
+                <button type="button" className="mf-button" onClick={requestClose} disabled={submitting}>ยกเลิก</button>
+                <button type="submit" className="mf-button mf-warning" disabled={submitting}>
+                  {submitting ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <ArrowLeftRight size={18} aria-hidden="true" />} {submitting ? 'กำลังบันทึก...' : 'ยืนยันการคืน'}
+                </button>
               </div>
-              <div style={fieldWrap}>
-                <label style={labelStyle}>หมายเหตุ (ถ้ามี)</label>
-                <textarea rows={2} value={returnNotes} onChange={(e) => setReturnNotes(e.target.value)} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
-              </div>
-              <button
-                type="submit"
-                disabled={submitting}
-                style={{
-                  width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: 'none',
-                  background: 'var(--accent-warning)', color: '#fff', fontWeight: 700, fontSize: '0.9rem',
-                  cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
-                }}
-              >
-                {submitting ? <Loader2 size={16} className="animate-spin" /> : <ArrowLeftRight size={16} />}
-                ยืนยันการคืน
-              </button>
             </form>
-          </>
-        ) : (
-          <form onSubmit={handleBorrow}>
-            <div style={fieldWrap}>
-              <label style={labelStyle}>ชื่อผู้ยืม <span style={{ color: 'var(--accent-danger)' }}>*</span></label>
-              <input type="text" required value={borrowerName} onChange={(e) => setBorrowerName(e.target.value)} style={inputStyle} placeholder="ชื่อ-นามสกุลผู้ยืม" />
-            </div>
-            <div style={fieldWrap}>
-              <label style={labelStyle}>รหัสพนักงานผู้ยืม</label>
-              <input type="text" value={borrowerEmpId} onChange={(e) => setBorrowerEmpId(e.target.value)} style={inputStyle} />
-            </div>
-            <div style={fieldWrap}>
-              <label style={labelStyle}>เบอร์ติดต่อผู้ยืม</label>
-              <input type="text" value={borrowerContact} onChange={(e) => setBorrowerContact(e.target.value)} style={inputStyle} />
-            </div>
-            <div style={fieldWrap}>
-              <label style={labelStyle}>กำหนดคืน (วันและเวลา)</label>
-              <input type="datetime-local" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={inputStyle} />
-            </div>
-            <div style={fieldWrap}>
-              <label style={labelStyle}>หมายเหตุ</label>
-              <textarea rows={2} value={borrowNotes} onChange={(e) => setBorrowNotes(e.target.value)} style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }} />
-            </div>
-            <button
-              type="submit"
-              disabled={submitting}
-              style={{
-                width: '100%', padding: '0.75rem', borderRadius: '0.5rem', border: 'none',
-                background: 'var(--accent-primary)', color: '#fff', fontWeight: 700, fontSize: '0.9rem',
-                cursor: submitting ? 'not-allowed' : 'pointer', opacity: submitting ? 0.7 : 1,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
-              }}
-            >
-              {submitting ? <Loader2 size={16} className="animate-spin" /> : <Repeat size={16} />}
-              ยืนยันการยืม
-            </button>
-          </form>
-        )}
-      </motion.div>
-    </motion.div>
+          ) : (
+            <form onSubmit={handleBorrow} noValidate>
+              {field('name', 'ชื่อผู้ยืม', <input type="text" autoComplete="off" placeholder="ชื่อ-นามสกุล" {...bind('name')} />, { required: true })}
+              {field('empId', 'รหัสพนักงานผู้ยืม', <input type="text" autoComplete="off" {...bind('empId')} />)}
+              {field('contact', 'เบอร์ติดต่อผู้ยืม', <input type="tel" autoComplete="off" {...bind('contact')} />)}
+              {field('due', 'กำหนดคืน (วันและเวลา)', <input type="datetime-local" {...bind('due')} />, { hint: 'เวลาประเทศไทย' })}
+              {field('notes', 'หมายเหตุ', <textarea rows={2} {...bind('notes')} />)}
+              <div className="mf-actions">
+                <button type="button" className="mf-button" onClick={requestClose} disabled={submitting}>ยกเลิก</button>
+                <button type="submit" className="mf-button mf-primary" disabled={submitting}>
+                  {submitting ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Repeat size={18} aria-hidden="true" />} {submitting ? 'กำลังบันทึก...' : 'ยืนยันการยืม'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      )}
+      <ConfirmDialog open={confirmClose} title="ทิ้งข้อมูลที่กรอกไว้?" tone="danger" confirmLabel="ทิ้งข้อมูล" cancelLabel="กลับไปกรอกต่อ"
+        message="ข้อมูลในฟอร์มยังไม่ได้บันทึก" onConfirm={() => { setConfirmClose(false); onClose(); }} onCancel={() => setConfirmClose(false)} />
+    </ModalFrame>
   );
 };
 

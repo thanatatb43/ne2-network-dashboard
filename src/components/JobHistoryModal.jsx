@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { X, Loader2, History, ArrowRight } from 'lucide-react';
+import React from 'react';
+import { History, ArrowRight } from 'lucide-react';
+import ModalFrame, { ModalState } from './common/ModalFrame.jsx';
+import useFetchList from './common/useFetchList.js';
 
 const formatDateTime = (value) => {
   if (!value) return null;
@@ -36,121 +37,38 @@ const ChangeLine = ({ label, change }) => {
   if (change === undefined) return null;
   if (change !== null && typeof change === 'object' && ('old' in change || 'new' in change)) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-        <span style={{ color: 'var(--text-secondary)' }}>{label}:</span>
-        <span>{change.old ?? '-'}</span>
-        <ArrowRight size={12} style={{ color: 'var(--text-secondary)' }} />
-        <span style={{ fontWeight: 700 }}>{change.new ?? '-'}</span>
+      <div className="oh-change">
+        <span className="mf-meta">{label}:</span> <span>{change.old ?? '—'}</span>
+        <ArrowRight size={14} aria-label="เปลี่ยนเป็น" /> <strong>{change.new ?? '—'}</strong>
       </div>
     );
   }
   return (
-    <div>
-      <span style={{ color: 'var(--text-secondary)' }}>{label}: </span>
-      <span style={{ fontWeight: 700 }}>{change === null ? '-' : String(change)}</span>
-    </div>
+    <div><span className="mf-meta">{label}: </span><strong>{change === null ? '—' : String(change)}</strong></div>
   );
 };
 
-// Full audit log for one job (GET /:id/history) -- unlike
-// OwnerHistoryModal.jsx (which filters an equipment's log down to just
-// owner-field changes), this shows every entry since a job's history is
-// the point of the feature, not a filtered slice of it.
+// Full audit log for one job (GET /:id/history) -- every entry, unlike the
+// owner-history modal which filters an equipment log.
 const JobHistoryModal = ({ jobId, jobName, token, onClose }) => {
-  const [loading, setLoading] = useState(true);
-  const [entries, setEntries] = useState([]);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    const fetchHistory = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/${jobId}/history`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
-        });
-        const result = await res.json();
-        const list = result.data || result;
-        setEntries(Array.isArray(list) ? list : []);
-      } catch (err) {
-        console.error('Failed to load job history:', err);
-        setError('ไม่สามารถโหลดประวัติของงานนี้ได้');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchHistory();
-  }, [jobId, token]);
-
+  const history = useFetchList(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/${jobId}/history`, { token, errorText: 'โหลดประวัติของงานนี้ไม่สำเร็จ' });
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem'
-      }}
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.9, y: 20 }}
-        animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.9, y: 20 }}
-        onClick={(e) => e.stopPropagation()}
-        className="card glass"
-        style={{ padding: '1.5rem', maxWidth: '520px', width: '100%', borderRadius: '0.75rem', maxHeight: '85vh', overflowY: 'auto' }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
-          <h3 style={{ margin: 0, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <History size={18} /> ประวัติของงาน
-          </h3>
-          <button
-            onClick={onClose}
-            className="glass"
-            style={{ padding: '0.4rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' }}
-          >
-            <X size={18} />
-          </button>
-        </div>
-        {jobName && (
-          <p style={{ margin: '0 0 1.25rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{jobName}</p>
-        )}
-
-        {loading ? (
-          <div style={{ padding: '2rem 0', textAlign: 'center' }}>
-            <Loader2 className="animate-spin" size={28} color="var(--accent-primary)" />
-          </div>
-        ) : error ? (
-          <p style={{ color: 'var(--accent-danger)', fontSize: '0.85rem', textAlign: 'center', padding: '1rem 0' }}>{error}</p>
-        ) : entries.length === 0 ? (
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', textAlign: 'center', padding: '1.5rem 0' }}>ยังไม่มีประวัติของงานนี้</p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {entries.map((entry, i) => {
-              const dataKeys = entry.data && typeof entry.data === 'object' ? Object.keys(entry.data) : [];
-              return (
-                <div key={entry.id || i} className="glass" style={{ padding: '0.9rem', borderRadius: '0.5rem', fontSize: '0.8rem' }}>
-                  <div style={{ fontWeight: 700, marginBottom: '0.4rem', color: 'var(--accent-primary)' }}>
-                    {ACTION_LABELS[entry.action] || entry.action || 'การเปลี่ยนแปลง'}
-                  </div>
-                  {dataKeys.length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginBottom: '0.5rem' }}>
-                      {dataKeys.map(key => (
-                        <ChangeLine key={key} label={FIELD_LABELS[key] || key} change={entry.data[key]} />
-                      ))}
-                    </div>
-                  )}
-                  <div style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    โดย: {entry.user_name || entry.username || '-'} · {formatDateTime(entry.createdAt) || '-'}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </motion.div>
-    </motion.div>
+    <ModalFrame title="ประวัติของงาน" icon={<History size={20} aria-hidden="true" />} subtitle={jobName} size="lg" onClose={onClose}>
+      <ModalState loading={history.loading} error={history.error} onRetry={history.retry} empty={!history.items.length} emptyText="ยังไม่มีประวัติของงานนี้">
+        <ul className="mf-list">
+          {history.items.map((entry, i) => {
+            const dataKeys = entry.data && typeof entry.data === 'object' ? Object.keys(entry.data) : [];
+            return (
+              <li key={entry.id || i}>
+                <strong className="jh-action">{ACTION_LABELS[entry.action] || entry.action || 'การเปลี่ยนแปลง'}</strong>
+                {dataKeys.map(key => <ChangeLine key={key} label={FIELD_LABELS[key] || key} change={entry.data[key]} />)}
+                <p className="mf-meta">โดย {entry.user_name || entry.username || '—'} · {formatDateTime(entry.createdAt) || '—'}</p>
+              </li>
+            );
+          })}
+        </ul>
+      </ModalState>
+    </ModalFrame>
   );
 };
 

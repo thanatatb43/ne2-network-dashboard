@@ -1,70 +1,28 @@
-import React from 'react';
-import { motion } from 'framer-motion';
-import { X, Download } from 'lucide-react';
+import React, { useState } from 'react';
+import { Download, QrCode } from 'lucide-react';
+import ModalFrame from './common/ModalFrame.jsx';
 
-// Shared QR modal for a single office-equipment item -- used from both the
-// Stock Management list and the Computer Management detail view. updatedAt
-// is appended as a cache-busting query param since the backend regenerates
-// the QR image at the SAME url path whenever the record changes, and the
-// browser would otherwise keep serving a stale cached PNG after an edit.
+// Shared QR modal for one office-equipment item. updatedAt busts the cache:
+// the backend regenerates the image at the same URL when the record changes.
 const QrCodeModal = ({ equipmentId, equipmentName, updatedAt, onClose }) => {
   const src = `${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${equipmentId}/qrcode?v=${encodeURIComponent(updatedAt || '')}`;
-
+  const [image, setImage] = useState({ src: '', status: 'loading' });
+  const status = image.src === src ? image.status : 'loading';
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem'
-      }}
-      onClick={onClose}
-    >
-      <motion.div
-        initial={{ scale: 0.9, y: 20 }}
-        animate={{ scale: 1, y: 0 }}
-        exit={{ scale: 0.9, y: 20 }}
-        onClick={(e) => e.stopPropagation()}
-        className="card glass"
-        style={{ padding: '1.5rem', maxWidth: '340px', width: '100%', borderRadius: '0.75rem', textAlign: 'center' }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <h3 style={{ margin: 0, fontSize: '1.05rem' }}>QR Code อุปกรณ์</h3>
-          <button
-            onClick={onClose}
-            className="glass"
-            style={{ padding: '0.4rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' }}
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <img
-          src={src}
-          alt={`QR Code - ${equipmentName}`}
-          style={{ width: '100%', maxWidth: '260px', borderRadius: '0.5rem', background: '#fff', padding: '0.75rem' }}
-        />
-
-        <p style={{ margin: '1rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)', wordBreak: 'break-word' }}>
-          {equipmentName}
-        </p>
-
-        <a
-          href={src}
-          download={`equipment-${equipmentId}-qrcode.png`}
-          className="glass"
-          style={{
-            marginTop: '1.25rem', padding: '0.65rem 1.5rem', borderRadius: '0.5rem',
-            background: 'var(--accent-primary)', color: '#fff', border: 'none', fontWeight: 600,
-            fontSize: '0.85rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center',
-            justifyContent: 'center', gap: '0.5rem', textDecoration: 'none'
-          }}
-        >
-          <Download size={16} /> ดาวน์โหลด
+    <ModalFrame title="QR Code อุปกรณ์" icon={<QrCode size={20} aria-hidden="true" />} subtitle={equipmentName} size="sm" onClose={onClose}>
+      <figure className="qr-figure">
+        {status === 'loading' && <p className="mf-state" role="status">กำลังโหลด QR Code...</p>}
+        {status === 'error' && <p className="mf-error" role="alert">โหลดรูป QR Code ไม่สำเร็จ</p>}
+        <img key={src} src={src} alt={`QR Code ของ ${equipmentName || `อุปกรณ์ #${equipmentId}`}`} hidden={status !== 'ready'}
+          onLoad={() => setImage({ src, status: 'ready' })} onError={() => setImage({ src, status: 'error' })} />
+        <figcaption className="mf-meta">ID: {equipmentId}</figcaption>
+      </figure>
+      <div className="mf-actions">
+        <a className="mf-button mf-primary" href={src} download={`equipment-${equipmentId}-qrcode.png`} aria-disabled={status !== 'ready'} onClick={(e) => { if (status !== 'ready') e.preventDefault(); }}>
+          <Download size={18} aria-hidden="true" /> ดาวน์โหลด
         </a>
-      </motion.div>
-    </motion.div>
+      </div>
+    </ModalFrame>
   );
 };
 

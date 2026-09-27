@@ -1,7 +1,9 @@
 import { useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2 } from 'lucide-react';
-import useDialogFocus from './useDialogFocus.js';
+import useDialogFocus from '../common/useDialogFocus.js';
+import '../ListPage.css';
+import './ConfirmDialog.css';
 
 export function DialogShell({ open, onClose, labelledBy, className = '', children, role = 'dialog' }) {
   const ref = useRef(null);
