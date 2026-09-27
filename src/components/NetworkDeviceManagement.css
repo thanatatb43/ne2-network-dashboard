@@ -1,0 +1,54 @@
+.ndm-page { container: ndm / inline-size; }
+.ndm-page .list-header h2 { margin: 12px 0 0; font-size: clamp(1.375rem, 2.6vw, 1.75rem); line-height: 1.4; }
+.ndm-back { margin-bottom: 4px; }
+.ndm-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 20px; color: var(--text-secondary); text-align: center; }
+.ndm-state p { margin: 0; }
+.ndm-idle { opacity: .35; }
+.ndm-num { text-align: right !important; width: 4rem; }
+.ndm-table .list-table td { white-space: nowrap; padding-top: 8px; padding-bottom: 8px; }
+.ndm-table:focus-visible { outline: 3px solid var(--list-action); outline-offset: -3px; }
+.ndm-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.ndm-host { display: inline-flex; gap: 4px; }
+.ndm-icon { width: 44px; padding: 0; text-decoration: none; }
+.ndm-danger { color: var(--list-danger); }
+.ndm-danger:hover:not(:disabled) { border-color: var(--list-danger); background: var(--bg-danger-subtle); }
+.ndm-cards { display: none; list-style: none; margin: 0; padding: 0; }
+.ndm-cards li { padding: 16px; border-top: 1px solid var(--border-subtle); }
+.ndm-cards .list-name { white-space: normal; max-width: 100%; overflow-wrap: anywhere; line-height: 1.6; }
+.ndm-cards dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 16px; margin: 8px 0 12px; font-size: .9375rem; }
+.ndm-cards dl div { display: contents; }
+.ndm-cards dt { color: var(--text-secondary); }
+.ndm-cards dd { margin: 0; overflow-wrap: anywhere; }
+.ndm-card-actions { justify-content: flex-start; }
+
+.ndm-form h2 { margin: 12px 0 4px; font-size: clamp(1.25rem, 2.2vw, 1.5rem); overflow-wrap: anywhere; }
+.ndm-form > .list-error { margin-top: 12px; }
+.ndm-form > .list-error p { margin: 0; }
+.ndm-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; margin-top: 16px; }
+.ndm-section { min-width: 0; margin: 0; padding: 20px; border: 1px solid var(--border-subtle); border-radius: 16px; background: var(--card-bg); }
+.ndm-section legend { padding: 0 6px; font-weight: 700; }
+.ndm-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.ndm-field { flex: none; }
+.ndm-field input { width: 100%; height: 48px; padding: 10px 12px; box-sizing: border-box; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-size: 1rem; font-weight: 400; }
+.ndm-mono { font-family: ui-monospace, monospace; }
+.ndm-page .list-field.is-invalid input { border-color: var(--list-danger) !important; background: var(--bg-danger-subtle) !important; }
+.ndm-required { color: var(--list-danger); }
+.ndm-hint { margin: 0; font-size: .8125rem; font-weight: 400; color: var(--text-secondary); }
+.ndm-error { margin: 0; font-size: .875rem; color: var(--list-danger); }
+.ndm-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 20px 0; padding: 16px 20px; border: 1px solid var(--border-subtle); border-radius: 16px; background: var(--card-bg); }
+.ndm-actions > div { display: flex; flex-wrap: wrap; gap: 12px; }
+.ndm-actions .list-button { min-width: 140px; }
+
+@container ndm (min-width: 700px) {
+  .ndm-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container ndm (min-width: 1100px) {
+  .ndm-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ndm-actions { position: sticky; bottom: 16px; z-index: 5; box-shadow: 0 4px 20px rgba(0, 0, 0, .1); }
+}
+@container ndm (max-width: 720px) {
+  .ndm-table { display: none; }
+  .ndm-cards { display: block; }
+  .ndm-page .list-toolbar .list-field, .ndm-page .list-toolbar > .list-button { flex: 1 1 100%; }
+  .ndm-actions > div, .ndm-actions .list-button { width: 100%; }
+}

@@ -1,857 +1,443 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
-import { ArrowLeft, Loader2, Edit2, Trash2, Plus, Save, AlertTriangle, ChevronLeft, ChevronRight, Search, ArrowUpDown, ArrowUp, ArrowDown, FileSpreadsheet, Terminal, Copy } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Copy, Edit2, FileSpreadsheet, Loader2, Plus, RefreshCw, Save, Search, Terminal, Trash2 } from 'lucide-react';
+import ConfirmDialog from './equipment-form/ConfirmDialog.jsx';
+import './ListPage.css';
+import './NetworkDeviceManagement.css';
 
-// Some records may already have a protocol prefix saved in the field (e.g. "ssh://172.x.x.x"),
-// which would double up to "ssh://ssh://172.x.x.x" if not stripped before building the link.
-const cleanHost = (value) => (value || '').toString().trim().replace(/^[a-z]+:\/\//i, '');
+const API = import.meta.env.VITE_API_BASE_URL;
+const VIEW_KEY = 'netdev.view.v1';
+const PAGE_SIZES = [10, 25, 50, 100];
+const SORT_KEYS = ['pea_name', 'pea_type', 'gateway', 'province'];
 
-// Clicking a device navigates to DeviceDetails through a different top-level
-// tab in App.jsx, which unmounts NetworkDeviceManagement entirely -- plain
-// useState for the search/filter/sort was wiped out by that navigation, so
-// clicking back landed on a blank/default-filtered list even though the URL
-// itself correctly returned to /management/network/devices. Persisted
-// through sessionStorage instead, same pattern StockManagement.jsx and
-// EquipmentSearch.jsx use for their own filters. currentPage is
-// deliberately NOT persisted -- it depends on which filters are active, and
-// pairing them back up reliably isn't worth the complexity here.
-const SEARCH_KEY = 'netdev_search';
-const TYPE_FILTER_KEY = 'netdev_type_filter';
-const PER_PAGE_KEY = 'netdev_per_page';
-const SORT_KEY = 'netdev_sort';
+// Some records carry a protocol prefix ("ssh://172...") that would double up.
+const cleanHost = (value) => String(value ?? '').trim().replace(/^[a-z]+:\/\//i, '');
+// Real data uses "-" as an empty placeholder.
+const present = (value) => { const v = cleanHost(value); return v && v !== '-' ? v : ''; };
 
-const readSavedSort = () => {
+const SECTIONS = [
+  { title: 'ข้อมูลสำนักงาน', fields: [
+    { name: 'pea_name', label: 'ชื่อสำนักงาน/อุปกรณ์', required: true },
+    { name: 'pea_type', label: 'ประเภทสำนักงาน' },
+    { name: 'province', label: 'จังหวัด' },
+    { name: 'web', label: 'ชื่อที่แสดงบนเว็บ' }
+  ] },
+  { title: 'เครือข่ายหลัก', fields: [
+    { name: 'gateway', label: 'Gateway IP', required: true, mono: true, hint: 'ใช้ตรวจสถานะอุปกรณ์' },
+    { name: 'network_id', label: 'Network ID', mono: true },
+    { name: 'subnet', label: 'Subnet', mono: true, placeholder: 'เช่น /24' },
+    { name: 'dhcp', label: 'DHCP Range', mono: true },
+    { name: 'gateway_backup', label: 'Gateway สำรอง', mono: true }
+  ] },
+  { title: 'วงย่อย', fields: [
+    { name: 'sub_ip1_gateway', label: 'วงย่อย 1 — Gateway', mono: true },
+    { name: 'sub_ip1_subnet', label: 'วงย่อย 1 — Subnet', mono: true },
+    { name: 'sub_ip2_gateway', label: 'วงย่อย 2 — Gateway', mono: true },
+    { name: 'sub_ip2_subnet', label: 'วงย่อย 2 — Subnet', mono: true }
+  ] },
+  { title: 'WAN และ VPN', fields: [
+    { name: 'wan_gateway_mpls', label: 'WAN Gateway MPLS', mono: true },
+    { name: 'wan_ip_fgt', label: 'WAN IP FortiGate', mono: true, hint: 'ใช้ตรวจแทนเมื่อ Gateway ไม่ตอบ' },
+    { name: 'vpn_main', label: 'VPN หลัก', mono: true },
+    { name: 'vpn_backup', label: 'VPN สำรอง', mono: true }
+  ] }
+];
+const FIELDS = SECTIONS.flatMap(s => s.fields);
+// pea_site_id is not edited here but is sent back unchanged in case the
+// backend replaces the whole record on PUT.
+const WRITABLE = [...FIELDS.map(f => f.name), 'pea_site_id'];
+const emptyDraft = () => Object.fromEntries(WRITABLE.map(k => [k, '']));
+const draftFrom = (device) => Object.fromEntries(WRITABLE.map(k => [k, device[k] === null || device[k] === undefined ? '' : String(device[k])]));
+
+const readView = () => {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(SORT_KEY) || 'null');
-    return saved && typeof saved === 'object' ? saved : { key: null, direction: 'asc' };
+    const v = JSON.parse(sessionStorage.getItem(VIEW_KEY)) || {};
+    return {
+      search: typeof v.search === 'string' ? v.search.slice(0, 200) : '',
+      type: typeof v.type === 'string' ? v.type : '',
+      page: Number.isInteger(v.page) && v.page > 0 ? v.page : 1,
+      pageSize: PAGE_SIZES.includes(v.pageSize) ? v.pageSize : 10,
+      sort: SORT_KEYS.includes(v.sort?.key) && ['asc', 'desc'].includes(v.sort?.order) ? v.sort : { key: null, order: 'asc' }
+    };
   } catch {
-    return { key: null, direction: 'asc' };
+    return { search: '', type: '', page: 1, pageSize: 10, sort: { key: null, order: 'asc' } };
+  }
+};
+
+const copyText = async (text) => {
+  try { await navigator.clipboard.writeText(text); return true; } catch {
+    // Clipboard API needs HTTPS; plain-HTTP deployments use execCommand.
+    const area = document.createElement('textarea');
+    area.value = text; area.setAttribute('readonly', ''); area.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(area); area.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch { ok = false; }
+    document.body.removeChild(area);
+    return ok;
   }
 };
 
 const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
-  const [devices, setDevices] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [editingDevice, setEditingDevice] = useState(null);
-  const [formData, setFormData] = useState({});
-  const [actionLoading, setActionLoading] = useState(false);
-  const [deviceToDelete, setDeviceToDelete] = useState(null);
-  const [responseModal, setResponseModal] = useState(null); // { type: 'success' | 'error', message: string }
-
-  // Pagination and search states
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem(SEARCH_KEY) || '');
-  const [devicesPerPage, setDevicesPerPage] = useState(() => Number(sessionStorage.getItem(PER_PAGE_KEY)) || 10);
-  const [selectedType, setSelectedType] = useState(() => sessionStorage.getItem(TYPE_FILTER_KEY) || 'All');
-  const [sortConfig, setSortConfig] = useState(readSavedSort);
-
-  const peaTypes = React.useMemo(() => {
-    const types = new Set(devices.map(d => d.pea_type).filter(Boolean));
-    return ['All', ...Array.from(types).sort()];
-  }, [devices]);
-
-  // Read-only for roles other than super_admin and network_admin
   const canEdit = user?.role === 'super_admin' || user?.role === 'network_admin';
+  const [view] = useState(readView);
+  const [search, setSearch] = useState(view.search);
+  const [type, setType] = useState(view.type);
+  const [page, setPage] = useState(view.page);
+  const [pageSize, setPageSize] = useState(view.pageSize);
+  const [sort, setSort] = useState(view.sort);
+  const [state, setState] = useState({ status: 'loading', devices: [], error: '' });
+  const [editing, setEditing] = useState(null); // null | { id: null|number }
+  const [draft, setDraft] = useState(emptyDraft);
+  const [baseline, setBaseline] = useState(emptyDraft);
+  const [errors, setErrors] = useState({});
+  const [formError, setFormError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [toDelete, setToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const inflight = useRef(null);
+  const formRef = useRef(null);
 
-  const fetchDevices = async () => {
-    setLoading(true);
+  const load = useCallback(async () => {
+    inflight.current?.abort();
+    const controller = new AbortController();
+    inflight.current = controller;
+    const timer = setTimeout(() => controller.abort(), 20000);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/devices`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await response.json();
-      if (result.data) {
-        setDevices(result.data);
-      } else if (Array.isArray(result)) {
-        setDevices(result);
-      }
-    } catch (error) {
-      console.error('Failed to fetch devices:', error);
-      toast.error('Failed to load devices');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDevices();
-  }, []);
-
-  // Opening the edit/add form doesn't change the URL (App.jsx's router has
-  // no route for it), so without this, pressing browser Back while editing
-  // has nothing of ours to pop and falls straight through to whatever page
-  // came before this one (e.g. /management/network) -- skipping right past
-  // the device list the user actually expects to land back on. Pushing a
-  // marker entry (same pathname, just a new history slot) on entering the
-  // form gives Back something to consume first; the popstate listener below
-  // then closes the form locally instead of letting the app's own router
-  // navigate away.
-  useEffect(() => {
-    const onPopState = () => {
-      if (editingDevice) {
-        setEditingDevice(null);
-        setFormData({});
-      }
-    };
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, [editingDevice]);
-
-  const handleEditClick = (device) => {
-    if (!canEdit) return;
-    window.history.pushState({ ndmEditing: true }, '', window.location.pathname);
-    setEditingDevice(device);
-    setFormData(device);
-  };
-
-  const handleCopyIp = async (ip) => {
-    try {
-      await navigator.clipboard.writeText(ip);
-      toast.success(`คัดลอก ${ip} แล้ว`);
+      const res = await fetch(`${API}/api/devices`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+      const body = await res.json().catch(() => null);
+      const list = Array.isArray(body) ? body : body?.data;
+      if (!res.ok || body?.success === false || !Array.isArray(list)) throw new Error(body?.message || `HTTP ${res.status}`);
+      if (inflight.current !== controller) return true;
+      setState({ status: 'ready', devices: list.filter(Boolean), error: '' });
+      return true;
     } catch (err) {
-      console.error('Copy failed:', err);
-      toast.error('คัดลอกไม่สำเร็จ');
+      if (inflight.current !== controller) return false;
+      const message = err.name === 'AbortError' ? 'หมดเวลารอการตอบกลับจากเซิร์ฟเวอร์' : err.message || 'โหลดข้อมูลไม่สำเร็จ';
+      setState(s => ({ ...s, status: s.devices.length ? 'stale' : 'error', error: message }));
+      return false;
+    } finally {
+      clearTimeout(timer);
     }
-  };
+  }, [token]);
 
-  const handleAddClick = () => {
+  useEffect(() => {
+    load();
+    return () => { const c = inflight.current; inflight.current = null; c?.abort(); };
+  }, [load]);
+
+  useEffect(() => {
+    try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ search, type, page, pageSize, sort })); } catch { /* not remembered */ }
+  }, [search, type, page, pageSize, sort]);
+
+  const dirty = editing && WRITABLE.some(k => draft[k] !== baseline[k]);
+
+  // The form has no URL of its own: a marker history entry lets browser Back
+  // close the form instead of leaving the page.
+  useEffect(() => {
+    if (!editing) return undefined;
+    const onPop = () => { setEditing(null); setConfirmDiscard(false); };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [editing]);
+
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
+
+  const openForm = (device) => {
     if (!canEdit) return;
     window.history.pushState({ ndmEditing: true }, '', window.location.pathname);
-    setEditingDevice({ isNew: true });
-    setFormData({
-      pea_type: "",
-      pea_name: "",
-      province: "",
-      web: "",
-      gateway: "",
-      dhcp: "",
-      network_id: "",
-      subnet: "",
-      sub_ip1_gateway: "",
-      sub_ip1_subnet: "",
-      sub_ip2_gateway: "",
-      sub_ip2_subnet: "",
-      wan_gateway_mpls: "",
-      wan_ip_fgt: "",
-      vpn_main: "",
-      vpn_backup: "",
-      gateway_backup: ""
-    });
+    const next = device ? draftFrom(device) : emptyDraft();
+    setDraft(next); setBaseline(next); setErrors({}); setFormError('');
+    setEditing({ id: device ? device.id : null, name: device?.pea_name || '' });
   };
 
-  // Closes the form when the USER explicitly does so (Cancel button, or
-  // after a successful Save) -- as opposed to the popstate listener above,
-  // which closes it in response to Back already having happened. Pops the
-  // marker entry pushed on open so a later Back doesn't land on a phantom
-  // history slot that does nothing.
-  const handleCancelEdit = () => {
-    setEditingDevice(null);
-    setFormData({});
-    if (window.history.state?.ndmEditing) {
-      window.history.back();
-    }
+  const closeForm = () => {
+    setEditing(null);
+    setConfirmDiscard(false);
+    if (window.history.state?.ndmEditing) window.history.back();
   };
 
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
+  const requestClose = () => (dirty ? setConfirmDiscard(true) : closeForm());
 
-  const handleSave = async (e) => {
+  const save = async (e) => {
     e.preventDefault();
-    if (!canEdit) return;
-    
-    setActionLoading(true);
-    const isNew = editingDevice.isNew;
-    const url = isNew 
-      ? `${import.meta.env.VITE_API_BASE_URL}/api/devices` 
-      : `${import.meta.env.VITE_API_BASE_URL}/api/devices/${editingDevice.id}`;
-    
+    if (!canEdit || saving) return;
+    const found = {};
+    if (!draft.pea_name.trim()) found.pea_name = 'กรุณากรอกชื่อสำนักงาน/อุปกรณ์';
+    if (!draft.gateway.trim()) found.gateway = 'กรุณากรอก Gateway IP';
+    setErrors(found);
+    const first = FIELDS.find(f => found[f.name]);
+    if (first) { formRef.current?.querySelector(`#ndm-${first.name}`)?.focus(); return; }
+    setSaving(true);
+    setFormError('');
     try {
-      // Use URLSearchParams to match qs.stringify behavior (application/x-www-form-urlencoded)
       const params = new URLSearchParams();
-      Object.keys(formData).forEach(key => {
-        if (key !== 'index' && formData[key] !== null && formData[key] !== undefined) {
-          params.append(key, formData[key]);
-        }
-      });
-
-      const response = await fetch(url, {
-        method: isNew ? 'POST' : 'PUT',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': `Bearer ${token}`
-        },
+      WRITABLE.forEach(k => { if (k !== 'pea_site_id' || draft.pea_site_id) params.append(k, draft[k].trim()); });
+      const res = await fetch(editing.id == null ? `${API}/api/devices` : `${API}/api/devices/${editing.id}`, {
+        method: editing.id == null ? 'POST' : 'PUT',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Bearer ${token}` },
         body: params.toString()
       });
-      
-      const result = await response.json();
-      
-      if (response.ok) {
-        setResponseModal({
-          type: 'success',
-          message: result.message || (isNew ? 'เพิ่มอุปกรณ์สำเร็จ' : 'แก้ไขข้อมูลอุปกรณ์สำเร็จ')
-        });
-        await fetchDevices();
-        handleCancelEdit();
-      } else {
-        setResponseModal({
-          type: 'error',
-          message: result.message || result.error || 'บันทึกข้อมูลไม่สำเร็จ กรุณาตรวจสอบข้อมูลอีกครั้ง'
-        });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || body?.success === false) {
+        setFormError(res.status === 401 ? 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่' : res.status === 403 ? 'คุณไม่มีสิทธิ์แก้ไขอุปกรณ์เครือข่าย' : body?.message || body?.error || 'บันทึกข้อมูลไม่สำเร็จ');
+        return;
       }
-    } catch (err) {
-      console.error('Error saving device:', err);
-      setResponseModal({
-        type: 'error',
-        message: 'เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์'
-      });
+      toast.success(body?.message || (editing.id == null ? 'เพิ่มอุปกรณ์สำเร็จ' : 'บันทึกข้อมูลสำเร็จ'));
+      closeForm();
+      if (!(await load())) toast.error('บันทึกแล้ว แต่โหลดรายการใหม่ไม่สำเร็จ — กดรีเฟรช ไม่ต้องบันทึกซ้ำ');
+    } catch {
+      setFormError(editing.id == null
+        ? 'ไม่ได้รับคำตอบจากเซิร์ฟเวอร์ ไม่ทราบว่าเพิ่มสำเร็จหรือไม่ — ตรวจสอบรายการก่อนบันทึกอีกครั้ง'
+        : 'ไม่ได้รับคำตอบจากเซิร์ฟเวอร์ ไม่ทราบว่าบันทึกสำเร็จหรือไม่ กรุณาลองอีกครั้ง');
     } finally {
-      setActionLoading(false);
+      setSaving(false);
     }
   };
 
   const confirmDelete = async () => {
-    if (!canEdit || !deviceToDelete) return;
-    setActionLoading(true);
+    setDeleting(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/devices/${deviceToDelete.id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-      
-      const result = await response.json();
-      
-      if (response.ok) {
-        setResponseModal({
-          type: 'success',
-          message: result.message || 'ลบอุปกรณ์สำเร็จ'
-        });
-        await fetchDevices();
-      } else {
-        setResponseModal({
-          type: 'error',
-          message: result.message || result.error || 'ลบอุปกรณ์ไม่สำเร็จ'
-        });
-      }
+      const res = await fetch(`${API}/api/devices/${toDelete.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || body?.success === false) throw new Error(res.status === 403 ? 'คุณไม่มีสิทธิ์ลบอุปกรณ์' : body?.message || 'ลบอุปกรณ์ไม่สำเร็จ');
+      toast.success(body?.message || 'ลบอุปกรณ์สำเร็จ');
+      setToDelete(null);
+      if (!(await load())) toast.error('ลบแล้ว แต่โหลดรายการใหม่ไม่สำเร็จ');
     } catch (err) {
-      console.error('Error deleting device:', err);
-      setResponseModal({
-        type: 'error',
-        message: 'เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์'
-      });
+      toast.error(err.message);
     } finally {
-      setActionLoading(false);
-      setDeviceToDelete(null);
+      setDeleting(false);
     }
   };
 
-  const requestSort = (key) => {
-    let direction = 'asc';
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    } else if (sortConfig.key === key && sortConfig.direction === 'desc') {
-      direction = null;
-      key = null;
-    }
-    setSortConfig({ key, direction });
-  };
-
-  // Filter logic
-  const filteredDevices = React.useMemo(() => {
-    let result = devices.filter(device => {
-      const matchesSearch = !searchTerm || (
-        (device.pea_name && String(device.pea_name).toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (device.pea_type && String(device.pea_type).toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (device.gateway && String(device.gateway).toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (device.province && String(device.province).toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (device.network_id && String(device.network_id).toLowerCase().includes(searchTerm.toLowerCase()))
-      );
-
-      const matchesType = selectedType === 'All' || device.pea_type === selectedType;
-
-      return matchesSearch && matchesType;
+  const devices = state.devices;
+  const types = useMemo(() => {
+    const set = new Set(devices.map(d => d.pea_type).filter(Boolean));
+    if (type) set.add(type);
+    return [...set].sort((a, b) => a.localeCompare(b, 'th'));
+  }, [devices, type]);
+  const q = search.trim().toLocaleLowerCase();
+  const filtered = useMemo(() => {
+    const list = devices.filter(d => (!type || d.pea_type === type) && (!q || ['pea_name', 'pea_type', 'gateway', 'province', 'network_id', 'wan_ip_fgt'].some(k => String(d[k] ?? '').toLocaleLowerCase().includes(q))));
+    if (!sort.key) return list;
+    return [...list].sort((a, b) => {
+      const r = String(a[sort.key] ?? '').localeCompare(String(b[sort.key] ?? ''), 'th', { numeric: true });
+      return sort.order === 'asc' ? r : -r;
     });
+  }, [devices, type, q, sort]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const rows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const hasFilter = Boolean(q || type);
+  const clearFilters = () => { setSearch(''); setType(''); setPage(1); };
 
-    if (sortConfig.key) {
-      result.sort((a, b) => {
-        const aValue = (a[sortConfig.key] || '').toString().toLowerCase();
-        const bValue = (b[sortConfig.key] || '').toString().toLowerCase();
+  const toggleSort = (key) => {
+    setSort(prev => (prev.key !== key ? { key, order: 'asc' } : prev.order === 'asc' ? { key, order: 'desc' } : { key: null, order: 'asc' }));
+    setPage(1);
+  };
+  const sortHeader = (key, label) => (
+    <th scope="col" aria-sort={sort.key === key ? (sort.order === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className="list-sort" onClick={() => toggleSort(key)}>
+        {label}{sort.key === key ? (sort.order === 'asc' ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />) : <ArrowUpDown size={14} aria-hidden="true" className="ndm-idle" />}
+      </button>
+    </th>
+  );
 
-        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
-
-    return result;
-  }, [devices, searchTerm, selectedType, sortConfig]);
-
-  // Pagination Logic
-  const indexOfLastDevice = currentPage * devicesPerPage;
-  const indexOfFirstDevice = indexOfLastDevice - devicesPerPage;
-  const currentDevices = filteredDevices.slice(indexOfFirstDevice, indexOfLastDevice);
-  const totalPages = Math.ceil(filteredDevices.length / devicesPerPage);
-
-  // Reset to first page when search changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
-
-  useEffect(() => {
-    sessionStorage.setItem(SEARCH_KEY, searchTerm);
-  }, [searchTerm]);
-  useEffect(() => {
-    sessionStorage.setItem(TYPE_FILTER_KEY, selectedType);
-  }, [selectedType]);
-  useEffect(() => {
-    sessionStorage.setItem(PER_PAGE_KEY, String(devicesPerPage));
-  }, [devicesPerPage]);
-  useEffect(() => {
-    sessionStorage.setItem(SORT_KEY, JSON.stringify(sortConfig));
-  }, [sortConfig]);
-
-  const nextPage = () => {
-    if (currentPage < totalPages) setCurrentPage(currentPage + 1);
+  const exportExcel = () => {
+    if (!devices.length) { toast.error('ไม่มีข้อมูลอุปกรณ์สำหรับส่งออก'); return; }
+    const sheet = XLSX.utils.json_to_sheet(devices.map(d => Object.fromEntries(FIELDS.map(f => [f.label, d[f.name] ?? '-']))));
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, 'อุปกรณ์เครือข่าย');
+    XLSX.writeFile(book, `Device_Management_${new Date().toISOString().split('T')[0]}.xlsx`);
+    toast.success(`ส่งออก Excel ทั้งหมดสำเร็จ (${devices.length} รายการ)`);
   };
 
-  const prevPage = () => {
-    if (currentPage > 1) setCurrentPage(currentPage - 1);
+  const hostActions = (device) => {
+    const hosts = [];
+    const gw = present(device.gateway);
+    const wan = present(device.wan_ip_fgt);
+    if (gw) hosts.push({ label: 'Gateway', value: gw });
+    if (wan && wan !== gw) hosts.push({ label: 'WAN FortiGate', value: wan });
+    return hosts.map(h => (
+      <span key={h.label} className="ndm-host">
+        <a className="list-button ndm-icon" href={`ssh://${h.value}`} aria-label={`SSH ไปยัง ${h.label} ${h.value} ของ ${device.pea_name || ''}`} title={`SSH ${h.label} (${h.value})`}><Terminal size={16} aria-hidden="true" /></a>
+        <button type="button" className="list-button ndm-icon" aria-label={`คัดลอก ${h.label} ${h.value}`} title={`คัดลอก ${h.label} (${h.value})`}
+          onClick={async () => ((await copyText(h.value)) ? toast.success(`คัดลอก ${h.value} แล้ว`) : toast.error('คัดลอกไม่สำเร็จ'))}><Copy size={16} aria-hidden="true" /></button>
+      </span>
+    ));
   };
 
-  // Fields to display in the form
-  const formFields = [
-    { name: 'pea_type', label: 'PEA Type', type: 'text' },
-    { name: 'pea_name', label: 'PEA Name', type: 'text' },
-    { name: 'province', label: 'Province', type: 'text' },
-    { name: 'web', label: 'Web', type: 'text' },
-    { name: 'gateway', label: 'Gateway IP', type: 'text' },
-    { name: 'dhcp', label: 'DHCP Range', type: 'text' },
-    { name: 'network_id', label: 'Network ID', type: 'text' },
-    { name: 'subnet', label: 'Subnet', type: 'text' },
-    { name: 'sub_ip1_gateway', label: 'Sub IP1 Gateway', type: 'text' },
-    { name: 'sub_ip1_subnet', label: 'Sub IP1 Subnet', type: 'text' },
-    { name: 'sub_ip2_gateway', label: 'Sub IP2 Gateway', type: 'text' },
-    { name: 'sub_ip2_subnet', label: 'Sub IP2 Subnet', type: 'text' },
-    { name: 'wan_gateway_mpls', label: 'WAN Gateway MPLS', type: 'text' },
-    { name: 'wan_ip_fgt', label: 'WAN IP FGT', type: 'text' },
-    { name: 'vpn_main', label: 'VPN Main', type: 'text' },
-    { name: 'vpn_backup', label: 'VPN Backup', type: 'text' },
-    { name: 'gateway_backup', label: 'Gateway Backup', type: 'text' }
-  ];
+  const nameCell = (device) => (onDeviceClick
+    ? <a className="list-name" href={`/device/${device.id}`} title={device.pea_name || undefined} onClick={(e) => { if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); onDeviceClick(device.id); }}>{device.pea_name || `อุปกรณ์ #${device.id}`}</a>
+    : <span>{device.pea_name || '—'}</span>);
 
-  // Exports every device fetched for this page (all fields, not just the
-  // columns shown in the table), regardless of the current search/type
-  // filter or page.
-  const exportToExcel = () => {
-    if (devices.length === 0) {
-      toast.error('ไม่มีข้อมูลอุปกรณ์สำหรับส่งออก');
-      return;
-    }
-    const rows = devices.map(device => {
-      const row = {};
-      formFields.forEach(field => { row[field.label] = device[field.name] || '-'; });
-      return row;
-    });
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Devices');
-    XLSX.writeFile(workbook, `Device_Management_${new Date().toISOString().split('T')[0]}.xlsx`);
-    toast.success(`ส่งออก Excel สำเร็จ (${rows.length} รายการ)`);
-  };
+  if (editing) {
+    return (
+      <div className="list-page ndm-page">
+        <button type="button" className="list-button ndm-back" onClick={requestClose} disabled={saving}><ArrowLeft size={18} aria-hidden="true" /> กลับรายการอุปกรณ์</button>
+        <form ref={formRef} className="ndm-form" onSubmit={save} noValidate aria-labelledby="ndm-form-title">
+          <h2 id="ndm-form-title">{editing.id == null ? 'เพิ่มอุปกรณ์เครือข่าย' : `แก้ไขอุปกรณ์เครือข่าย${editing.name ? ` — ${editing.name}` : ''}`}</h2>
+          <p className="list-muted">ช่องที่มี * จำเป็นต้องกรอก · ช่องที่ไม่มีข้อมูลเว้นว่างได้</p>
+          {formError && <div className="list-error" role="alert"><AlertTriangle size={22} aria-hidden="true" /><div><p>{formError}</p></div></div>}
+          <div className="ndm-sections">
+            {SECTIONS.map(section => (
+              <fieldset key={section.title} className="ndm-section">
+                <legend>{section.title}</legend>
+                <div className="ndm-fields">
+                  {section.fields.map(f => {
+                    const value = draft[f.name];
+                    return (
+                      <div key={f.name} className={`list-field ndm-field${value.trim() && value.trim() !== '-' ? ' is-active' : ''}${errors[f.name] ? ' is-invalid' : ''}`}>
+                        <label htmlFor={`ndm-${f.name}`}>{f.label}{f.required && <span className="ndm-required" aria-hidden="true"> *</span>}{f.required && <span className="list-sr-only"> (จำเป็น)</span>}</label>
+                        <input id={`ndm-${f.name}`} type="text" autoComplete="off" value={value} placeholder={f.placeholder} className={f.mono ? 'ndm-mono' : undefined}
+                          aria-invalid={errors[f.name] ? 'true' : undefined} aria-describedby={[errors[f.name] && `ndm-${f.name}-error`, f.hint && `ndm-${f.name}-hint`].filter(Boolean).join(' ') || undefined}
+                          onChange={e => { setDraft(prev => ({ ...prev, [f.name]: e.target.value })); if (errors[f.name]) setErrors(prev => ({ ...prev, [f.name]: undefined })); }} />
+                        {f.hint && <p id={`ndm-${f.name}-hint`} className="ndm-hint">{f.hint}</p>}
+                        {errors[f.name] && <p id={`ndm-${f.name}-error`} className="ndm-error">{errors[f.name]}</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            ))}
+          </div>
+          <div className="ndm-actions">
+            <span className="list-muted">{dirty ? 'มีการแก้ไขที่ยังไม่ได้บันทึก' : ''}</span>
+            <div>
+              <button type="button" className="list-button" onClick={requestClose} disabled={saving}>ยกเลิก</button>
+              <button type="submit" className="list-button list-button-primary" disabled={saving}>
+                {saving ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Save size={18} aria-hidden="true" />} {saving ? 'กำลังบันทึก...' : 'บันทึก'}
+              </button>
+            </div>
+          </div>
+        </form>
+        <ConfirmDialog open={confirmDiscard} title="ทิ้งการแก้ไขที่ยังไม่ได้บันทึก?" tone="danger" confirmLabel="ทิ้งการแก้ไข" cancelLabel="แก้ไขต่อ"
+          message="ข้อมูลที่แก้ไขแต่ยังไม่ได้กดบันทึกจะหายไป" onConfirm={closeForm} onCancel={() => setConfirmDiscard(false)} />
+      </div>
+    );
+  }
 
   return (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 20 }}
-    >
-      <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <button
-            onClick={editingDevice ? handleCancelEdit : onBack}
-            className="glass"
-            style={{ padding: '0.5rem 1rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-          >
-            <ArrowLeft size={16} /> กลับ
-          </button>
-          
-          {!editingDevice && (
-            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-              <div className="glass" style={{
-                display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem',
-                border: selectedType !== 'All' ? '1px solid var(--accent-primary)' : undefined,
-                background: selectedType !== 'All' ? 'var(--bg-accent-subtle)' : undefined
-              }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>ประเภท:</span>
-                <select
-                  value={selectedType}
-                  onChange={(e) => {
-                    setSelectedType(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#0f172a',
-                    outline: 'none',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem',
-                    fontWeight: 700,
-                    paddingRight: '1.5rem',
-                    appearance: 'none',
-                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%230f172a\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right center',
-                    backgroundSize: '1rem'
-                  }}
-                >
-                  {peaTypes.map(type => (
-                    <option key={type} value={type} style={{ background: '#ffffff', color: '#0f172a' }}>{type}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Show:</span>
-                <select
-                  value={devicesPerPage}
-                  onChange={(e) => {
-                    setDevicesPerPage(Number(e.target.value));
-                    setCurrentPage(1);
-                  }}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#0f172a',
-                    outline: 'none',
-                    cursor: 'pointer',
-                    fontSize: '0.85rem',
-                    fontWeight: 700,
-                    paddingRight: '1.5rem',
-                    appearance: 'none',
-                    backgroundImage: 'url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'%230f172a\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'/%3e%3c/svg%3e")',
-                    backgroundRepeat: 'no-repeat',
-                    backgroundPosition: 'right center',
-                    backgroundSize: '1rem'
-                  }}
-                >
-                  <option value="10" style={{ background: '#ffffff', color: '#0f172a' }}>10</option>
-                  <option value="25" style={{ background: '#ffffff', color: '#0f172a' }}>25</option>
-                  <option value="50" style={{ background: '#ffffff', color: '#0f172a' }}>50</option>
-                  <option value="100" style={{ background: '#ffffff', color: '#0f172a' }}>100</option>
-                </select>
-              </div>
-              <div style={{ position: 'relative' }}>
-                <div style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', pointerEvents: 'none' }}>
-                  <Search size={16} />
-                </div>
-                <input
-                  type="text"
-                  placeholder="ค้นหาอุปกรณ์..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  style={{
-                    padding: '0.5rem 1rem 0.5rem 2.5rem',
-                    borderRadius: '0.5rem',
-                    border: searchTerm ? '1px solid var(--accent-primary)' : '1px solid var(--input-border)',
-                    background: searchTerm ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
-                    color: 'var(--text-primary)',
-                    outline: 'none',
-                    width: '200px'
-                  }}
-                />
-              </div>
-
-              <button
-                onClick={exportToExcel}
-                className="glass"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '0.5rem 1rem',
-                  gap: '0.5rem',
-                  borderRadius: '0.5rem',
-                  color: 'var(--accent-primary)',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontWeight: 600
-                }}
-              >
-                <FileSpreadsheet size={18} /> Export Excel
-              </button>
-            </div>
-          )}
+    <div className="list-page ndm-page">
+      <header className="list-header">
+        <div>
+          <button type="button" className="list-button ndm-back" onClick={onBack}><ArrowLeft size={18} aria-hidden="true" /> กลับ</button>
+          <h2>จัดการอุปกรณ์เครือข่าย</h2>
+          <p>ข้อมูลวงเครือข่าย Gateway และ WAN/VPN ของแต่ละสำนักงาน{!canEdit && ' · สิทธิ์ของคุณดูได้อย่างเดียว'}</p>
         </div>
-        
-        {canEdit && !editingDevice && (
-          <button 
-            onClick={handleAddClick} 
-            className="glass" 
-            style={{ padding: '0.5rem 1rem', borderRadius: '0.5rem', color: 'var(--accent-primary)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}
-          >
-            <Plus size={16} /> เพิ่มอุปกรณ์ (Add Device)
-          </button>
-        )}
-      </div>
-
-      {editingDevice ? (
-        <div className="card glass" style={{ padding: '2rem' }}>
-          <h2 style={{ marginTop: 0, marginBottom: '1.5rem', color: 'var(--text-primary)' }}>
-            {editingDevice.isNew ? 'เพิ่มอุปกรณ์เครือข่าย' : 'แก้ไขอุปกรณ์เครือข่าย'}
-          </h2>
-          <form onSubmit={handleSave} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
-            {formFields.map(field => (
-              <div key={field.name} style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{field.label}</label>
-                <input
-                  type={field.type}
-                  name={field.name}
-                  value={formData[field.name] || ''}
-                  onChange={handleInputChange}
-                  style={{
-                    padding: '0.75rem',
-                    borderRadius: '0.5rem',
-                    border: '1px solid var(--input-border)',
-                    background: 'var(--input-bg)',
-                    color: 'var(--text-primary)'
-                  }}
-                  required={field.name === 'pea_name' || field.name === 'gateway'}
-                />
-              </div>
-            ))}
-            <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '1rem', marginTop: '1rem', justifyContent: 'flex-end' }}>
-              <button 
-                type="button" 
-                onClick={handleCancelEdit}
-                className="glass"
-                style={{ padding: '0.75rem 1.5rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
-                disabled={actionLoading}
-              >
-                ยกเลิก (Cancel)
-              </button>
-              <button 
-                type="submit" 
-                style={{ padding: '0.75rem 1.5rem', borderRadius: '0.5rem', border: 'none', background: 'var(--accent-primary)', color: 'white', cursor: 'pointer', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                disabled={actionLoading}
-              >
-                {actionLoading ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} 
-                บันทึก (Save)
-              </button>
-            </div>
-          </form>
+        <div className="list-actions">
+          <button type="button" className="list-button" onClick={load}><RefreshCw size={18} aria-hidden="true" /> รีเฟรช</button>
+          <button type="button" className="list-button" onClick={exportExcel} disabled={!devices.length}><FileSpreadsheet size={18} aria-hidden="true" /> ส่งออก Excel ทั้งหมด</button>
+          {canEdit && <button type="button" className="list-button list-button-primary" onClick={() => openForm(null)}><Plus size={18} aria-hidden="true" /> เพิ่มอุปกรณ์</button>}
         </div>
-      ) : (
-        <div id="management-table-container" className="card glass" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', borderRadius: '0.75rem' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
-                  <th style={{ padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '80px' }}>
-                    Sequence
-                  </th>
-                  <th 
-                    style={{ padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none' }}
-                    onClick={() => requestSort('pea_name')}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      ชื่ออุปกรณ์ (PEA Name) {sortConfig.key === 'pea_name' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}
-                    </div>
-                  </th>
-                  <th 
-                    style={{ padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none' }}
-                    onClick={() => requestSort('pea_type')}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      ประเภท (Type) {sortConfig.key === 'pea_type' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}
-                    </div>
-                  </th>
-                  <th 
-                    style={{ padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none' }}
-                    onClick={() => requestSort('gateway')}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      ไอพี (Gateway) {sortConfig.key === 'gateway' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}
-                    </div>
-                  </th>
-                  <th 
-                    style={{ padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem', cursor: 'pointer', userSelect: 'none' }}
-                    onClick={() => requestSort('province')}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      จังหวัด (Province) {sortConfig.key === 'province' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}
-                    </div>
-                  </th>
-                  <th style={{ padding: '1rem', color: 'var(--text-secondary)', fontSize: '0.85rem', textAlign: 'right' }}>จัดการ (Actions)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-primary)' }}>
-                      <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto' }} />
-                      <p style={{ marginTop: '1rem' }}>Loading devices...</p>
-                    </td>
-                  </tr>
-                ) : devices.length === 0 ? (
-                  <tr>
-                    <td colSpan="6" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                      ไม่พบข้อมูลอุปกรณ์
-                    </td>
-                  </tr>
-                ) : (
-                  currentDevices.map((device, index) => (
-                    <tr key={device.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }} className="table-row-hover">
-                      <td style={{ padding: '1rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                        {indexOfFirstDevice + index + 1}
-                      </td>
-                      <td
-                        onClick={() => onDeviceClick && onDeviceClick(device.id)}
-                        style={{
-                          padding: '1rem',
-                          fontSize: '0.85rem',
-                          fontWeight: 600,
-                          cursor: onDeviceClick ? 'pointer' : 'default',
-                          color: onDeviceClick ? 'var(--accent-primary)' : 'inherit'
-                        }}
-                        title={onDeviceClick ? 'คลิกเพื่อดูรายละเอียดอุปกรณ์นี้' : undefined}
-                      >
-                        {device.pea_name || '-'}
-                      </td>
-                      <td style={{ padding: '1rem', fontSize: '0.85rem' }}>{device.pea_type || '-'}</td>
-                      <td style={{ padding: '1rem', fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--accent-primary)' }}>{device.gateway || '-'}</td>
-                      <td style={{ padding: '1rem', fontSize: '0.85rem' }}>{device.province || '-'}</td>
-                      <td style={{ padding: '1rem', textAlign: 'right' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                          {device.gateway && (
-                            <>
-                              <a
-                                href={`ssh://${cleanHost(device.gateway)}`}
-                                className="glass"
-                                style={{ padding: '0.5rem', border: '1px solid rgba(34, 197, 94, 0.3)', color: '#22c55e', borderRadius: '0.25rem', display: 'inline-flex', textDecoration: 'none' }}
-                                title={`SSH ไปยัง Gateway (${cleanHost(device.gateway)})`}
-                              >
-                                <Terminal size={16} />
-                              </a>
-                              <button
-                                onClick={() => handleCopyIp(cleanHost(device.gateway))}
-                                className="glass"
-                                style={{ padding: '0.5rem', border: '1px solid rgba(34, 197, 94, 0.3)', color: '#22c55e', borderRadius: '0.25rem', cursor: 'pointer' }}
-                                title={`คัดลอก Gateway IP (${cleanHost(device.gateway)})`}
-                              >
-                                <Copy size={16} />
-                              </button>
-                            </>
-                          )}
-                          {device.wan_ip_fgt && cleanHost(device.wan_ip_fgt) !== cleanHost(device.gateway) && (
-                            <>
-                              <a
-                                href={`ssh://${cleanHost(device.wan_ip_fgt)}`}
-                                className="glass"
-                                style={{ padding: '0.5rem', border: '1px solid rgba(20, 184, 166, 0.3)', color: '#14b8a6', borderRadius: '0.25rem', display: 'inline-flex', textDecoration: 'none' }}
-                                title={`SSH ไปยัง WAN IP FGT (${cleanHost(device.wan_ip_fgt)})`}
-                              >
-                                <Terminal size={16} />
-                              </a>
-                              <button
-                                onClick={() => handleCopyIp(cleanHost(device.wan_ip_fgt))}
-                                className="glass"
-                                style={{ padding: '0.5rem', border: '1px solid rgba(20, 184, 166, 0.3)', color: '#14b8a6', borderRadius: '0.25rem', cursor: 'pointer' }}
-                                title={`คัดลอก WAN IP FGT (${cleanHost(device.wan_ip_fgt)})`}
-                              >
-                                <Copy size={16} />
-                              </button>
-                            </>
-                          )}
-                          <button
-                            onClick={() => handleEditClick(device)}
-                            className="glass"
-                            style={{ padding: '0.5rem', border: '1px solid rgba(59, 130, 246, 0.3)', color: '#3b82f6', borderRadius: '0.25rem', cursor: canEdit ? 'pointer' : 'not-allowed', opacity: canEdit ? 1 : 0.5 }}
-                            disabled={!canEdit}
-                            title={canEdit ? "Edit Device" : "Read-only access"}
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            onClick={() => setDeviceToDelete(device)}
-                            className="glass"
-                            style={{ padding: '0.5rem', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', borderRadius: '0.25rem', cursor: canEdit ? 'pointer' : 'not-allowed', opacity: canEdit ? 1 : 0.5 }}
-                            disabled={!canEdit}
-                            title={canEdit ? "Delete Device" : "Read-only access"}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-          
-          {/* Pagination Controls */}
-          {!loading && filteredDevices.length > devicesPerPage && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(255,255,255,0.01)' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Showing {indexOfFirstDevice + 1} to {Math.min(indexOfLastDevice, filteredDevices.length)} of {filteredDevices.length} entries
-              </span>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <button
-                  onClick={prevPage}
-                  disabled={currentPage === 1}
-                  style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.5 : 1, color: 'var(--text-primary)' }}
-                >
-                  <ChevronLeft size={16} />
-                </button>
-                <span style={{ fontSize: '0.85rem', padding: '0 0.5rem' }}>
-                  Page {currentPage} of {totalPages}
-                </span>
-                <button
-                  onClick={nextPage}
-                  disabled={currentPage === totalPages}
-                  style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === totalPages ? 0.5 : 1, color: 'var(--text-primary)' }}
-                >
-                  <ChevronRight size={16} />
-                </button>
-              </div>
-            </div>
-          )}
+      </header>
+
+      {(state.status === 'error' || state.status === 'stale') && (
+        <div className="list-error" role="alert">
+          <AlertTriangle size={24} aria-hidden="true" />
+          <div><strong>{state.status === 'stale' ? 'โหลดรายการใหม่ไม่สำเร็จ แสดงข้อมูลเดิม' : 'โหลดอุปกรณ์เครือข่ายไม่สำเร็จ'}</strong><p>{state.error}</p></div>
+          <button type="button" className="list-button" onClick={load}>ลองใหม่</button>
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
-      <AnimatePresence>
-        {deviceToDelete && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-              background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              zIndex: 9999
-            }}
-            onClick={() => !actionLoading && setDeviceToDelete(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              onClick={(e) => e.stopPropagation()}
-              className="card glass"
-              style={{ padding: '2rem', maxWidth: '400px', width: '90%', textAlign: 'center', border: '1px solid rgba(239, 68, 68, 0.3)' }}
-            >
-              <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem' }}>
-                <AlertTriangle size={24} />
-              </div>
-              <h3 style={{ margin: '0 0 1rem', fontSize: '1.25rem' }}>ยืนยันการลบอุปกรณ์</h3>
-              <p style={{ color: 'var(--text-secondary)', margin: '0 0 2rem', lineHeight: 1.5, fontSize: '0.95rem' }}>
-                คุณแน่ใจหรือไม่ว่าต้องการลบอุปกรณ์ <strong style={{ color: 'var(--text-primary)' }}>{deviceToDelete.pea_name || 'นี้'}</strong>?<br/>การดำเนินการนี้ไม่สามารถย้อนกลับได้
-              </p>
-              
-              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
-                <button
-                  onClick={() => setDeviceToDelete(null)}
-                  disabled={actionLoading}
-                  className="glass"
-                  style={{ padding: '0.75rem 1.5rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', flex: 1 }}
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  onClick={confirmDelete}
-                  disabled={actionLoading}
-                  style={{ padding: '0.75rem 1.5rem', borderRadius: '0.5rem', border: 'none', background: '#ef4444', color: 'white', cursor: 'pointer', fontWeight: 600, flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
-                >
-                  {actionLoading ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-                  ยืนยันการลบ
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <section className="list-panel" aria-label="รายการอุปกรณ์เครือข่าย">
+        <div className="list-toolbar">
+          <label className={`list-field list-search${search ? ' is-active' : ''}`}>
+            <span>ค้นหา</span>
+            <div className="list-search-input">
+              <Search size={18} aria-hidden="true" />
+              <input type="search" value={search} placeholder="ชื่อ ประเภท จังหวัด Gateway หรือ Network ID" onChange={e => { setSearch(e.target.value); setPage(1); }} />
+            </div>
+          </label>
+          <label className={`list-field${type ? ' is-active' : ''}`}>
+            <span>ประเภทสำนักงาน</span>
+            <select value={type} onChange={e => { setType(e.target.value); setPage(1); }}>
+              <option value="">ทั้งหมด</option>
+              {types.map(t => <option key={t} value={t}>{devices.some(d => d.pea_type === t) ? t : `${t} (ไม่พบในข้อมูลล่าสุด)`}</option>)}
+            </select>
+          </label>
+          <button type="button" className="list-button" onClick={clearFilters} disabled={!hasFilter}>ล้างตัวกรอง</button>
+        </div>
+        {state.status !== 'loading' && state.status !== 'error' && <div className="list-result-info" role="status"><span>{hasFilter ? `พบ ${filtered.length} จาก ${devices.length} รายการ` : `ทั้งหมด ${devices.length} รายการ`}</span></div>}
 
-      {/* Response Message Modal */}
-      <AnimatePresence>
-        {responseModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-              background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              zIndex: 10000
-            }}
-            onClick={() => setResponseModal(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              onClick={(e) => e.stopPropagation()}
-              className="card glass"
-              style={{ 
-                padding: '2.5rem', 
-                maxWidth: '450px', 
-                width: '90%', 
-                textAlign: 'center', 
-                border: `1px solid ${responseModal.type === 'success' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
-                boxShadow: `0 20px 40px rgba(0,0,0,0.4), 0 0 20px ${responseModal.type === 'success' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)'}`
-              }}
-            >
-              <div style={{ 
-                width: '64px', 
-                height: '64px', 
-                borderRadius: '50%', 
-                background: responseModal.type === 'success' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)', 
-                color: responseModal.type === 'success' ? '#10b981' : '#ef4444', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                margin: '0 auto 1.5rem',
-                fontSize: '2rem'
-              }}>
-                {responseModal.type === 'success' ? '✓' : '✕'}
+        {state.status === 'loading' ? (
+          <div className="ndm-state"><Loader2 size={28} className="animate-spin" aria-hidden="true" /> กำลังโหลด...</div>
+        ) : state.status === 'error' ? (
+          <div className="ndm-state">ยังไม่มีข้อมูลให้แสดง</div>
+        ) : rows.length === 0 ? (
+          <div className="ndm-state"><p>{hasFilter ? 'ไม่พบอุปกรณ์ตามตัวกรอง' : 'ยังไม่มีอุปกรณ์เครือข่าย'}</p>{hasFilter && <button type="button" className="list-button" onClick={clearFilters}>ล้างตัวกรอง</button>}</div>
+        ) : (
+          <>
+            <div className="list-table-scroll ndm-table" tabIndex={0} role="region" aria-label="ตารางอุปกรณ์เครือข่าย">
+              <table className="list-table">
+                <caption className="list-sr-only">อุปกรณ์เครือข่าย หน้า {currentPage} จาก {totalPages}</caption>
+                <thead><tr>
+                  <th scope="col" className="ndm-num">ลำดับ</th>
+                  {sortHeader('pea_name', 'ชื่อสำนักงาน/อุปกรณ์')}
+                  {sortHeader('pea_type', 'ประเภท')}
+                  {sortHeader('gateway', 'Gateway IP')}
+                  {sortHeader('province', 'จังหวัด')}
+                  <th scope="col"><span className="list-sr-only">คำสั่ง</span></th>
+                </tr></thead>
+                <tbody>
+                  {rows.map((d, i) => (
+                    <tr key={d.id}>
+                      <td className="ndm-num list-number">{(currentPage - 1) * pageSize + i + 1}</td>
+                      <td>{nameCell(d)}</td>
+                      <td>{d.pea_type || '—'}</td>
+                      <td className="list-ip">{present(d.gateway) || '—'}</td>
+                      <td>{d.province || '—'}</td>
+                      <td><div className="ndm-row-actions">
+                        {hostActions(d)}
+                        {canEdit && <button type="button" className="list-button ndm-icon" onClick={() => openForm(d)} aria-label={`แก้ไข ${d.pea_name || d.id}`}><Edit2 size={16} aria-hidden="true" /></button>}
+                        {canEdit && <button type="button" className="list-button ndm-icon ndm-danger" onClick={() => setToDelete(d)} aria-label={`ลบ ${d.pea_name || d.id}`}><Trash2 size={16} aria-hidden="true" /></button>}
+                      </div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <ul className="ndm-cards">
+              {rows.map(d => (
+                <li key={d.id}>
+                  <div className="ndm-card-name">{nameCell(d)}</div>
+                  <dl>
+                    <div><dt>Gateway</dt><dd className="list-ip">{present(d.gateway) || '—'}</dd></div>
+                    <div><dt>ประเภท / จังหวัด</dt><dd>{[d.pea_type, d.province].filter(Boolean).join(' · ') || '—'}</dd></div>
+                  </dl>
+                  <div className="ndm-row-actions ndm-card-actions">
+                    {hostActions(d)}
+                    {canEdit && <button type="button" className="list-button" onClick={() => openForm(d)}><Edit2 size={16} aria-hidden="true" /> แก้ไข</button>}
+                    {canEdit && <button type="button" className="list-button ndm-danger" onClick={() => setToDelete(d)}><Trash2 size={16} aria-hidden="true" /> ลบ</button>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="list-footer">
+              <span>แสดง {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filtered.length)} จาก {filtered.length} รายการ</span>
+              <div className="list-pagination">
+                <label>จำนวนต่อหน้า
+                  <select value={pageSize} onChange={e => { setPageSize(Number(e.target.value)); setPage(1); }}>{PAGE_SIZES.map(n => <option key={n} value={n}>{n}</option>)}</select>
+                </label>
+                <button type="button" className="list-button" onClick={() => setPage(currentPage - 1)} disabled={currentPage <= 1}>ก่อนหน้า</button>
+                <span className="list-muted">หน้า {currentPage} / {totalPages}</span>
+                <button type="button" className="list-button" onClick={() => setPage(currentPage + 1)} disabled={currentPage >= totalPages}>ถัดไป</button>
               </div>
-              <h3 style={{ margin: '0 0 1rem', fontSize: '1.5rem', fontWeight: 700 }} className="krub-bold">
-                {responseModal.type === 'success' ? 'สำเร็จ' : 'เกิดข้อผิดพลาด'}
-              </h3>
-              <p style={{ color: 'var(--text-secondary)', margin: '0 0 2.5rem', lineHeight: 1.6, fontSize: '1.05rem' }}>
-                {responseModal.message}
-              </p>
-              
-              <button
-                onClick={() => setResponseModal(null)}
-                style={{ 
-                  padding: '0.875rem 2rem', 
-                  borderRadius: '0.75rem', 
-                  border: 'none', 
-                  background: responseModal.type === 'success' ? '#10b981' : '#ef4444', 
-                  color: 'white', 
-                  cursor: 'pointer', 
-                  fontWeight: 600, 
-                  width: '100%',
-                  fontSize: '1rem',
-                  transition: 'transform 0.2s ease'
-                }}
-                onMouseOver={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
-                onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              >
-                ตกลง
-              </button>
-            </motion.div>
-          </motion.div>
+            </div>
+          </>
         )}
-      </AnimatePresence>
-    </motion.div>
+      </section>
+
+      <ConfirmDialog open={Boolean(toDelete)} title="ยืนยันการลบอุปกรณ์เครือข่าย" tone="danger" confirmLabel="ลบอุปกรณ์" busy={deleting}
+        message={toDelete && <>ต้องการลบ <strong>{toDelete.pea_name || `#${toDelete.id}`}</strong> ใช่หรือไม่? อุปกรณ์นี้จะหายจากการตรวจสถานะและแผนที่ การลบย้อนกลับไม่ได้</>}
+        onConfirm={confirmDelete} onCancel={() => setToDelete(null)} />
+    </div>
   );
 };
 

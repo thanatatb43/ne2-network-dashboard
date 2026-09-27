@@ -1,28 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Loader2, Search, ChevronLeft, ChevronRight, Boxes, QrCode, X, Plus, Printer, Trash2, AlertTriangle, Repeat, History } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ArrowLeft, History, Loader2, Plus, Printer, QrCode, RefreshCw, Repeat, Search, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import BorrowReturnModal from './BorrowReturnModal';
 import LoanHistoryModal from './LoanHistoryModal';
 import QrCodeModal from './QrCodeModal';
+import ModalFrame from './common/ModalFrame.jsx';
+import ConfirmDialog from './equipment-form/ConfirmDialog.jsx';
+import { STATUS_OPTIONS } from './equipment-form/equipmentFields.js';
+import './ListPage.css';
+import './StockManagement.css';
 
+const API = import.meta.env.VITE_API_BASE_URL;
 // Fits neatly on one A4 page at a readable size (2 columns x 3 rows).
 const QR_PER_PAGE = 6;
+const PAGE_SIZE = 15;
+const MAX_NEW_QR = 200;
 
-// Single-line ellipsis truncation for table cells -- full text still
-// available via the wrapping <span>'s title attribute on hover.
-const truncateStyle = { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
-
-const statusColor = (status) => {
-  const s = (status || '').trim();
-  if (s === 'ใช้งาน') return 'var(--accent-success)';
-  if (s === 'รอปรับปรุง' || s === 'รอจำหน่าย') return 'var(--accent-warning)';
-  if (s === 'เลิกใช้งาน' || s === 'จำหน่าย') return 'var(--accent-danger)';
-  return 'var(--text-secondary)';
-};
-
-// Fixed storage-location tabs for this page -- the three actual stock rooms,
-// plus an "other" bucket for equipment already deployed elsewhere.
+// The three stock rooms, plus "other" = equipment deployed anywhere else.
 const STOCK_SITES = [
   { id: 198, name: 'โรงเก็บของใต้บันได ตึก 2' },
   { id: 199, name: 'โรงเก็บของอาคาร กรย.' },
@@ -31,957 +25,455 @@ const STOCK_SITES = [
 const STOCK_SITE_IDS = STOCK_SITES.map(s => s.id);
 const EXCLUDE_STOCK_SITES_PARAM = STOCK_SITE_IDS.join(',');
 
-// Fixed status list, matching the options office-equipment records are
-// created with (see OfficeEquipmentManagement's formFields) -- can't be
-// derived from the current page anymore since equipment is server-paginated.
-const STATUS_OPTIONS = ['ใช้งาน', 'รอปรับปรุง', 'เลิกใช้งาน', 'รอจำหน่าย', 'จำหน่าย', 'จัดเก็บ', 'อื่นๆ'];
+// Filters/selection survive leaving the page (details open in another
+// top-level tab), so they live in sessionStorage. Storage may be unavailable.
+const KEYS = { tab: 'stock_active_site_tab', search: 'stock_search_term', status: 'stock_status_filter', site: 'stock_other_site_input', selected: 'stock_selected_ids', page: 'stock_page' };
+const safeGet = (key, fallback) => { try { return sessionStorage.getItem(key) ?? fallback; } catch { return fallback; } };
+const safeSet = (key, value) => { try { sessionStorage.setItem(key, value); } catch { /* not remembered */ } };
+const readTab = () => { const saved = safeGet(KEYS.tab, ''); if (saved === 'other') return 'other'; const n = Number(saved); return STOCK_SITE_IDS.includes(n) ? n : 198; };
+const readSelected = () => { try { const v = JSON.parse(safeGet(KEYS.selected, '[]')); return new Set(Array.isArray(v) ? v.filter(Number.isFinite) : []); } catch { return new Set(); } };
 
-// Which storage-location tab/filters were active, kept outside React state so
-// they survive StockManagement unmounting -- clicking into an equipment's
-// details and back navigates through a different top-level tab in App.jsx,
-// which unmounts this component entirely and would otherwise reset the tab
-// and every filter back to their defaults on each visit.
-const ACTIVE_SITE_TAB_KEY = 'stock_active_site_tab';
-const SEARCH_TERM_KEY = 'stock_search_term';
-const STATUS_FILTER_KEY = 'stock_status_filter';
-const OTHER_SITE_INPUT_KEY = 'stock_other_site_input';
-const SELECTED_IDS_KEY = 'stock_selected_ids';
-
-const readSavedSiteTab = () => {
-  const saved = sessionStorage.getItem(ACTIVE_SITE_TAB_KEY);
-  if (saved === 'other') return 'other';
-  const n = Number(saved);
-  return STOCK_SITE_IDS.includes(n) ? n : 198;
+const statusTone = (status) => {
+  const s = String(status || '').trim();
+  if (s === 'ใช้งาน' || s === 'active') return 'up';
+  if (s === 'เลิกใช้งาน' || s === 'จำหน่าย') return 'down';
+  if (s.startsWith('รอ')) return 'warning';
+  return 'unknown';
 };
-const readSaved = (key, fallback) => sessionStorage.getItem(key) ?? fallback;
+const siteLabel = (site) => (site ? `${site.pea_name}${site.pea_province ? ` (${site.pea_province})` : ''}` : '');
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// Clicking a row navigates to EquipmentDetails.jsx through a different
-// top-level tab in App.jsx, which unmounts StockManagement entirely -- so a
-// plain useState for the QR selection was wiped out by that navigation,
-// same reason the filters above already go through sessionStorage instead.
-const readSavedSelectedIds = () => {
-  try {
-    const saved = JSON.parse(sessionStorage.getItem(SELECTED_IDS_KEY) || '[]');
-    return new Set(Array.isArray(saved) ? saved : []);
-  } catch {
-    return new Set();
-  }
+// Opened synchronously from the click so pop-up blockers allow it; filled
+// once the ids are known.
+const openPrintShell = () => {
+  const w = window.open('', '_blank');
+  if (w) w.document.write('<!DOCTYPE html><meta charset="utf-8"><title>กำลังเตรียม QR Code</title><p style="font-family:sans-serif;padding:2rem">กำลังเตรียม QR Code...</p>');
+  return w;
+};
+const fillPrintWindow = (w, items) => {
+  const pages = [];
+  for (let i = 0; i < items.length; i += QR_PER_PAGE) pages.push(items.slice(i, i + QR_PER_PAGE));
+  const pagesHtml = pages.map(page => `<div class="page">${page.map(item => `
+    <div class="qr-cell"><img src="${escapeHtml(`${API}/api/office-equipment/${item.id}/qrcode`)}" alt="QR ${escapeHtml(item.id)}" />
+    <div class="caption">ID: ${escapeHtml(item.id)}</div>${item.name ? `<div class="caption name">${escapeHtml(item.name)}</div>` : ''}</div>`).join('')}</div>`).join('');
+  w.document.open();
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8" /><title>พิมพ์ QR Code อุปกรณ์</title><style>
+  @page { size: A4; margin: 12mm; } * { box-sizing: border-box; } body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; }
+  .page { display: grid; grid-template-columns: repeat(2, 1fr); grid-template-rows: repeat(3, 1fr); gap: 8mm; width: 100%; height: 273mm; page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  .qr-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed #999; border-radius: 4mm; padding: 6mm; }
+  .qr-cell img { width: 60mm; height: 60mm; object-fit: contain; }
+  .caption { margin-top: 3mm; font-size: 11pt; color: #333; text-align: center; } .caption.name { font-size: 10pt; word-break: break-word; }
+  </style></head><body>${pagesHtml}<script>
+  var imgs = Array.prototype.slice.call(document.images), left = imgs.length;
+  function done() { left -= 1; if (left <= 0) setTimeout(function () { window.print(); }, 200); }
+  if (!left) window.print(); imgs.forEach(function (img) { if (img.complete) done(); else { img.onload = done; img.onerror = done; } });
+  </script></body></html>`);
+  w.document.close();
 };
 
 const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, onRequireLogin }) => {
   const canEdit = ['super_admin', 'computer_admin', 'network_admin', 'operator'].includes(user?.role);
   const canDelete = ['super_admin', 'computer_admin', 'network_admin'].includes(user?.role);
-  const [equipment, setEquipment] = useState([]);
-  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 15, totalPages: 1 });
-  const [loading, setLoading] = useState(true);
-  const [activeSiteTab, setActiveSiteTab] = useState(readSavedSiteTab);
-  // searchInput is the raw, immediate textbox value; searchTerm is the
-  // debounced value actually sent to the API (see the debounce effect below).
-  const [searchInput, setSearchInput] = useState(() => readSaved(SEARCH_TERM_KEY, ''));
-  const [searchTerm, setSearchTerm] = useState(() => readSaved(SEARCH_TERM_KEY, ''));
-  const [statusFilter, setStatusFilter] = useState(() => readSaved(STATUS_FILTER_KEY, 'All'));
-  // สำนักงาน filter (in the "other" tab) is a typeable <input list> +
-  // <datalist> combo instead of a plain <select> -- only an exact match
-  // against a known site's label resolves to the id actually sent as
-  // ?pea_site_id=; partial typing just leaves it at 'all' (no site filter).
-  const [otherSiteInput, setOtherSiteInput] = useState(() => readSaved(OTHER_SITE_INPUT_KEY, ''));
-  const [otherSiteFilter, setOtherSiteFilter] = useState('all');
-  const [currentPage, setCurrentPage] = useState(1);
+  const auth = useMemo(() => (token ? { Authorization: `Bearer ${token}` } : {}), [token]);
+
+  const [activeTab, setActiveTab] = useState(readTab);
+  const [searchInput, setSearchInput] = useState(() => safeGet(KEYS.search, ''));
+  const [searchTerm, setSearchTerm] = useState(() => safeGet(KEYS.search, ''));
+  const [statusFilter, setStatusFilter] = useState(() => { const v = safeGet(KEYS.status, 'All'); return v === 'All' || STATUS_OPTIONS.includes(v) ? v : 'All'; });
+  const [siteInput, setSiteInput] = useState(() => safeGet(KEYS.site, ''));
+  const [page, setPage] = useState(() => { const n = Number(safeGet(KEYS.page, '1')); return Number.isInteger(n) && n > 0 ? n : 1; });
+  const [list, setList] = useState({ status: 'loading', items: [], total: 0, totalPages: 1, error: '' });
+  const [counts, setCounts] = useState({ 198: null, 199: null, 200: null, other: null });
   const [peaSites, setPeaSites] = useState([]);
-  const [tabCounts, setTabCounts] = useState({ 198: 0, 199: 0, 200: 0, other: 0 });
+  const [selectedIds, setSelectedIds] = useState(readSelected);
   const [qrItem, setQrItem] = useState(null);
-  const [showPrintModal, setShowPrintModal] = useState(false);
-  const [printQuantity, setPrintQuantity] = useState(1);
-  const [printing, setPrinting] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState(null);
-  const [deleting, setDeleting] = useState(false);
   const [borrowItem, setBorrowItem] = useState(null);
   const [historyItem, setHistoryItem] = useState(null);
-  // Checkbox selection for batch-printing QR codes of EXISTING equipment --
-  // separate from showPrintModal's flow above, which creates brand-new blank
-  // records first. A Set (not scoped to the current page) so a selection
-  // survives paging through the list before printing everything at once.
-  const [selectedIds, setSelectedIds] = useState(readSavedSelectedIds);
-  const itemsPerPage = 15;
+  const [toDelete, setToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [newQr, setNewQr] = useState(null); // { quantity, error, busy }
+  const [printCheck, setPrintCheck] = useState(null); // { ok:[], missing:[], busy }
+  const requestRef = useRef(0);
+  const headerCheckbox = useRef(null);
 
-  // Full PEA site directory -- used only to populate the "other" tab's site
-  // filter dropdown, since equipment is server-paginated now and can no
-  // longer be scanned locally for the distinct sites it contains.
-  const fetchPeaSites = async () => {
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/pea-jobs/sites`, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-      });
-      const result = await response.json();
-      const list = result.data || result || [];
-      setPeaSites(Array.isArray(list) ? list : []);
-    } catch (error) {
-      console.error('Error fetching PEA sites:', error);
-    }
-  };
+  const otherSites = useMemo(() => peaSites
+    .filter(s => !STOCK_SITE_IDS.includes(Number(s.id)))
+    .map(s => ({ id: String(s.id), name: siteLabel(s) }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'th')), [peaSites]);
+  const matchedSite = otherSites.find(s => s.name === siteInput.trim()) || null;
+  const siteFilter = activeTab === 'other' && matchedSite ? matchedSite.id : '';
 
-  // The "other" tab has no single site id -- it means "not in any of the
-  // three storage-location sites" -- so it uses exclude_pea_site_id instead
-  // of pea_site_id, unless the user narrowed it down to one specific site.
-  const buildEquipmentQuery = (extra = {}) => {
-    const params = new URLSearchParams();
-    if (activeSiteTab === 'other') {
-      if (otherSiteFilter === 'all') {
-        params.append('exclude_pea_site_id', EXCLUDE_STOCK_SITES_PARAM);
-      } else {
-        params.append('pea_site_id', otherSiteFilter);
-      }
+  const query = useMemo(() => {
+    const p = new URLSearchParams();
+    if (activeTab === 'other') {
+      if (siteFilter) p.append('pea_site_id', siteFilter); else p.append('exclude_pea_site_id', EXCLUDE_STOCK_SITES_PARAM);
     } else {
-      params.append('pea_site_id', String(activeSiteTab));
+      p.append('pea_site_id', String(activeTab));
     }
-    if (statusFilter !== 'All') params.append('status', statusFilter);
-    if (searchTerm.trim()) params.append('search', searchTerm.trim());
-    // Newest-added first by default -- id itself isn't a sortable column,
-    // but createdAt is and tracks the same thing.
-    params.append('sort', 'createdAt');
-    params.append('order', 'desc');
-    Object.entries(extra).forEach(([k, v]) => params.set(k, v));
-    return params;
-  };
+    if (statusFilter !== 'All') p.append('status', statusFilter);
+    if (searchTerm.trim()) p.append('search', searchTerm.trim());
+    p.append('sort', 'createdAt');
+    p.append('order', 'desc');
+    p.append('page', String(page));
+    p.append('limit', String(PAGE_SIZE));
+    return p.toString();
+  }, [activeTab, siteFilter, statusFilter, searchTerm, page]);
 
-  const fetchEquipment = async () => {
-    setLoading(true);
+  const loadList = useCallback(async () => {
+    const id = ++requestRef.current;
     try {
-      const params = buildEquipmentQuery({ page: String(currentPage), limit: String(itemsPerPage) });
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/?${params.toString()}`, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-      });
-      const result = await response.json();
-      if (result.success) {
-        setEquipment(result.data || []);
-        if (result.pagination) setPagination(result.pagination);
-      }
-    } catch (error) {
-      console.error('Error fetching office equipment stock:', error);
-    } finally {
-      setLoading(false);
+      const res = await fetch(`${API}/api/office-equipment/?${query}`, { headers: auth });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.success || !Array.isArray(body.data)) throw new Error(body?.message || `HTTP ${res.status}`);
+      if (id !== requestRef.current) return true;
+      const total = Number(body.pagination?.total);
+      const pages = Number(body.pagination?.totalPages);
+      // A remembered page can be past the end once filters change.
+      if (Number.isFinite(pages) && pages > 0 && page > pages) { setPage(pages); return true; }
+      setList({ status: 'ready', items: body.data, total: Number.isFinite(total) ? total : body.data.length, totalPages: Number.isFinite(pages) && pages > 0 ? pages : 1, error: '' });
+      return true;
+    } catch (err) {
+      if (id === requestRef.current) setList(prev => ({ ...prev, status: prev.items.length ? 'stale' : 'error', error: err.message || 'โหลดข้อมูลไม่สำเร็จ' }));
+      return false;
     }
-  };
+  }, [query, auth, page]);
 
-  // Lightweight limit=1 requests -- only pagination.total is read from each
-  // -- used purely to populate the tab badge counts, independent of
-  // whichever filters/page are currently active on the visible tab.
-  const fetchTabCounts = async () => {
-    try {
-      const countFor = async (siteParams) => {
-        const params = new URLSearchParams({ ...siteParams, limit: '1' });
-        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/?${params.toString()}`, {
-          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-        });
-        const result = await res.json();
-        return result?.pagination?.total ?? 0;
-      };
-      const [c198, c199, c200, cOther] = await Promise.all([
-        countFor({ pea_site_id: '198' }),
-        countFor({ pea_site_id: '199' }),
-        countFor({ pea_site_id: '200' }),
-        countFor({ exclude_pea_site_id: EXCLUDE_STOCK_SITES_PARAM })
-      ]);
-      setTabCounts({ 198: c198, 199: c199, 200: c200, other: cOther });
-    } catch (error) {
-      console.error('Error fetching stock tab counts:', error);
-    }
-  };
-
-  useEffect(() => {
-    fetchPeaSites();
-    fetchTabCounts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  useEffect(() => {
-    fetchEquipment();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, currentPage, activeSiteTab, otherSiteFilter, statusFilter, searchTerm]);
-
-  // Debounces free-text search into a single request instead of firing one
-  // per keystroke; lands together with the page-1 reset so they batch into
-  // one re-render instead of racing across two separate effects.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setSearchTerm(searchInput);
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  const otherSites = React.useMemo(() => {
-    return peaSites
-      .filter(s => !STOCK_SITE_IDS.includes(s.id))
-      .map(s => ({ id: s.id, name: s.pea_name + (s.pea_province ? ` (${s.pea_province})` : '') }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'th'));
-  }, [peaSites]);
-
-  // Only resolves to a real pea_site_id once the typed text exactly matches
-  // a known site's label (i.e. the user picked a datalist suggestion or
-  // typed the full name) -- partial text just leaves the filter at 'all'.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const match = otherSites.find(s => s.name === otherSiteInput);
-      setOtherSiteFilter(match ? String(match.id) : 'all');
-      setCurrentPage(1);
-    }, 400);
-    return () => clearTimeout(t);
-  }, [otherSiteInput, otherSites]);
-
-  const handleSiteTabChange = (tab) => {
-    setActiveSiteTab(tab);
-    setCurrentPage(1);
-  };
-  const handleStatusFilterChange = (value) => {
-    setStatusFilter(value);
-    setCurrentPage(1);
-  };
-
-  useEffect(() => {
-    sessionStorage.setItem(ACTIVE_SITE_TAB_KEY, String(activeSiteTab));
-  }, [activeSiteTab]);
-  useEffect(() => {
-    sessionStorage.setItem(SEARCH_TERM_KEY, searchInput);
-  }, [searchInput]);
-  useEffect(() => {
-    sessionStorage.setItem(STATUS_FILTER_KEY, statusFilter);
-  }, [statusFilter]);
-  useEffect(() => {
-    sessionStorage.setItem(OTHER_SITE_INPUT_KEY, otherSiteInput);
-  }, [otherSiteInput]);
-  useEffect(() => {
-    sessionStorage.setItem(SELECTED_IDS_KEY, JSON.stringify(Array.from(selectedIds)));
-  }, [selectedIds]);
-
-  // Creates N blank equipment records (so each gets a real id), then opens a
-  // dedicated print window with their QR codes laid out on A4 pages -- QR
-  // stickers get printed and physically attached to devices BEFORE anyone
-  // fills in the device's actual details (done later by scanning the code).
-  const handleConfirmPrint = async () => {
-    const quantity = Math.max(1, Math.min(200, Number(printQuantity) || 0));
-    if (quantity < 1) {
-      toast.error('กรุณาระบุจำนวนที่ต้องการพิมพ์');
-      return;
-    }
-
-    setPrinting(true);
-    try {
-      const defaultSiteId = activeSiteTab !== 'other' ? activeSiteTab : '';
-      const createOne = async () => {
-        const params = new URLSearchParams();
-        params.append('name', 'อุปกรณ์ใหม่ (รอกรอกข้อมูล)');
-        params.append('pea_site_id', String(defaultSiteId));
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Authorization': `Bearer ${token}`
-          },
-          body: params.toString()
-        });
-        const result = await response.json();
-        return response.ok ? (result.data?.id ?? result.id ?? null) : null;
-      };
-
-      const results = await Promise.all(Array.from({ length: quantity }, createOne));
-      const createdIds = results.filter(id => id != null);
-
-      if (createdIds.length === 0) {
-        toast.error('สร้างรายการอุปกรณ์สำหรับพิมพ์ QR ไม่สำเร็จ');
-        return;
-      }
-      if (createdIds.length < quantity) {
-        toast.error(`สร้างได้ ${createdIds.length} จาก ${quantity} รายการ (บางรายการล้มเหลว)`);
-      } else {
-        toast.success(`สร้างรายการสำหรับพิมพ์ QR สำเร็จ ${createdIds.length} รายการ`);
-      }
-
-      openQrPrintWindow(createdIds);
-      setShowPrintModal(false);
-      setPrintQuantity(1);
-      await fetchEquipment();
-      fetchTabCounts();
-    } catch (error) {
-      console.error('Error creating blank equipment for QR printing:', error);
-      toast.error('เกิดข้อผิดพลาดในการสร้างรายการสำหรับพิมพ์ QR');
-    } finally {
-      setPrinting(false);
-    }
-  };
-
-  const openQrPrintWindow = (ids) => {
-    const apiBase = import.meta.env.VITE_API_BASE_URL;
-    const pages = [];
-    for (let i = 0; i < ids.length; i += QR_PER_PAGE) {
-      pages.push(ids.slice(i, i + QR_PER_PAGE));
-    }
-
-    const pagesHtml = pages.map(pageIds => `
-      <div class="page">
-        ${pageIds.map(id => `
-          <div class="qr-cell">
-            <img src="${apiBase}/api/office-equipment/${id}/qrcode" alt="QR ${id}" />
-            <div class="caption">ID: ${id}</div>
-          </div>
-        `).join('')}
-      </div>
-    `).join('');
-
-    const html = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8" />
-<title>พิมพ์ QR Code อุปกรณ์</title>
-<style>
-  @page { size: A4; margin: 12mm; }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Segoe UI", Tahoma, sans-serif; }
-  .page {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    grid-template-rows: repeat(3, 1fr);
-    gap: 8mm;
-    width: 100%;
-    height: 273mm;
-    page-break-after: always;
-  }
-  .page:last-child { page-break-after: auto; }
-  .qr-cell {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    border: 1px dashed #999;
-    border-radius: 4mm;
-    padding: 6mm;
-  }
-  .qr-cell img { width: 60mm; height: 60mm; object-fit: contain; }
-  .qr-cell .caption { margin-top: 4mm; font-size: 11pt; color: #333; text-align: center; }
-</style>
-</head>
-<body>
-  ${pagesHtml}
-  <script>
-    window.onload = function() {
-      setTimeout(function() { window.print(); }, 300);
+  const loadCounts = useCallback(async () => {
+    const countFor = async (params) => {
+      try {
+        const res = await fetch(`${API}/api/office-equipment/?${new URLSearchParams({ ...params, limit: '1' })}`, { headers: auth });
+        const body = await res.json().catch(() => null);
+        const n = Number(body?.pagination?.total);
+        return res.ok && Number.isFinite(n) ? n : null;
+      } catch { return null; }
     };
-  </script>
-</body>
-</html>`;
+    const [a, b, c, other] = await Promise.all([
+      countFor({ pea_site_id: '198' }), countFor({ pea_site_id: '199' }), countFor({ pea_site_id: '200' }),
+      countFor({ exclude_pea_site_id: EXCLUDE_STOCK_SITES_PARAM })
+    ]);
+    setCounts({ 198: a, 199: b, 200: c, other });
+  }, [auth]);
 
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast.error('ไม่สามารถเปิดหน้าต่างพิมพ์ได้ กรุณาอนุญาต pop-up สำหรับเว็บไซต์นี้');
+  useEffect(() => {
+    loadCounts();
+    const controller = new AbortController();
+    fetch(`${API}/api/pea-jobs/sites`, { headers: auth, signal: controller.signal })
+      .then(r => r.json()).then(body => { const l = Array.isArray(body) ? body : body?.data; if (Array.isArray(l)) setPeaSites(l); })
+      .catch(() => { /* site filter falls back to "all other offices" */ });
+    return () => controller.abort();
+  }, [auth, loadCounts]);
+
+  useEffect(() => { loadList(); }, [loadList]);
+
+  useEffect(() => {
+    if (searchInput === searchTerm) return undefined;
+    const t = setTimeout(() => { setSearchTerm(searchInput); setPage(1); }, 400);
+    return () => clearTimeout(t);
+  }, [searchInput, searchTerm]);
+
+  useEffect(() => { safeSet(KEYS.tab, String(activeTab)); }, [activeTab]);
+  useEffect(() => { safeSet(KEYS.search, searchInput); }, [searchInput]);
+  useEffect(() => { safeSet(KEYS.status, statusFilter); }, [statusFilter]);
+  useEffect(() => { safeSet(KEYS.site, siteInput); }, [siteInput]);
+  useEffect(() => { safeSet(KEYS.page, String(page)); }, [page]);
+  useEffect(() => { safeSet(KEYS.selected, JSON.stringify([...selectedIds])); }, [selectedIds]);
+
+  const items = list.items;
+  const onPageSelected = items.filter(i => selectedIds.has(i.id)).length;
+  const allOnPage = items.length > 0 && onPageSelected === items.length;
+  useEffect(() => { if (headerCheckbox.current) headerCheckbox.current.indeterminate = onPageSelected > 0 && !allOnPage; }, [onPageSelected, allOnPage]);
+
+  const toggle = (id) => setSelectedIds(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const togglePage = () => setSelectedIds(prev => { const next = new Set(prev); items.forEach(i => (allOnPage ? next.delete(i.id) : next.add(i.id))); return next; });
+  const hasFilter = Boolean(searchInput.trim() || statusFilter !== 'All' || (activeTab === 'other' && siteInput.trim()));
+  const clearFilters = () => { setSearchInput(''); setSearchTerm(''); setStatusFilter('All'); setSiteInput(''); setPage(1); };
+  const changeTab = (tab) => { setActiveTab(tab); setPage(1); };
+
+  // Existing items: verify every selected id still exists before printing,
+  // and show which ones can't be printed instead of dropping them silently.
+  const checkSelection = async () => {
+    const ids = [...selectedIds];
+    setPrintCheck({ ok: [], missing: [], busy: true });
+    const results = [];
+    for (let i = 0; i < ids.length; i += 8) {
+      const chunk = ids.slice(i, i + 8);
+      results.push(...await Promise.all(chunk.map(async (id) => {
+        try {
+          const res = await fetch(`${API}/api/office-equipment/${id}`, { headers: auth });
+          const body = await res.json().catch(() => null);
+          if (res.ok && body?.data) return { id, name: body.data.name || '', ok: true };
+          return { id, ok: false, reason: res.status === 404 ? 'ไม่พบ (อาจถูกลบแล้ว)' : `ตรวจสอบไม่ได้ (HTTP ${res.status})` };
+        } catch { return { id, ok: false, reason: 'ตรวจสอบไม่ได้ (เชื่อมต่อไม่ได้)' }; }
+      })));
+    }
+    setPrintCheck({ ok: results.filter(r => r.ok), missing: results.filter(r => !r.ok), busy: false });
+  };
+
+  const printChecked = () => {
+    const w = openPrintShell();
+    if (!w) { toast.error('ไม่สามารถเปิดหน้าต่างพิมพ์ได้ กรุณาอนุญาต pop-up สำหรับเว็บไซต์นี้'); return; }
+    fillPrintWindow(w, printCheck.ok);
+    setSelectedIds(prev => { const next = new Set(prev); printCheck.missing.filter(m => m.reason.startsWith('ไม่พบ')).forEach(m => next.delete(m.id)); return next; });
+    setPrintCheck(null);
+  };
+
+  // Creates N blank records (each gets a real id) so stickers can be printed
+  // and attached before the device's details are filled in.
+  const createAndPrint = async (e) => {
+    e.preventDefault();
+    const quantity = Number(newQr.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_NEW_QR) {
+      setNewQr(s => ({ ...s, error: `กรุณาระบุจำนวนเต็ม 1–${MAX_NEW_QR}` }));
       return;
     }
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
+    const w = openPrintShell();
+    if (!w) { setNewQr(s => ({ ...s, error: 'เบราว์เซอร์บล็อกหน้าต่างพิมพ์ กรุณาอนุญาต pop-up แล้วลองใหม่ (ยังไม่ได้สร้างรายการ)' })); return; }
+    setNewQr(s => ({ ...s, busy: true, error: '' }));
+    const siteId = activeTab !== 'other' ? String(activeTab) : '';
+    const createOne = async () => {
+      try {
+        const res = await fetch(`${API}/api/office-equipment`, {
+          method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...auth },
+          body: new URLSearchParams({ name: 'อุปกรณ์ใหม่ (รอกรอกข้อมูล)', pea_site_id: siteId }).toString()
+        });
+        const body = await res.json().catch(() => null);
+        return res.ok ? (body?.data?.id ?? body?.id ?? null) : null;
+      } catch { return null; }
+    };
+    const created = (await Promise.all(Array.from({ length: quantity }, createOne))).filter(id => id != null);
+    setNewQr(null);
+    if (!created.length) { w.close(); toast.error('สร้างรายการอุปกรณ์สำหรับพิมพ์ QR ไม่สำเร็จ'); return; }
+    fillPrintWindow(w, created.map(id => ({ id })));
+    if (created.length < quantity) toast.error(`สร้างได้ ${created.length} จาก ${quantity} รายการ (บางรายการล้มเหลว)`, { duration: 8000 });
+    else toast.success(`สร้างรายการสำหรับพิมพ์ QR ${created.length} รายการ`);
+    loadList(); loadCounts();
   };
 
-  const toggleSelected = (id) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  // Header checkbox toggles just the CURRENT page's items -- selections made
-  // on other pages before/after are left untouched either way.
-  const allOnPageSelected = equipment.length > 0 && equipment.every(item => selectedIds.has(item.id));
-  const toggleSelectPage = () => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (allOnPageSelected) {
-        equipment.forEach(item => next.delete(item.id));
-      } else {
-        equipment.forEach(item => next.add(item.id));
-      }
-      return next;
-    });
-  };
-  const clearSelection = () => setSelectedIds(new Set());
-
-  // These items already exist (unlike handleConfirmPrint's flow, which
-  // creates blank ones first), so printing their QR codes is just opening
-  // the same print window directly with the selected ids.
-  const handlePrintSelected = () => {
-    if (selectedIds.size === 0) return;
-    openQrPrintWindow(Array.from(selectedIds));
-  };
-
-  const handleConfirmDelete = async () => {
-    if (!canDelete || !itemToDelete) return;
-
+  const confirmDelete = async () => {
     setDeleting(true);
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${itemToDelete.id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await response.json();
-      if (response.ok) {
-        toast.success(result.message || 'ลบอุปกรณ์สำเร็จ');
-        await fetchEquipment();
-        fetchTabCounts();
-      } else {
-        toast.error(result.message || result.error || 'ลบอุปกรณ์ไม่สำเร็จ');
-      }
-    } catch (error) {
-      console.error('Error deleting office equipment:', error);
-      toast.error('เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์');
+      const res = await fetch(`${API}/api/office-equipment/${toDelete.id}`, { method: 'DELETE', headers: auth });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || body?.success === false) throw new Error(res.status === 403 ? 'คุณไม่มีสิทธิ์ลบอุปกรณ์' : body?.message || 'ลบอุปกรณ์ไม่สำเร็จ');
+      toast.success(body?.message || 'ลบอุปกรณ์สำเร็จ');
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(toDelete.id); return next; });
+      setToDelete(null);
+      if (!(await loadList())) toast.error('ลบแล้ว แต่โหลดรายการใหม่ไม่สำเร็จ');
+      loadCounts();
+    } catch (err) {
+      toast.error(err.message);
     } finally {
       setDeleting(false);
-      setItemToDelete(null);
     }
   };
 
+  const openBorrow = (item) => { if (!user) { onRequireLogin?.(); return; } setBorrowItem(item); };
+  const nameLink = (item) => (
+    <a className="list-name" href={`/equipment/${item.id}`} title={item.name || undefined}
+      onClick={(e) => { if (!onEquipmentClick || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); onEquipmentClick(item.id); }}>
+      {item.name || `อุปกรณ์ #${item.id}`}
+    </a>
+  );
+  const actions = (item, withText) => (
+    <>
+      <button type="button" className={`list-button${withText ? '' : ' sm-icon'}`} onClick={() => setQrItem(item)} aria-label={withText ? undefined : `QR Code ของ ${item.name || item.id}`}><QrCode size={16} aria-hidden="true" />{withText && ' QR'}</button>
+      <button type="button" className={`list-button${withText ? '' : ' sm-icon'}`} onClick={() => openBorrow(item)} aria-label={withText ? undefined : `ยืม/คืน ${item.name || item.id}`}><Repeat size={16} aria-hidden="true" />{withText && ' ยืม/คืน'}</button>
+      <button type="button" className={`list-button${withText ? '' : ' sm-icon'}`} onClick={() => setHistoryItem(item)} aria-label={withText ? undefined : `ประวัติการยืม-คืนของ ${item.name || item.id}`}><History size={16} aria-hidden="true" />{withText && ' ประวัติ'}</button>
+      {canDelete && <button type="button" className={`list-button sm-danger${withText ? '' : ' sm-icon'}`} onClick={() => setToDelete(item)} aria-label={withText ? undefined : `ลบ ${item.name || item.id}`}><Trash2 size={16} aria-hidden="true" />{withText && ' ลบ'}</button>}
+    </>
+  );
+  const count = (n) => (n === null ? '—' : n.toLocaleString('th-TH'));
+  const first = list.total ? (page - 1) * PAGE_SIZE + 1 : 0;
+
   return (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: 20 }}
-    >
-      <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-        <button
-          onClick={onBack}
-          className="glass"
-          style={{ padding: '0.5rem 1rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-        >
-          <ArrowLeft size={16} /> กลับไปยัง Overview
-        </button>
-
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          {selectedIds.size > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.4rem 0.6rem 0.4rem 1rem', borderRadius: '0.5rem', background: 'var(--bg-accent-subtle)', border: '1px solid var(--accent-primary)' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--accent-primary)' }}>เลือกแล้ว {selectedIds.size} รายการ</span>
-              <button
-                onClick={handlePrintSelected}
-                style={{
-                  padding: '0.4rem 0.9rem', borderRadius: '0.4rem', border: 'none',
-                  background: 'var(--accent-primary)', color: '#fff', fontWeight: 600, fontSize: '0.85rem',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem'
-                }}
-              >
-                <Printer size={14} /> พิมพ์ QR ที่เลือก
-              </button>
-              <button
-                onClick={clearSelection}
-                title="ล้างการเลือก"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  width: '1.8rem', height: '1.8rem', padding: 0, borderRadius: '0.4rem',
-                  border: 'none', background: 'none', color: 'var(--text-secondary)', cursor: 'pointer'
-                }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-          )}
-          {canEdit && (
-            <>
-              <button
-                onClick={() => setShowPrintModal(true)}
-                className="glass"
-                title="สร้างรายการอุปกรณ์ใหม่ (ยังไม่กรอกข้อมูล) แล้วพิมพ์ QR ไว้ล่วงหน้า"
-                style={{
-                  padding: '0.5rem 1.1rem', borderRadius: '0.5rem',
-                  border: '1px solid var(--accent-primary)', background: 'var(--bg-accent-subtle)',
-                  color: 'var(--accent-primary)', fontWeight: 600,
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem'
-                }}
-              >
-                <Printer size={16} /> พิมพ์ QR-Code (สร้างใหม่)
-              </button>
-              <button
-                onClick={() => onAddStock && onAddStock(activeSiteTab !== 'other' ? activeSiteTab : null)}
-                className="glass"
-                style={{
-                  padding: '0.5rem 1.1rem', borderRadius: '0.5rem', border: 'none',
-                  background: 'var(--accent-primary)', color: '#fff', fontWeight: 600,
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem'
-                }}
-              >
-                <Plus size={16} /> เพิ่ม Stock
-              </button>
-            </>
-          )}
+    <div className="list-page sm-page">
+      <header className="list-header">
+        <div>
+          <button type="button" className="list-button sm-back" onClick={onBack}><ArrowLeft size={18} aria-hidden="true" /> กลับ</button>
+          <h2>คลังอุปกรณ์</h2>
+          <p>อุปกรณ์ในคลังจัดเก็บทั้ง 3 แห่ง และอุปกรณ์ที่ติดตั้งที่สำนักงานอื่น</p>
         </div>
-      </div>
+        {canEdit && (
+          <div className="list-actions">
+            <button type="button" className="list-button" onClick={() => setNewQr({ quantity: '1', error: '', busy: false })}><Printer size={18} aria-hidden="true" /> พิมพ์ QR (สร้างรายการใหม่)</button>
+            <button type="button" className="list-button list-button-primary" onClick={() => onAddStock?.(activeTab !== 'other' ? activeTab : null)}><Plus size={18} aria-hidden="true" /> เพิ่มอุปกรณ์เข้าคลัง</button>
+          </div>
+        )}
+      </header>
 
-      <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
-        {STOCK_SITES.map(site => (
-          <button
-            key={site.id}
-            onClick={() => handleSiteTabChange(site.id)}
-            className="glass"
-            style={{
-              padding: '0.6rem 1.1rem',
-              borderRadius: '0.6rem',
-              border: activeSiteTab === site.id ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-              background: activeSiteTab === site.id ? 'var(--bg-accent-subtle)' : 'var(--card-bg)',
-              color: activeSiteTab === site.id ? 'var(--accent-primary)' : 'var(--text-primary)',
-              fontWeight: 600,
-              fontSize: '0.9rem',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
-          >
-            {site.name}
-            <span style={{
-              fontSize: '0.75rem', padding: '0.1rem 0.5rem', borderRadius: '1rem',
-              background: activeSiteTab === site.id ? 'var(--accent-primary)' : 'var(--glass-bg-subtle)',
-              color: activeSiteTab === site.id ? '#fff' : 'var(--text-secondary)'
-            }}>
-              {tabCounts[site.id] || 0}
-            </span>
+      <div className="sm-tabs" role="group" aria-label="สถานที่จัดเก็บ">
+        {[...STOCK_SITES, { id: 'other', name: 'สำนักงานอื่น' }].map(site => (
+          <button key={site.id} type="button" className={`sm-tab${activeTab === site.id ? ' is-active' : ''}`} aria-pressed={activeTab === site.id} onClick={() => changeTab(site.id)}>
+            {site.name}<span className="sm-count">{count(counts[site.id])}</span>
           </button>
         ))}
-        <button
-          onClick={() => handleSiteTabChange('other')}
-          className="glass"
-          style={{
-            padding: '0.6rem 1.1rem',
-            borderRadius: '0.6rem',
-            border: activeSiteTab === 'other' ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-            background: activeSiteTab === 'other' ? 'var(--bg-accent-subtle)' : 'var(--card-bg)',
-            color: activeSiteTab === 'other' ? 'var(--accent-primary)' : 'var(--text-primary)',
-            fontWeight: 600,
-            fontSize: '0.9rem',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem'
-          }}
-        >
-          อื่นๆ
-          <span style={{
-            fontSize: '0.75rem', padding: '0.1rem 0.5rem', borderRadius: '1rem',
-            background: activeSiteTab === 'other' ? 'var(--accent-primary)' : 'var(--glass-bg-subtle)',
-            color: activeSiteTab === 'other' ? '#fff' : 'var(--text-secondary)'
-          }}>
-            {tabCounts.other || 0}
-          </span>
-        </button>
       </div>
 
-      <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
-        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ position: 'relative', flex: '1 1 260px' }}>
-            <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-            <input
-              type="text"
-              placeholder="ค้นหาชื่ออุปกรณ์ / แผนก / สำนักงาน / IP..."
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '0.6rem 0.6rem 0.6rem 2.5rem',
-                borderRadius: '0.5rem',
-                border: searchInput ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)',
-                background: searchInput ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
-                color: 'var(--text-primary)',
-                fontSize: '0.9rem'
-              }}
-            />
+      {selectedIds.size > 0 && (
+        <div className="sm-selection" role="status">
+          <span>เลือกไว้ <strong>{selectedIds.size}</strong> รายการ{selectedIds.size !== onPageSelected && ` (อยู่ในหน้านี้ ${onPageSelected})`} — การเลือกคงอยู่เมื่อเปลี่ยนหน้าหรือแท็บ</span>
+          <div>
+            <button type="button" className="list-button list-button-primary" onClick={checkSelection}><Printer size={18} aria-hidden="true" /> พิมพ์ QR ที่เลือก</button>
+            <button type="button" className="list-button" onClick={() => setSelectedIds(new Set())}><X size={18} aria-hidden="true" /> ล้างที่เลือก</button>
           </div>
+        </div>
+      )}
 
-          {activeSiteTab === 'other' && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem',
-              background: otherSiteInput ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
-              border: otherSiteInput ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)'
-            }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สำนักงาน:</span>
-              <input
-                type="text"
-                list="stock-other-site-options"
-                placeholder="ทั้งหมด"
-                value={otherSiteInput}
-                onChange={(e) => setOtherSiteInput(e.target.value)}
-                style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', fontSize: '0.85rem', fontWeight: 600, width: '180px' }}
-              />
-              <datalist id="stock-other-site-options">
-                {otherSites.map(s => <option key={s.id} value={s.name} />)}
-              </datalist>
+      {(list.status === 'error' || list.status === 'stale') && (
+        <div className="list-error" role="alert">
+          <AlertTriangle size={24} aria-hidden="true" />
+          <div><strong>{list.status === 'stale' ? 'โหลดรายการใหม่ไม่สำเร็จ แสดงข้อมูลเดิม' : 'โหลดรายการอุปกรณ์ไม่สำเร็จ'}</strong><p>{list.error}</p></div>
+          <button type="button" className="list-button" onClick={loadList}><RefreshCw size={16} aria-hidden="true" /> ลองใหม่</button>
+        </div>
+      )}
+
+      <section className="list-panel" aria-label="รายการอุปกรณ์ในคลัง">
+        <div className="list-toolbar">
+          <label className={`list-field list-search${searchInput ? ' is-active' : ''}`}>
+            <span>ค้นหาอุปกรณ์</span>
+            <div className="list-search-input">
+              <Search size={18} aria-hidden="true" />
+              <input type="search" value={searchInput} placeholder="ชื่ออุปกรณ์ แผนก สำนักงาน หรือ IP" onChange={e => setSearchInput(e.target.value)} />
             </div>
+          </label>
+          {activeTab === 'other' && (
+            <label className={`list-field${siteInput ? ' is-active' : ''}`}>
+              <span>สำนักงาน</span>
+              <input type="text" list="stock-other-sites" value={siteInput} placeholder="ทั้งหมด (พิมพ์แล้วเลือกจากรายการ)" onChange={e => { setSiteInput(e.target.value); setPage(1); }} className="sm-input" aria-describedby={siteInput && !matchedSite ? 'sm-site-hint' : undefined} />
+              <datalist id="stock-other-sites">{otherSites.map(s => <option key={s.id} value={s.name} />)}</datalist>
+              {siteInput && !matchedSite && <span id="sm-site-hint" className="sm-hint">ยังไม่ตรงกับสำนักงานในรายการ จึงแสดงทุกสำนักงาน</span>}
+            </label>
           )}
-
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0.8rem', borderRadius: '0.5rem',
-            background: statusFilter !== 'All' ? 'var(--bg-accent-subtle)' : 'var(--input-bg)',
-            border: statusFilter !== 'All' ? '1px solid var(--accent-primary)' : '1px solid var(--border-subtle)'
-          }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>สถานะ:</span>
-            <select
-              value={statusFilter}
-              onChange={(e) => handleStatusFilterChange(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}
-            >
-              <option value="All">All</option>
+          <label className={`list-field${statusFilter !== 'All' ? ' is-active' : ''}`}>
+            <span>สถานะ</span>
+            <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }}>
+              <option value="All">ทั้งหมด</option>
               {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-          </div>
-
-          <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginLeft: 'auto' }}>
-            แสดง <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{equipment.length}</span> จาก <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{pagination.total}</span> รายการ
-          </div>
+          </label>
+          <button type="button" className="list-button" onClick={clearFilters} disabled={!hasFilter}>ล้างตัวกรอง</button>
         </div>
+        {list.status !== 'loading' && list.status !== 'error' && <div className="list-result-info" role="status"><span>{list.total ? `แสดง ${first}–${Math.min(page * PAGE_SIZE, list.total)} จาก ${list.total.toLocaleString('th-TH')} รายการ` : ''}</span></div>}
 
-        <div style={{ overflowX: 'auto' }}>
-          {/* Fixed layout so the truncated cells' maxWidth actually clips
-              instead of the column just growing to fit the longest value. */}
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', tableLayout: 'fixed' }}>
-            <thead>
-              <tr style={{ background: 'var(--glass-bg-subtle)' }}>
-                <th style={{ padding: '1rem 0.75rem 1rem 1.5rem', width: '2.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={allOnPageSelected}
-                    onChange={toggleSelectPage}
-                    title="เลือกทั้งหมดในหน้านี้"
-                    style={{ cursor: 'pointer' }}
-                  />
-                </th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '4.5rem' }}>ID</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '170px' }}>ชื่ออุปกรณ์</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '130px' }}>ประเภท</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '130px' }}>รหัสทรัพย์สิน</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '150px' }}>Serial Number</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '130px' }}>ผู้ถือครอง</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '130px' }}>แผนก</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '160px' }}>สำนักงาน</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', width: '220px' }}>สถานะ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="10" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-primary)' }}>
-                    <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto' }} />
-                    <p style={{ marginTop: '1rem' }}>กำลังโหลดรายการอุปกรณ์...</p>
-                  </td>
-                </tr>
-              ) : equipment.length === 0 ? (
-                <tr>
-                  <td colSpan="10" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                    <Boxes size={40} style={{ opacity: 0.2, margin: '0 auto 1rem' }} />
-                    <p>ไม่พบรายการอุปกรณ์</p>
-                  </td>
-                </tr>
-              ) : (
-                equipment.map((item) => (
-                  <tr
-                    key={item.id}
-                    onClick={() => onEquipmentClick && onEquipmentClick(item.id)}
-                    style={{ borderBottom: '1px solid var(--border-subtle)', cursor: onEquipmentClick ? 'pointer' : 'default' }}
-                    className="table-row-hover"
-                    title="คลิกเพื่อดูรายละเอียดอุปกรณ์"
-                  >
-                    <td style={{ padding: '1rem 0.75rem 1rem 1.5rem' }} onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(item.id)}
-                        onChange={() => toggleSelected(item.id)}
-                        style={{ cursor: 'pointer' }}
-                      />
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{item.id}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontWeight: 600, overflow: 'hidden' }}>
-                      <span style={truncateStyle} title={item.name || '-'}>{item.name || '-'}</span>
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', overflow: 'hidden' }}>
-                      <span style={truncateStyle} title={item.equipment_type || '-'}>{item.equipment_type || '-'}</span>
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', fontFamily: 'monospace', overflow: 'hidden' }}>
-                      <span style={truncateStyle} title={item.asset_number || '-'}>{item.asset_number || '-'}</span>
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', fontFamily: 'monospace', overflow: 'hidden' }}>
-                      <span style={truncateStyle} title={item.serial_number || '-'}>{item.serial_number || '-'}</span>
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', overflow: 'hidden' }}>
-                      <span style={truncateStyle} title={item.asset_owner || '-'}>{item.asset_owner || '-'}</span>
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', overflow: 'hidden' }}>
-                      <span style={truncateStyle} title={item.department || '-'}>{item.department || '-'}</span>
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', overflow: 'hidden' }}>
-                      <span style={truncateStyle} title={item.pea_site ? `${item.pea_site.pea_name}${item.pea_site.pea_province ? ` (${item.pea_site.pea_province})` : ''}` : '-'}>
-                        {item.pea_site ? `${item.pea_site.pea_name}${item.pea_site.pea_province ? ` (${item.pea_site.pea_province})` : ''}` : '-'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <span style={{
-                          fontSize: '0.75rem',
-                          padding: '0.2rem 0.6rem',
-                          borderRadius: '1rem',
-                          fontWeight: 600,
-                          color: statusColor(item.status),
-                          background: `${statusColor(item.status)}15`
-                        }}>
-                          {item.status || '-'}
-                        </span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setQrItem(item); }}
-                          title="แสดง QR Code ของอุปกรณ์นี้"
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: '1.6rem', height: '1.6rem', padding: 0,
-                            borderRadius: '0.4rem', border: '1px solid var(--border-subtle)',
-                            background: 'var(--glass-bg-subtle)', color: 'var(--text-secondary)', cursor: 'pointer'
-                          }}
-                        >
-                          <QrCode size={13} />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!user) { onRequireLogin && onRequireLogin(); return; }
-                            setBorrowItem(item);
-                          }}
-                          title="ยืม/คืนอุปกรณ์นี้"
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: '1.6rem', height: '1.6rem', padding: 0,
-                            borderRadius: '0.4rem', border: '1px solid rgba(168, 85, 247, 0.3)',
-                            background: 'var(--bg-accent-subtle)', color: 'var(--accent-primary)', cursor: 'pointer'
-                          }}
-                        >
-                          <Repeat size={13} />
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setHistoryItem(item); }}
-                          title="ประวัติการยืม-คืน"
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: '1.6rem', height: '1.6rem', padding: 0,
-                            borderRadius: '0.4rem', border: '1px solid var(--border-subtle)',
-                            background: 'var(--glass-bg-subtle)', color: 'var(--text-secondary)', cursor: 'pointer'
-                          }}
-                        >
-                          <History size={13} />
-                        </button>
-                        {canDelete && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setItemToDelete(item); }}
-                            title="ลบอุปกรณ์นี้"
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                              width: '1.6rem', height: '1.6rem', padding: 0,
-                              borderRadius: '0.4rem', border: '1px solid rgba(239, 68, 68, 0.3)',
-                              background: 'rgba(239, 68, 68, 0.1)', color: 'var(--accent-danger)', cursor: 'pointer'
-                            }}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {!loading && pagination.totalPages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', padding: '1.5rem', borderTop: '1px solid var(--border-subtle)' }}>
-            <button
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(prev => prev - 1)}
-              style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', opacity: currentPage === 1 ? 0.3 : 1 }}
-            >
-              <ChevronLeft size={20} />
-            </button>
-            <select
-              value={currentPage}
-              onChange={(e) => setCurrentPage(Number(e.target.value))}
-              className="glass"
-              style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', padding: '0.2rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', outline: 'none' }}
-            >
-              {Array.from({ length: pagination.totalPages }, (_, i) => i + 1).map(p => (
-                <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>หน้า {p} จาก {pagination.totalPages}</option>
+        {list.status === 'loading' ? (
+          <div className="sm-state"><Loader2 size={28} className="animate-spin" aria-hidden="true" /> กำลังโหลดรายการอุปกรณ์...</div>
+        ) : list.status === 'error' ? (
+          <div className="sm-state">ยังไม่มีข้อมูลให้แสดง</div>
+        ) : items.length === 0 ? (
+          <div className="sm-state"><p>{hasFilter ? 'ไม่พบอุปกรณ์ตามตัวกรอง' : 'ยังไม่มีอุปกรณ์ในที่จัดเก็บนี้'}</p>{hasFilter && <button type="button" className="list-button" onClick={clearFilters}>ล้างตัวกรอง</button>}</div>
+        ) : (
+          <>
+            <div className="list-table-scroll sm-table" tabIndex={0} role="region" aria-label="ตารางอุปกรณ์ในคลัง">
+              <table className="list-table">
+                <caption className="list-sr-only">อุปกรณ์ในคลัง หน้า {page} จาก {list.totalPages}</caption>
+                <thead><tr>
+                  <th scope="col" className="sm-check"><input ref={headerCheckbox} type="checkbox" checked={allOnPage} onChange={togglePage} aria-label="เลือกทั้งหมดในหน้านี้" /></th>
+                  <th scope="col" className="sm-num">ID</th><th scope="col">ชื่ออุปกรณ์</th><th scope="col">ประเภท</th><th scope="col">รหัสทรัพย์สิน</th>
+                  <th scope="col">Serial Number</th><th scope="col">ผู้ถือครอง</th><th scope="col">สำนักงาน</th><th scope="col">สถานะ</th>
+                  <th scope="col"><span className="list-sr-only">คำสั่ง</span></th>
+                </tr></thead>
+                <tbody>
+                  {items.map(item => (
+                    <tr key={item.id} className={selectedIds.has(item.id) ? 'sm-selected' : undefined}>
+                      <td className="sm-check"><input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggle(item.id)} aria-label={`เลือก ${item.name || item.id}`} /></td>
+                      <td className="sm-num list-number">{item.id}</td>
+                      <td>{nameLink(item)}</td>
+                      <td className="sm-ellipsis" title={item.equipment_type || ''}>{item.equipment_type || '—'}</td>
+                      <td className="list-ip sm-ellipsis" title={item.asset_number || ''}>{item.asset_number || '—'}</td>
+                      <td className="list-ip sm-ellipsis" title={item.serial_number || ''}>{item.serial_number || '—'}</td>
+                      <td className="sm-ellipsis" title={item.asset_owner || ''}>{item.asset_owner || '—'}</td>
+                      <td className="sm-ellipsis" title={siteLabel(item.pea_site)}>{siteLabel(item.pea_site) || '—'}</td>
+                      <td><span className={`list-status list-status-${statusTone(item.status)}`}>{item.status || 'ไม่ระบุ'}</span></td>
+                      <td><div className="sm-actions">{actions(item, false)}</div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <ul className="sm-cards">
+              {items.map(item => (
+                <li key={item.id} className={selectedIds.has(item.id) ? 'sm-selected' : undefined}>
+                  <div className="sm-card-head">
+                    <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggle(item.id)} aria-label={`เลือก ${item.name || item.id}`} />
+                    <div>{nameLink(item)}<span className="list-muted"> · ID {item.id}</span></div>
+                  </div>
+                  <span className={`list-status list-status-${statusTone(item.status)}`}>{item.status || 'ไม่ระบุ'}</span>
+                  <dl>
+                    <div><dt>ประเภท</dt><dd>{item.equipment_type || '—'}</dd></div>
+                    <div><dt>รหัสทรัพย์สิน</dt><dd className="list-ip">{item.asset_number || '—'}</dd></div>
+                    <div><dt>ผู้ถือครอง</dt><dd>{item.asset_owner || '—'}</dd></div>
+                    <div><dt>สำนักงาน</dt><dd>{siteLabel(item.pea_site) || '—'}</dd></div>
+                  </dl>
+                  <div className="sm-actions sm-card-actions">{actions(item, true)}</div>
+                </li>
               ))}
-            </select>
-            <button
-              disabled={currentPage === pagination.totalPages}
-              onClick={() => setCurrentPage(prev => prev + 1)}
-              style={{ padding: '0.5rem', borderRadius: '0.5rem', border: '1px solid var(--border-subtle)', background: 'var(--card-bg)', cursor: currentPage === pagination.totalPages ? 'not-allowed' : 'pointer', opacity: currentPage === pagination.totalPages ? 0.3 : 1 }}
-            >
-              <ChevronRight size={20} />
-            </button>
-          </div>
-        )}
-      </div>
-
-      <AnimatePresence>
-        {qrItem && (
-          <QrCodeModal
-            equipmentId={qrItem.id}
-            equipmentName={qrItem.name}
-            updatedAt={qrItem.updatedAt}
-            onClose={() => setQrItem(null)}
-          />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {showPrintModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem'
-            }}
-            onClick={() => !printing && setShowPrintModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              onClick={(e) => e.stopPropagation()}
-              className="card glass"
-              style={{ padding: '1.5rem', maxWidth: '360px', width: '100%', borderRadius: '0.75rem' }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h3 style={{ margin: 0, fontSize: '1.05rem' }}>พิมพ์ QR-Code</h3>
-                <button
-                  onClick={() => !printing && setShowPrintModal(false)}
-                  className="glass"
-                  style={{ padding: '0.4rem', borderRadius: '0.5rem', border: 'none', color: 'var(--text-secondary)', cursor: printing ? 'not-allowed' : 'pointer', display: 'flex' }}
-                  disabled={printing}
-                >
-                  <X size={18} />
-                </button>
+            </ul>
+            <div className="list-footer">
+              <label className="sm-select-page"><input type="checkbox" checked={allOnPage} onChange={togglePage} /> เลือกทั้งหมดในหน้านี้ ({items.length})</label>
+              <div className="list-pagination">
+                <button type="button" className="list-button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>ก่อนหน้า</button>
+                <label><span className="list-sr-only">หน้า</span>
+                  <select value={Math.min(page, list.totalPages)} onChange={e => setPage(Number(e.target.value))}>
+                    {Array.from({ length: list.totalPages }, (_, i) => <option key={i + 1} value={i + 1}>หน้า {i + 1} จาก {list.totalPages}</option>)}
+                  </select>
+                </label>
+                <button type="button" className="list-button" onClick={() => setPage(p => Math.min(list.totalPages, p + 1))} disabled={page >= list.totalPages}>ถัดไป</button>
               </div>
+            </div>
+          </>
+        )}
+      </section>
 
-              <p style={{ margin: '0 0 1rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                ระบบจะสร้างรายการอุปกรณ์เปล่าจำนวนเท่ากับที่ระบุ (รอกรอกข้อมูลภายหลัง) แล้วเปิดหน้าต่างพิมพ์ QR Code ให้อัตโนมัติ -- จัดหน้ากระดาษ A4 สูงสุด {QR_PER_PAGE} QR ต่อแผ่น
-              </p>
+      {qrItem && <QrCodeModal equipmentId={qrItem.id} equipmentName={qrItem.name} updatedAt={qrItem.updatedAt} onClose={() => setQrItem(null)} />}
+      {borrowItem && <BorrowReturnModal equipmentId={borrowItem.id} equipmentName={borrowItem.name} token={token} onClose={() => setBorrowItem(null)} onChanged={() => { setBorrowItem(null); loadList(); }} />}
+      {historyItem && <LoanHistoryModal equipmentId={historyItem.id} equipmentName={historyItem.name} onClose={() => setHistoryItem(null)} />}
 
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>จำนวนที่ต้องการพิมพ์</label>
-              <input
-                type="number"
-                min="1"
-                max="200"
-                value={printQuantity}
-                onChange={(e) => setPrintQuantity(e.target.value)}
-                disabled={printing}
-                style={{
-                  width: '100%', padding: '0.75rem', borderRadius: '0.5rem',
-                  border: '1px solid var(--input-border)', background: 'var(--input-bg)',
-                  color: 'var(--text-primary)', fontSize: '1rem', marginBottom: '1.25rem'
-                }}
-              />
-
-              <button
-                onClick={handleConfirmPrint}
-                disabled={printing}
-                className="glass"
-                style={{
-                  width: '100%', padding: '0.75rem', borderRadius: '0.5rem',
-                  background: 'var(--accent-primary)', color: '#fff', border: 'none',
-                  fontWeight: 700, fontSize: '0.95rem',
-                  cursor: printing ? 'not-allowed' : 'pointer', opacity: printing ? 0.7 : 1,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem'
-                }}
-              >
-                {printing ? <Loader2 size={16} className="animate-spin" /> : <Printer size={16} />}
-                {printing ? 'กำลังสร้างรายการ...' : 'สร้างและพิมพ์'}
+      {newQr && (
+        <ModalFrame title="พิมพ์ QR (สร้างรายการใหม่)" icon={<Printer size={20} aria-hidden="true" />} busy={newQr.busy} onClose={() => setNewQr(null)}>
+          <form onSubmit={createAndPrint} noValidate>
+            <p className="mf-meta">ระบบจะสร้างรายการอุปกรณ์เปล่า "อุปกรณ์ใหม่ (รอกรอกข้อมูล)" {activeTab !== 'other' ? `ใน ${STOCK_SITES.find(s => s.id === activeTab)?.name}` : '(ยังไม่ระบุสำนักงาน)'} ตามจำนวนที่ระบุ แล้วเปิดหน้าต่างพิมพ์ ({QR_PER_PAGE} QR ต่อ A4) — รายการที่สร้างแล้วจะอยู่ในระบบแม้ไม่ได้พิมพ์</p>
+            <div className={`mf-field${newQr.error ? ' is-invalid' : ''}`}>
+              <label htmlFor="sm-qr-qty">จำนวนที่ต้องการ (1–{MAX_NEW_QR})</label>
+              <input id="sm-qr-qty" type="number" inputMode="numeric" min="1" max={MAX_NEW_QR} value={newQr.quantity} disabled={newQr.busy}
+                aria-invalid={newQr.error ? 'true' : undefined} aria-describedby={newQr.error ? 'sm-qr-error' : undefined}
+                onChange={e => setNewQr(s => ({ ...s, quantity: e.target.value, error: '' }))} />
+              {newQr.error && <p id="sm-qr-error" className="mf-field-error" role="alert">{newQr.error}</p>}
+            </div>
+            <div className="mf-actions">
+              <button type="button" className="mf-button" onClick={() => setNewQr(null)} disabled={newQr.busy}>ยกเลิก</button>
+              <button type="submit" className="mf-button mf-primary" disabled={newQr.busy}>
+                {newQr.busy ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <Printer size={18} aria-hidden="true" />} {newQr.busy ? 'กำลังสร้างรายการ...' : 'สร้างและพิมพ์'}
               </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
+          </form>
+        </ModalFrame>
+      )}
 
-      <AnimatePresence>
-        {itemToDelete && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(4px)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '1rem'
-            }}
-            onClick={() => !deleting && setItemToDelete(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              onClick={(e) => e.stopPropagation()}
-              className="card glass"
-              style={{ padding: '1.5rem', maxWidth: '340px', width: '100%', borderRadius: '0.75rem', textAlign: 'center' }}
-            >
-              <AlertTriangle size={36} color="var(--accent-danger)" style={{ margin: '0 auto 1rem' }} />
-              <p style={{ margin: '0 0 1.25rem', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-                ต้องการลบอุปกรณ์ <strong style={{ color: 'var(--text-primary)' }}>{itemToDelete.name || 'นี้'}</strong> ใช่หรือไม่?<br />การดำเนินการนี้ไม่สามารถย้อนกลับได้
-              </p>
-              <div style={{ display: 'flex', gap: '0.75rem' }}>
-                <button
-                  onClick={() => setItemToDelete(null)}
-                  disabled={deleting}
-                  className="glass"
-                  style={{
-                    flex: 1, padding: '0.65rem', borderRadius: '0.5rem',
-                    border: '1px solid var(--border-subtle)', background: 'var(--card-bg)',
-                    color: 'var(--text-primary)', fontWeight: 600, fontSize: '0.85rem',
-                    cursor: deleting ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  onClick={handleConfirmDelete}
-                  disabled={deleting}
-                  className="glass"
-                  style={{
-                    flex: 1, padding: '0.65rem', borderRadius: '0.5rem', border: 'none',
-                    background: 'var(--accent-danger)', color: '#fff', fontWeight: 700, fontSize: '0.85rem',
-                    cursor: deleting ? 'not-allowed' : 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem'
-                  }}
-                >
-                  {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                  ลบอุปกรณ์
-                </button>
+      {printCheck && (
+        <ModalFrame title="พิมพ์ QR ที่เลือก" icon={<Printer size={20} aria-hidden="true" />} busy={printCheck.busy} onClose={() => setPrintCheck(null)}>
+          {printCheck.busy ? <p className="mf-state" role="status">กำลังตรวจสอบรายการที่เลือก...</p> : (
+            <>
+              <p>พิมพ์ได้ <strong>{printCheck.ok.length}</strong> รายการ{printCheck.missing.length > 0 && <>, พิมพ์ไม่ได้ <strong>{printCheck.missing.length}</strong> รายการ</>}</p>
+              {printCheck.missing.length > 0 && (
+                <ul className="mf-list sm-missing">
+                  {printCheck.missing.map(m => <li key={m.id}>ID {m.id} — {m.reason}</li>)}
+                </ul>
+              )}
+              {printCheck.missing.some(m => m.reason.startsWith('ไม่พบ')) && <p className="mf-meta">รายการที่ไม่พบจะถูกนำออกจากที่เลือกหลังพิมพ์</p>}
+              <div className="mf-actions">
+                <button type="button" className="mf-button" onClick={() => setPrintCheck(null)}>ยกเลิก</button>
+                <button type="button" className="mf-button mf-primary" onClick={printChecked} disabled={!printCheck.ok.length}><Printer size={18} aria-hidden="true" /> พิมพ์ {printCheck.ok.length} รายการ</button>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </>
+          )}
+        </ModalFrame>
+      )}
 
-      <AnimatePresence>
-        {borrowItem && (
-          <BorrowReturnModal
-            equipmentId={borrowItem.id}
-            equipmentName={borrowItem.name}
-            token={token}
-            onClose={() => setBorrowItem(null)}
-            onChanged={() => { setBorrowItem(null); fetchEquipment(); }}
-          />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {historyItem && (
-          <LoanHistoryModal
-            equipmentId={historyItem.id}
-            equipmentName={historyItem.name}
-            onClose={() => setHistoryItem(null)}
-          />
-        )}
-      </AnimatePresence>
-    </motion.div>
+      <ConfirmDialog open={Boolean(toDelete)} title="ยืนยันการลบอุปกรณ์" tone="danger" confirmLabel="ลบอุปกรณ์" busy={deleting}
+        message={toDelete && <>ต้องการลบ <strong>{toDelete.name || `#${toDelete.id}`}</strong> ใช่หรือไม่? การลบย้อนกลับไม่ได้</>}
+        onConfirm={confirmDelete} onCancel={() => setToDelete(null)} />
+    </div>
   );
 };
 
