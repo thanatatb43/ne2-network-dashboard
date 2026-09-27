@@ -6,6 +6,7 @@ import './NetworkTestHistory.css';
 const PAGE_SIZES = [10, 25, 50, 100];
 const VIEW_KEY = 'networkTestHistory.view.v1';
 const SORTS = ['timestamp', 'download', 'upload', 'latency'];
+const SERVER_CAP = 100;
 
 const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
 const fmt = (v) => (v === null ? '—' : v.toLocaleString('th-TH', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
@@ -132,6 +133,8 @@ export default function NetworkTestHistory({ token, onBack }) {
         </div>
       )}
       {partial && <p className="list-filter-warning">เซิร์ฟเวอร์ส่งมา {state.rows.length} จาก {state.total} รายการ การค้นหาและเรียงครอบคลุมเฉพาะที่โหลดมา</p>}
+      {/* The endpoint currently returns only the latest 100 tests and reports no total. */}
+      {!partial && state.total === null && state.rows.length >= SERVER_CAP && <p className="list-filter-warning">เซิร์ฟเวอร์ส่งเฉพาะการทดสอบล่าสุด {state.rows.length} รายการ รายการที่เก่ากว่านี้จะไม่แสดง การค้นหาและเรียงครอบคลุมเฉพาะที่โหลดมา</p>}
 
       <section className="list-panel" aria-label="ประวัติการทดสอบความเร็ว">
         <div className="list-toolbar">

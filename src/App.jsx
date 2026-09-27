@@ -24,6 +24,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import toast, { Toaster } from 'react-hot-toast';
 import { useEffect } from 'react';
 import { APP_NAME } from './config/branding';
+import ConfirmDialog from './components/equipment-form/ConfirmDialog.jsx';
+import { shouldConfirmLeave, clearNavigationGuard } from './navigationGuard';
 
 // "ชื่อหน้า | NE2 LDAP" per tab -- detail/edit pages use their page TYPE as
 // the title (not the specific record's name), which is an acceptable
@@ -143,6 +145,11 @@ function App() {
   // devices, devices, overview, management...) is the previous history entry,
   // so Back returns there instead of always jumping to the devices list.
   const cameFromDeviceSourceRef = useRef(false);
+  // Unsaved-changes prompt (see navigationGuard.js): the pending action runs
+  // only if the user confirms leaving.
+  const [leaveConfirm, setLeaveConfirm] = useState(null);
+  const lastUrlRef = useRef(window.location.pathname + window.location.search);
+  const bypassPopRef = useRef(false);
 
   const applyRoute = (route) => {
     setActiveTab(route.tab);
@@ -157,6 +164,7 @@ function App() {
   // Central navigation helper: updates state AND pushes a URL so the browser's
   // back/forward buttons can retrace the pages the user visited.
   const navigate = (tab, opts = {}) => {
+    if (shouldConfirmLeave('navigate')) { setLeaveConfirm({ run: () => { clearNavigationGuard(); navigate(tab, opts); } }); return; }
     let path;
     if (tab === 'deviceDetails') {
       path = `/device/${opts.deviceId}`;
@@ -186,6 +194,7 @@ function App() {
     if (window.location.pathname !== path) {
       window.history.pushState({}, '', path);
     }
+    lastUrlRef.current = window.location.pathname + window.location.search;
   };
 
   // Same as navigate(), but takes a raw path instead of a tab name -- used
@@ -193,10 +202,12 @@ function App() {
   // POST_LOGIN_REDIRECT_KEY), since that path was captured as a plain
   // string, not a tab name.
   const navigateToPath = (path) => {
+    if (shouldConfirmLeave('navigate')) { setLeaveConfirm({ run: () => { clearNavigationGuard(); navigateToPath(path); } }); return; }
     applyRoute(pathToRoute(path));
     if (window.location.pathname !== path) {
       window.history.pushState({}, '', path);
     }
+    lastUrlRef.current = window.location.pathname + window.location.search;
   };
 
   // Swaps the current history entry for a new tab/path instead of pushing a
@@ -215,6 +226,7 @@ function App() {
     }
     applyRoute({ tab, ...opts });
     window.history.replaceState({}, '', path);
+    lastUrlRef.current = window.location.pathname + window.location.search;
   };
 
   // Called by BudgetDashboard/Management when the user switches sub-view
@@ -329,11 +341,26 @@ function App() {
     // that the report-issue list is "one history.back() away" -- the user
     // may have navigated anywhere. Reset the shortcut; JobReportDetails'
     // back button falls back to a normal push-navigate in that case.
-    const applyPath = () => { cameFromJobListRef.current = false; cameFromDeviceSourceRef.current = false; applyRoute(pathToRoute(window.location.pathname)); };
+    const applyPath = () => {
+      cameFromJobListRef.current = false; cameFromDeviceSourceRef.current = false;
+      applyRoute(pathToRoute(window.location.pathname));
+      lastUrlRef.current = window.location.pathname + window.location.search;
+    };
+    // Browser Back/Forward with unsaved changes: put the current page back
+    // in the address bar, ask, and only then let the Back through.
+    const onPopState = () => {
+      if (bypassPopRef.current) { bypassPopRef.current = false; applyPath(); return; }
+      if (shouldConfirmLeave('popstate')) {
+        window.history.pushState(window.history.state, '', lastUrlRef.current);
+        setLeaveConfirm({ run: () => { clearNavigationGuard(); bypassPopRef.current = true; window.history.back(); } });
+        return;
+      }
+      applyPath();
+    };
 
     applyPath();
-    window.addEventListener('popstate', applyPath);
-    return () => window.removeEventListener('popstate', applyPath);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   // Keeps the browser tab title in sync with the current page -- index.html
@@ -459,6 +486,8 @@ function App() {
   };
 
   const handleLogout = () => {
+    // Once logged out a draft can't be saved; never block the logout itself.
+    clearNavigationGuard();
     const currentToken = token;
     const isSsoUser = localStorage.getItem('auth_provider') === 'sso';
 
@@ -645,6 +674,16 @@ function App() {
   return (
     <div className={`dashboard-container ${!isSidebarOpen ? 'sidebar-closed' : ''}`}>
       <Toaster position="top-right" reverseOrder={false} />
+      <ConfirmDialog
+        open={Boolean(leaveConfirm)}
+        title="ออกจากหน้านี้โดยไม่บันทึก?"
+        tone="danger"
+        confirmLabel="ออกโดยไม่บันทึก"
+        cancelLabel="อยู่ต่อเพื่อบันทึก"
+        message="ข้อมูลในฟอร์มที่แก้ไขแต่ยังไม่ได้กดบันทึกจะหายไป"
+        onConfirm={() => { const run = leaveConfirm?.run; setLeaveConfirm(null); run?.(); }}
+        onCancel={() => setLeaveConfirm(null)}
+      />
       
       {/* Sidebar toggle -- shown whenever the sidebar is collapsed, on any screen size */}
       {!isSidebarOpen && (

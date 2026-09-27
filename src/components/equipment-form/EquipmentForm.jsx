@@ -9,6 +9,7 @@ import useEquipmentEditor from './useEquipmentEditor.js';
 import useSiteNetwork from './useSiteNetwork.js';
 import { SECTIONS, WRITABLE_FIELDS, canEditEquipment, isDirty, statusOptionsFor } from './equipmentFields.js';
 import { normalizeMac, validateDraft } from './equipmentValidation.js';
+import { setNavigationGuard, clearNavigationGuard } from '../../navigationGuard';
 import '../ListPage.css';
 import '../SearchableDropdown.css';
 import './EquipmentForm.css';
@@ -65,7 +66,9 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
     if (!dirty) return undefined;
     const warn = (event) => { event.preventDefault(); event.returnValue = ''; };
     window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
+    // In-app navigation and browser Back ask first too (App shows the prompt).
+    const release = setNavigationGuard(() => true);
+    return () => { window.removeEventListener('beforeunload', warn); release(); };
   }, [dirty]);
 
   const labelToSite = useMemo(() => {
@@ -238,7 +241,7 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
 
       <ConfirmDialog open={confirm === 'discard'} title="ทิ้งการแก้ไขที่ยังไม่ได้บันทึก?" tone="danger" confirmLabel="ทิ้งการแก้ไข" cancelLabel="แก้ไขต่อ"
         message="ข้อมูลที่แก้ไขแต่ยังไม่ได้กดบันทึกจะหายไป (รูปที่อัปโหลดแล้วยังอยู่ เพราะบันทึกทันทีตอนอัปโหลด)"
-        onConfirm={() => { setConfirm(null); onCancel(); }} onCancel={() => setConfirm(null)} />
+        onConfirm={() => { setConfirm(null); clearNavigationGuard(); onCancel(); }} onCancel={() => setConfirm(null)} />
       <ConfirmDialog open={confirm === 'upload'} title="รูปยังอัปโหลดไม่เสร็จ" tone="warning" confirmLabel="บันทึกข้อมูลเลย" cancelLabel="รอ"
         message="ข้อมูลข้อความกับรูปเป็นคนละคำขอ บันทึกข้อมูลตอนนี้ได้ ส่วนรูปที่กำลังอัปโหลดจะแจ้งผลแยกเมื่อเสร็จ"
         onConfirm={() => { setConfirm(null); submit({ preventDefault() {}, force: true }); }} onCancel={() => setConfirm(null)} />

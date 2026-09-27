@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Copy, Edit2, FileSpreadsheet, Loader2, Plus, RefreshCw, Save, Search, Terminal, Trash2 } from 'lucide-react';
 import ConfirmDialog from './equipment-form/ConfirmDialog.jsx';
+import { setNavigationGuard, clearNavigationGuard } from '../navigationGuard';
 import './ListPage.css';
 import './NetworkDeviceManagement.css';
 
@@ -134,9 +135,17 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
 
   // The form has no URL of its own: a marker history entry lets browser Back
   // close the form instead of leaving the page.
+  const dirtyRef = useRef(false);
+  useEffect(() => { dirtyRef.current = Boolean(dirty); });
+  const leavingRef = useRef(false);
   useEffect(() => {
     if (!editing) return undefined;
-    const onPop = () => { setEditing(null); setConfirmDiscard(false); };
+    const onPop = () => {
+      if (leavingRef.current) { leavingRef.current = false; setEditing(null); setConfirmDiscard(false); return; }
+      // Back with unsaved edits: restore the marker entry and ask first.
+      if (dirtyRef.current) { window.history.pushState({ ndmEditing: true }, '', window.location.pathname); setConfirmDiscard(true); return; }
+      setEditing(null);
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, [editing]);
@@ -145,7 +154,9 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
     if (!dirty) return undefined;
     const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
     window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
+    // Sidebar/in-app navigation asks via App; Back is handled above.
+    const release = setNavigationGuard(() => true, { handlesPopstate: true });
+    return () => { window.removeEventListener('beforeunload', warn); release(); };
   }, [dirty]);
 
   const openForm = (device) => {
@@ -157,9 +168,9 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
   };
 
   const closeForm = () => {
-    setEditing(null);
+    clearNavigationGuard();
     setConfirmDiscard(false);
-    if (window.history.state?.ndmEditing) window.history.back();
+    if (window.history.state?.ndmEditing) { leavingRef.current = true; window.history.back(); } else setEditing(null);
   };
 
   const requestClose = () => (dirty ? setConfirmDiscard(true) : closeForm());
