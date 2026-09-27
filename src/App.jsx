@@ -864,6 +864,7 @@ function App() {
                 onAddStock={(siteId) => {
                   setNewEquipmentDefaultSiteId(siteId);
                   navigate('equipmentEdit', { equipmentId: 'new' });
+                  if (siteId != null) window.history.replaceState(window.history.state, '', `/equipment/new/edit?site_id=${encodeURIComponent(siteId)}`);
                 }}
                 onRequireLogin={() => requireLoginFor('/management/stock')}
                 view={mgmtView}
