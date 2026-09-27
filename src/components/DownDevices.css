@@ -1,0 +1,20 @@
+.dd-page { container: dd / inline-size; }
+.dd-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 20px; color: var(--text-secondary); text-align: center; }
+.dd-state p { margin: 0; }
+.dd-ok { color: var(--list-success); font-weight: 600; }
+.dd-num { text-align: right !important; }
+.dd-table .list-table td { white-space: nowrap; }
+.dd-table:focus-visible { outline: 3px solid var(--list-action); outline-offset: -3px; }
+.dd-cards { display: none; list-style: none; margin: 0; padding: 0; }
+.dd-cards li { padding: 16px; border-top: 1px solid var(--border-subtle); }
+.dd-card-name { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.dd-cards .list-name { white-space: normal; max-width: 100%; overflow-wrap: anywhere; line-height: 1.6; }
+.dd-cards dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 16px; margin: 10px 0 0; font-size: .9375rem; }
+.dd-cards dl div { display: contents; }
+.dd-cards dt { color: var(--text-secondary); }
+.dd-cards dd { margin: 0; overflow-wrap: anywhere; }
+@container dd (max-width: 720px) {
+  .dd-table { display: none; }
+  .dd-cards { display: block; }
+  .dd-page .list-toolbar .list-field, .dd-page .list-toolbar > .list-button { flex: 1 1 100%; }
+}

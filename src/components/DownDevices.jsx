@@ -1,136 +1,172 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { AlertCircle, RefreshCw, Loader2, Search, ChevronRight } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { motion as Motion } from 'framer-motion';
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Search } from 'lucide-react';
+import './ListPage.css';
+import './DownDevices.css';
+
+const API = import.meta.env.VITE_API_BASE_URL;
+const REFRESH_MS = 60000;
+const TIMEOUT_MS = 15000;
+
+const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+const time = (v) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d : null; };
+
+const normalize = (item) => ({
+  key: item.id ?? item.device_id,
+  deviceId: item.device_id ?? item.device?.id ?? null,
+  name: item.device?.pea_name || '',
+  type: item.device?.pea_type || '',
+  province: item.device?.province || '',
+  gateway: item.device?.gateway || '',
+  packetLoss: num(item.packet_loss),
+  checkedAt: time(item.checked_at)
+});
 
 const DownDevices = ({ onDeviceClick }) => {
-  const [devices, setDevices] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [state, setState] = useState({ status: 'loading', rows: [], error: '', loadedAt: null, refreshing: false });
+  const [search, setSearch] = useState(() => {
+    try { return sessionStorage.getItem('downDevices.search.v1') || ''; } catch { return ''; }
+  });
+  const inflight = useRef(null);
+  const lastOk = useRef(0);
 
-  const fetchDownDevices = async (isRefresh = false) => {
-    setLoading(true);
+  const load = useCallback(async () => {
+    if (inflight.current) return;
+    const controller = new AbortController();
+    inflight.current = controller;
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, TIMEOUT_MS);
+    setState(s => ({ ...s, refreshing: true }));
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latency/down`);
-      const result = await response.json();
-      if (result.success) {
-        setDevices(result.data || []);
-      } else {
-        setDevices([]);
-      }
-    } catch (error) {
-      console.error('Error fetching down devices:', error);
-      setDevices([]);
+      const res = await fetch(`${API}/api/latency/down`, { signal: controller.signal });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body || body.success === false || !Array.isArray(body.data)) throw new Error(body?.message || `เซิร์ฟเวอร์ตอบกลับ HTTP ${res.status}`);
+      if (inflight.current !== controller) return;
+      lastOk.current = Date.now();
+      setState({ status: 'ready', rows: body.data.filter(Boolean).map(normalize), error: '', loadedAt: new Date(), refreshing: false });
+    } catch (err) {
+      if (inflight.current !== controller) return;
+      const message = timedOut ? 'หมดเวลารอการตอบกลับจากเซิร์ฟเวอร์' : err.message || 'โหลดข้อมูลไม่สำเร็จ';
+      // Keep the last good list; say it may be stale instead of claiming "nothing is down".
+      setState(s => ({ ...s, status: s.loadedAt ? 'stale' : 'error', error: message, refreshing: false }));
     } finally {
-      setLoading(false);
+      clearTimeout(timer);
+      if (inflight.current === controller) inflight.current = null;
     }
-  };
-
-  useEffect(() => {
-    fetchDownDevices();
-    const interval = setInterval(fetchDownDevices, 60000);
-    return () => clearInterval(interval);
   }, []);
 
-  const filteredDevices = devices.filter(item => {
-    if (!searchTerm) return true;
-    const q = searchTerm.toLowerCase();
-    return (
-      (item.device?.pea_name && item.device.pea_name.toLowerCase().includes(q)) ||
-      (item.device?.pea_type && item.device.pea_type.toLowerCase().includes(q)) ||
-      (item.device?.province && item.device.province.toLowerCase().includes(q)) ||
-      (item.device?.gateway && item.device.gateway.toLowerCase().includes(q))
-    );
-  });
+  useEffect(() => {
+    load();
+    const interval = setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+    const onVisible = () => { if (!document.hidden && Date.now() - lastOk.current > REFRESH_MS) load(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      const c = inflight.current; inflight.current = null; c?.abort();
+    };
+  }, [load]);
+
+  useEffect(() => {
+    try { sessionStorage.setItem('downDevices.search.v1', search); } catch { /* not remembered */ }
+  }, [search]);
+
+  const q = search.trim().toLocaleLowerCase();
+  const filtered = useMemo(() => state.rows.filter(r => !q || `${r.name} ${r.type} ${r.province} ${r.gateway}`.toLocaleLowerCase().includes(q)), [state.rows, q]);
+  const hasData = state.status === 'ready' || state.status === 'stale';
+
+  const openDevice = (event, row) => {
+    if (!onDeviceClick || row.deviceId == null || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onDeviceClick(row.deviceId);
+  };
+  const nameCell = (row) => row.deviceId != null
+    ? <a className="list-name" href={`/device/${row.deviceId}`} title={row.name || undefined} onClick={e => openDevice(e, row)}>{row.name || `อุปกรณ์ #${row.deviceId}`}</a>
+    : <span title={row.name}>{row.name || '—'}</span>;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-    >
-      <header style={{ marginBottom: '2.5rem', display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
+    <Motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="list-page dd-page">
+      <header className="list-header">
         <div>
-          <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <AlertCircle color="var(--accent-danger)" /> อุปกรณ์ที่ขัดข้อง (Offline)
-          </h1>
-          <p style={{ margin: '0.25rem 0 0', color: 'var(--text-secondary)' }}>รายการอุปกรณ์ที่ตรวจไม่พบสัญญาณล่าสุด</p>
+          <h1>อุปกรณ์ที่ขัดข้อง</h1>
+          <p>อุปกรณ์เครือข่ายที่ผลตรวจล่าสุดไม่ตอบสนอง{state.loadedAt && ` · โหลดล่าสุด ${state.loadedAt.toLocaleTimeString('th-TH')} · อัปเดตทุก 1 นาที`}</p>
         </div>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.5rem 1rem', gap: '0.5rem', borderRadius: '0.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)' }}>
-            <Search size={18} color="var(--text-secondary)" />
-            <input
-              type="text"
-              placeholder="ค้นหาอุปกรณ์..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', width: '180px' }}
-            />
-          </div>
-          <button
-            onClick={() => fetchDownDevices(true)}
-            className="glass"
-            style={{ padding: '0.6rem', borderRadius: '0.75rem', color: 'var(--accent-primary)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            title="Refresh"
-          >
-            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+        <div className="list-actions">
+          <button type="button" className="list-button" onClick={load} disabled={state.refreshing}>
+            <RefreshCw size={18} aria-hidden="true" className={state.refreshing ? 'animate-spin' : ''} /> รีเฟรชข้อมูล
           </button>
         </div>
       </header>
 
-      <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-            <thead>
-              <tr style={{ background: 'var(--glass-bg-subtle)' }}>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ชื่ออุปกรณ์</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ประเภท</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>จังหวัด</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Gateway IP</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Packet Loss</th>
-                <th style={{ padding: '1rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>ตรวจสอบล่าสุด</th>
-                <th style={{ padding: '1rem 1.5rem', width: '40px' }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading && devices.length === 0 ? (
-                <tr>
-                  <td colSpan="7" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-primary)' }}>
-                    <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto' }} />
-                    <p style={{ marginTop: '1rem' }}>กำลังโหลดข้อมูล...</p>
-                  </td>
-                </tr>
-              ) : filteredDevices.length === 0 ? (
-                <tr>
-                  <td colSpan="7" style={{ padding: '4rem', textAlign: 'center', color: 'var(--accent-success)' }}>
-                    ไม่มีอุปกรณ์ที่ขัดข้องในขณะนี้
-                  </td>
-                </tr>
-              ) : (
-                filteredDevices.map((item) => (
-                  <tr
-                    key={item.id}
-                    onClick={() => onDeviceClick && onDeviceClick(item.device_id)}
-                    style={{ borderBottom: '1px solid var(--border-subtle)', cursor: onDeviceClick ? 'pointer' : 'default' }}
-                    className="table-row-hover"
-                  >
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.9rem', fontWeight: 600, color: 'var(--accent-primary)' }}>{item.device?.pea_name || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{item.device?.pea_type || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.device?.province || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', fontFamily: 'monospace' }}>{item.device?.gateway || '-'}</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', color: 'var(--accent-danger)', fontWeight: 600 }}>{item.packet_loss ?? '-'}%</td>
-                    <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                      {item.checked_at ? new Date(item.checked_at).toLocaleString('th-TH') : '-'}
-                    </td>
-                    <td style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>
-                      <ChevronRight size={18} color="var(--text-secondary)" />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+      {(state.status === 'error' || state.status === 'stale') && (
+        <div className="list-error" role="alert">
+          <AlertTriangle size={24} aria-hidden="true" />
+          <div>
+            <strong>{state.status === 'stale' ? 'อัปเดตไม่สำเร็จ ข้อมูลอาจเก่า' : 'โหลดรายการอุปกรณ์ขัดข้องไม่สำเร็จ'}</strong>
+            <p>{state.error}{state.status === 'stale' && ` — แสดงผลที่โหลดสำเร็จเมื่อ ${state.loadedAt.toLocaleTimeString('th-TH')}`}{state.status === 'error' && ' — ยังไม่ทราบสถานะอุปกรณ์ ไม่ได้หมายความว่าไม่มีอุปกรณ์ขัดข้อง'}</p>
+          </div>
+          <button type="button" className="list-button" onClick={load} disabled={state.refreshing}>ลองใหม่</button>
         </div>
-      </div>
-    </motion.div>
+      )}
+
+      <section className="list-panel" aria-label="รายการอุปกรณ์ที่ขัดข้อง">
+        <div className="list-toolbar">
+          <label className={`list-field list-search${search ? ' is-active' : ''}`}>
+            <span>ค้นหาอุปกรณ์ขัดข้อง</span>
+            <div className="list-search-input">
+              <Search size={18} aria-hidden="true" />
+              <input type="search" value={search} placeholder="ชื่อ ประเภท จังหวัด หรือ Gateway IP" onChange={e => setSearch(e.target.value)} />
+            </div>
+          </label>
+          <button type="button" className="list-button" onClick={() => setSearch('')} disabled={!search}>ล้างคำค้น</button>
+        </div>
+        {hasData && <div className="list-result-info" role="status"><span>{q ? `พบ ${filtered.length} จาก ${state.rows.length} รายการ` : `ขัดข้อง ${state.rows.length} รายการ`}</span></div>}
+
+        {state.status === 'loading' ? (
+          <div className="dd-state"><Loader2 size={28} className="animate-spin" aria-hidden="true" /> กำลังโหลดข้อมูล...</div>
+        ) : state.status === 'error' ? (
+          <div className="dd-state">ยังไม่มีข้อมูลให้แสดง</div>
+        ) : state.rows.length === 0 ? (
+          <div className="dd-state dd-ok"><CheckCircle2 size={28} aria-hidden="true" /> ผลตรวจล่าสุดไม่พบอุปกรณ์ที่ขัดข้อง</div>
+        ) : filtered.length === 0 ? (
+          <div className="dd-state"><p>ไม่พบอุปกรณ์ขัดข้องตามคำค้น “{search.trim()}”</p><button type="button" className="list-button" onClick={() => setSearch('')}>ล้างคำค้น</button></div>
+        ) : (
+          <>
+            <div className="list-table-scroll dd-table" tabIndex={0} role="region" aria-label="ตารางอุปกรณ์ที่ขัดข้อง">
+              <table className="list-table">
+                <caption className="list-sr-only">อุปกรณ์ที่ขัดข้อง {filtered.length} รายการ</caption>
+                <thead><tr><th scope="col">ชื่ออุปกรณ์</th><th scope="col">ประเภท</th><th scope="col">จังหวัด</th><th scope="col">Gateway IP</th><th scope="col" className="dd-num">Packet Loss</th><th scope="col">ตรวจสอบล่าสุด</th></tr></thead>
+                <tbody>
+                  {filtered.map(row => (
+                    <tr key={row.key} className="list-row-down">
+                      <td>{nameCell(row)}</td>
+                      <td>{row.type || '—'}</td>
+                      <td>{row.province || '—'}</td>
+                      <td className="list-ip">{row.gateway || '—'}</td>
+                      <td className="dd-num list-number">{row.packetLoss === null ? '—' : `${row.packetLoss}%`}</td>
+                      <td>{row.checkedAt ? row.checkedAt.toLocaleString('th-TH') : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <ul className="dd-cards">
+              {filtered.map(row => (
+                <li key={row.key}>
+                  <div className="dd-card-name">{nameCell(row)}<span className="list-status list-status-down"><span aria-hidden="true">!</span> ขัดข้อง</span></div>
+                  <dl>
+                    <div><dt>Gateway IP</dt><dd className="list-ip">{row.gateway || '—'}</dd></div>
+                    <div><dt>ประเภท / จังหวัด</dt><dd>{[row.type, row.province].filter(Boolean).join(' · ') || '—'}</dd></div>
+                    <div><dt>Packet Loss</dt><dd>{row.packetLoss === null ? '—' : `${row.packetLoss}%`}</dd></div>
+                    <div><dt>ตรวจสอบล่าสุด</dt><dd>{row.checkedAt ? row.checkedAt.toLocaleString('th-TH') : '—'}</dd></div>
+                  </dl>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
+    </Motion.div>
   );
 };
 

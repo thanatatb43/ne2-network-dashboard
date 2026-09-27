@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 import { ChevronLeft, Share2, Globe, Shield, Cpu, Users, ArrowRight, Loader2, Search, RefreshCw, Clock, CalendarDays, CalendarRange, Activity, Calendar, FileSpreadsheet, Boxes, X } from 'lucide-react';
 import AvailabilityHistoryChart from './AvailabilityHistoryChart';
 import * as XLSX from 'xlsx';
+import { normalizeLiveStatus, LIVE_STATUS_META } from './deviceStatus';
+import './DeviceDetails.css';
 
 // Matches the status badge colors used in OfficeEquipmentManagement.jsx
 const statusColorFor = (status) => {
@@ -36,6 +38,8 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
     lastUpdated: null
   });
   const [refreshingStatus, setRefreshingStatus] = useState(false);
+  const [statusError, setStatusError] = useState('');
+  const [scanError, setScanError] = useState('');
   // Live per-IP check results for the client list table, keyed by ip_address.
   // Kept separate from the scanned `last_online` timestamps -- this is an
   // on-demand real-time probe (GET /api/test/check-ip/:ip), not tied to scan freshness.
@@ -96,28 +100,26 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
     }
   };
 
+  // Only explicit evidence decides up/down; a missing latency field is not
+  // proof the device is online, and no match at all is "unknown".
   const fetchRealtimeStats = async () => {
     try {
       const metricsRes = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latency/metrics`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
-      const metricsResult = await metricsRes.json();
-      if (metricsResult.success && metricsResult.data) {
-        // deviceId can arrive as a number (clicked from a list) or a string
-        // (restored from the URL after browser back/forward), so compare as strings.
-        const currentStats = metricsResult.data.find(d => String(d.device_id ?? d.id) === String(deviceId));
-        if (currentStats) {
-          setRealtimeStats({
-            status: (currentStats.alive === false || currentStats.status === 'down' || currentStats.status === 'offline') ? 'offline' :
-              (currentStats.alive === true || currentStats.status === 'up' || currentStats.status === 'online' || currentStats.latency_ms !== null || currentStats.latency !== null) ? 'online' : 'offline',
-            latency: currentStats.latency_ms,
-            packetLoss: currentStats.packet_loss,
-            lastUpdated: currentStats.updated_at || currentStats.checked_at || new Date().toISOString()
-          });
-        }
-      }
+      const metricsResult = await metricsRes.json().catch(() => null);
+      if (!metricsRes.ok || !metricsResult?.success || !Array.isArray(metricsResult.data)) throw new Error(`HTTP ${metricsRes.status}`);
+      // deviceId can arrive as a number (clicked from a list) or a string
+      // (restored from the URL after browser back/forward), so compare as strings.
+      const currentStats = metricsResult.data.find(d => String(d.device_id ?? d.id) === String(deviceId));
+      setStatusError('');
+      setRealtimeStats(normalizeLiveStatus(currentStats));
+      return true;
     } catch (err) {
       console.error('Error fetching realtime stats:', err);
+      setStatusError('โหลดสถานะล่าสุดไม่สำเร็จ');
+      setRealtimeStats(prev => (prev.status === 'loading' ? { status: 'unknown', latency: null, packetLoss: null, lastUpdated: null } : prev));
+      return false;
     }
   };
 
@@ -127,12 +129,12 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/latency/check/${deviceId}`, {
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
-      if (response.ok) {
-        // After checking, re-fetch the latest metrics to update UI
-        await fetchRealtimeStats();
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      // After checking, re-fetch the latest metrics to update UI
+      if (!(await fetchRealtimeStats())) return;
     } catch (error) {
       console.error('Error checking device status:', error);
+      setStatusError('ตรวจสอบสถานะไม่สำเร็จ — แสดงผลเดิม');
     } finally {
       setRefreshingStatus(false);
     }
@@ -143,12 +145,14 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
     setIpCheckResults(prev => ({ ...prev, [ip]: { ...prev[ip], checking: true } }));
     try {
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/test/check-ip/${ip}`);
-      const result = await response.json();
+      const result = await response.json().catch(() => null);
+      // An API failure is not evidence the host is offline.
+      if (!response.ok || !result || result.success === false || typeof result.alive !== 'boolean') throw new Error('check failed');
       setIpCheckResults(prev => ({
         ...prev,
         [ip]: {
           checking: false,
-          alive: !!result.alive,
+          alive: result.alive,
           latency_ms: result.latency_ms,
           packet_loss: result.packet_loss,
           checked_at: result.checked_at
@@ -156,6 +160,7 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
       }));
     } catch (error) {
       console.error('Error checking IP status:', error);
+      toast.error(`ตรวจสอบ ${ip} ไม่สำเร็จ ลองใหม่อีกครั้ง`);
       setIpCheckResults(prev => ({ ...prev, [ip]: { ...prev[ip], checking: false } }));
     }
   };
@@ -278,27 +283,30 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
       return;
     }
     setScanStatus('scanning');
+    setScanError('');
+    const idleOrPrevious = scannedClients.length > 0 ? 'completed' : 'idle';
     try {
       const scanIndex = deviceData.index || deviceId;
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/clients/scan/${scanIndex}`, {
         method: 'POST',
         headers: token ? { 'Authorization': `Bearer ${token}` } : {}
       });
-      const result = await response.json();
+      const result = await response.json().catch(() => null);
 
-      if (result.success) {
+      if (response.ok && result?.success) {
         scanTimeoutRef.current = setTimeout(async () => {
           await fetchResults();
           setScanStatus('completed');
           scanTimeoutRef.current = null;
         }, 3000);
       } else {
-        setScanStatus('idle');
-        alert('Scan failed: ' + result.message);
+        setScanStatus(idleOrPrevious);
+        setScanError(`สแกนไม่สำเร็จ: ${result?.message || `HTTP ${response.status}`}`);
       }
     } catch (error) {
       console.error('Scan error:', error);
-      setScanStatus('idle');
+      setScanStatus(idleOrPrevious);
+      setScanError('สแกนไม่สำเร็จ: เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
     }
   };
 
@@ -420,8 +428,8 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
   if (!deviceData) {
     return (
       <div style={{ padding: '2rem', textAlign: 'center' }}>
-        <h2>Device not found</h2>
-        <button onClick={onBack} className="glass" style={{ marginTop: '1rem', padding: '0.5rem 2rem' }}>Go Back</button>
+        <h2>ไม่พบข้อมูลอุปกรณ์เครือข่ายนี้</h2>
+        <button onClick={onBack} className="glass" style={{ marginTop: '1rem', padding: '0.5rem 2rem', minHeight: '44px' }}>ย้อนกลับ</button>
       </div>
     );
   }
@@ -438,6 +446,8 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <button
             onClick={onBack}
+            aria-label="ย้อนกลับ"
+            title="ย้อนกลับ"
             className="glass"
             data-html2canvas-ignore="true"
             style={{
@@ -513,10 +523,18 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
             title={!isAdmin ? 'Administrative role required for live scanning' : ''}
           >
             <Share2 size={18} />
-            {scanStatus === 'scanning' ? 'Scanning...' : scanStatus === 'completed' ? 'Scan Again' : 'Live Scan Now'}
+            {scanStatus === 'scanning' ? 'กำลังสแกน...' : scanStatus === 'completed' ? 'สแกนอีกครั้ง' : 'สแกนเครื่องในวงตอนนี้'}
           </button>
         </div>
       </header>
+
+      {scanError && (
+        <div className="dd-scan-error" role="alert">
+          <span>{scanError}{scannedClients.length > 0 && ' — ยังแสดงผลสแกนครั้งก่อน'}</span>
+          <button type="button" onClick={startScan} disabled={scanStatus === 'scanning'}>ลองใหม่</button>
+          <button type="button" onClick={() => setScanError('')} aria-label="ปิดข้อความ">ปิด</button>
+        </div>
+      )}
 
       <AnimatePresence>
         {scanStatus === 'scanning' && (
@@ -547,88 +565,30 @@ const DeviceDetails = ({ deviceId, onBack, onManageSiteEquipment, user, token })
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem', marginBottom: '2.5rem' }}>
         {/* Real-time Status & Latency Card */}
-        <div className="card glass" style={{
-          background: realtimeStats.status === 'online' ? 'var(--bg-success-subtle)' : 'var(--bg-danger-subtle)',
-          border: `1px solid ${realtimeStats.status === 'online' ? 'var(--border-success)' : 'var(--border-danger)'}`
-        }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <div style={{
-                background: realtimeStats.status === 'online' ? 'var(--bg-success-subtle)' : 'var(--bg-danger-subtle)',
-                padding: '0.5rem', borderRadius: '0.5rem',
-                color: realtimeStats.status === 'online' ? 'var(--accent-success)' : 'var(--accent-danger)'
-              }}>
-                <Activity size={20} />
-              </div>
-              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>สถานะอุปกรณ์</h3>
-            </div>
-            <div style={{
-              fontSize: '0.7rem',
-              fontWeight: 800,
-              padding: '0.25rem 0.75rem',
-              borderRadius: '1rem',
-              background: realtimeStats.status === 'online' ? 'var(--accent-success)' : 'var(--accent-danger)',
-              color: '#fff',
-              textTransform: 'uppercase'
-            }}>
-              {realtimeStats.status}
-            </div>
+        <section className={`card glass dd-status dd-status-${LIVE_STATUS_META[realtimeStats.status].tone}`} aria-labelledby="dd-status-title">
+          <div className="dd-status-head">
+            <h3 id="dd-status-title"><Activity size={20} aria-hidden="true" /> สถานะอุปกรณ์</h3>
+            <span className={`dd-status-pill dd-status-pill-${LIVE_STATUS_META[realtimeStats.status].tone}`} role="status">
+              <span aria-hidden="true">{LIVE_STATUS_META[realtimeStats.status].symbol}</span> {LIVE_STATUS_META[realtimeStats.status].label}
+            </span>
           </div>
-
-          {realtimeStats.lastUpdated && (
-            <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
-              <Clock size={12} />
-              <span>อัปเดตล่าสุด: {new Date(realtimeStats.lastUpdated).toLocaleTimeString('th-TH')}</span>
-            </div>
-          )}
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
-            <div>
-              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Current Latency</p>
-              <h2 style={{ margin: '0.25rem 0 0', fontSize: '1.75rem', fontWeight: 700, color: realtimeStats.status === 'online' ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-                {realtimeStats.latency !== null ? `${realtimeStats.latency.toFixed(1)}ms` : '--'}
-              </h2>
-            </div>
-            <div>
-              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Packet Loss</p>
-              <h2 style={{ margin: '0.25rem 0 0', fontSize: '1.75rem', fontWeight: 700, color: (realtimeStats.packetLoss || 0) > 0 ? 'var(--accent-danger)' : 'var(--text-primary)' }}>
-                {realtimeStats.packetLoss !== null ? `${realtimeStats.packetLoss}%` : '--'}
-              </h2>
-            </div>
-          </div>
-
-          <button
-            onClick={handleManualStatusCheck}
-            disabled={refreshingStatus}
-            style={{
-              width: '100%',
-              padding: '0.6rem',
-              borderRadius: '0.5rem',
-              background: realtimeStats.status === 'online' ? 'var(--accent-success)' :
-                realtimeStats.status === 'offline' ? 'var(--accent-danger)' :
-                  'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-              border: 'none',
-              color: '#fff',
-              boxShadow: realtimeStats.status === 'online' ? '0 4px 12px rgba(34, 197, 94, 0.3)' :
-                realtimeStats.status === 'offline' ? '0 4px 12px rgba(239, 68, 68, 0.3)' :
-                  '0 4px 12px rgba(168, 85, 247, 0.3)',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.5rem',
-              cursor: refreshingStatus ? 'not-allowed' : 'pointer',
-              transition: 'all 0.2s',
-              opacity: refreshingStatus ? 0.7 : 1
-            }}
-            className="refresh-button-hover"
-            title="Update connectivity status"
-          >
-            <RefreshCw size={14} className={refreshingStatus ? 'animate-spin' : ''} />
-            {refreshingStatus ? 'กำลังตรวจสอบ...' : 'ตรวจสอบเดี๋ยวนี้!'}
+          <p className="dd-status-time">
+            <Clock size={14} aria-hidden="true" />
+            {realtimeStats.lastUpdated
+              ? <>ตรวจวัดล่าสุด: {new Date(realtimeStats.lastUpdated).toLocaleString('th-TH')}</>
+              : realtimeStats.status === 'loading' ? 'กำลังโหลด...' : 'ไม่ทราบเวลาตรวจวัดล่าสุด'}
+          </p>
+          {realtimeStats.status === 'unknown' && !statusError && <p className="dd-status-note">ไม่มีผลตรวจล่าสุดของอุปกรณ์นี้ในระบบ จึงยังไม่ระบุว่าออนไลน์หรือขัดข้อง</p>}
+          {statusError && <p className="dd-status-error" role="alert">{statusError}</p>}
+          <dl className="dd-status-metrics">
+            <div><dt>Latency ล่าสุด</dt><dd>{realtimeStats.latency !== null ? `${realtimeStats.latency.toFixed(1)} ms` : '—'}</dd></div>
+            <div><dt>Packet Loss</dt><dd className={realtimeStats.packetLoss > 0 ? 'dd-bad' : undefined}>{realtimeStats.packetLoss !== null ? `${realtimeStats.packetLoss}%` : '—'}</dd></div>
+          </dl>
+          <button type="button" className="dd-status-button" onClick={handleManualStatusCheck} disabled={refreshingStatus}>
+            <RefreshCw size={16} aria-hidden="true" className={refreshingStatus ? 'animate-spin' : ''} />
+            {refreshingStatus ? 'กำลังตรวจสอบ...' : 'ตรวจสอบสถานะตอนนี้'}
           </button>
-        </div>
+        </section>
 
         <div className="card glass">
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>

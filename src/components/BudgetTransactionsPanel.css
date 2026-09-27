@@ -1,0 +1,14 @@
+.bt-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 20px 0; }
+.bt-head h2 { margin: 0; font-size: 1.25rem; }
+.bt-head p { margin: 4px 0 0; }
+.bt-input { min-height: 44px; padding: 8px 12px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font-weight: 400; }
+.bt-error { margin: 0 20px 16px; }
+.bt-num { text-align: right !important; }
+.bt-num .list-sort { justify-content: flex-end; }
+.bt-table .list-table td { white-space: nowrap; }
+.bt-ellipsis { max-width: 22rem; overflow: hidden; text-overflow: ellipsis; }
+.bt-negative { color: var(--list-success); }
+.bt-stale { opacity: .55; }
+.bt-sort-idle { opacity: .35; }
+.bt-table:focus-visible { outline: 3px solid var(--list-action); outline-offset: -3px; }
+.bt-table .list-empty { display: table-cell; }

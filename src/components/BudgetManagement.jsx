@@ -1,3 +1,4 @@
+import BudgetTransactionsPanel from './BudgetTransactionsPanel';
 import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import {
@@ -40,7 +41,7 @@ const BudgetManagement = ({ token, onBack, user }) => {
   });
 
   // Transactions state
-  const [transactions, setTransactions] = useState([]);
+  const [transactionsRefresh, setTransactionsRefresh] = useState(0);
   const [activeSubTab, setActiveSubTab] = useState('budgets'); // 'budgets' or 'transactions'
   const [uploadResult, setUploadResult] = useState(null);
   const [showResultModal, setShowResultModal] = useState(false);
@@ -101,32 +102,8 @@ const BudgetManagement = ({ token, onBack, user }) => {
     }
   };
 
-  const fetchTransactions = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/budgets/transactions`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await response.json();
-      if (result.success) {
-        setTransactions(result.data || []);
-      } else {
-        setTransactions(Array.isArray(result) ? result : []);
-      }
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
-      toast.error('Failed to load transaction data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    if (activeSubTab === 'budgets') {
-      fetchBudgets();
-    } else {
-      fetchTransactions();
-    }
+    if (activeSubTab === 'budgets') fetchBudgets();
     fetchSelectors();
   }, [activeSubTab]);
 
@@ -148,18 +125,6 @@ const BudgetManagement = ({ token, onBack, user }) => {
     );
   });
 
-  const filteredTransactions = transactions.filter(item => {
-    const search = searchTerm.toLowerCase();
-    return (
-      item.description?.toLowerCase().includes(search) ||
-      item.reference_doc_no?.toLowerCase().includes(search) ||
-      item.cost_center?.toLowerCase().includes(search) ||
-      item.clearing_account_name?.toLowerCase().includes(search) ||
-      item.username?.toLowerCase().includes(search) ||
-      item.posting_date?.toLowerCase().includes(search)
-    );
-  });
-
   const sortedBudgets = [...filteredBudgets].sort((a, b) => {
     if (!sortConfig.key) return 0;
     const aVal = a[sortConfig.key];
@@ -169,28 +134,8 @@ const BudgetManagement = ({ token, onBack, user }) => {
     return 0;
   });
 
-  const sortedTransactions = [...filteredTransactions].sort((a, b) => {
-    if (!sortConfig.key) return 0;
-    const aVal = a[sortConfig.key];
-    const bVal = b[sortConfig.key];
-
-    // Numeric sort for count and value_co_curr
-    if (sortConfig.key === 'count' || sortConfig.key === 'value_co_curr') {
-      const nA = parseFloat(aVal || 0);
-      const nB = parseFloat(bVal || 0);
-      return sortConfig.direction === 'asc' ? nA - nB : nB - nA;
-    }
-
-    if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-    if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  const currentItems = activeSubTab === 'budgets'
-    ? sortedBudgets.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
-    : sortedTransactions.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-
-  const totalPages = Math.ceil((activeSubTab === 'budgets' ? sortedBudgets.length : sortedTransactions.length) / itemsPerPage);
+  const currentItems = sortedBudgets.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const totalPages = Math.ceil(sortedBudgets.length / itemsPerPage);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -330,7 +275,7 @@ const BudgetManagement = ({ token, onBack, user }) => {
         if (activeSubTab === 'budgets') {
           fetchBudgets();
         } else {
-          fetchTransactions();
+          setTransactionsRefresh(n => n + 1);
         }
       } else {
         toast.error(result.message || 'เกิดข้อผิดพลาดในการอัพโหลด');
@@ -394,7 +339,17 @@ const BudgetManagement = ({ token, onBack, user }) => {
         </button>
       </div>
 
-      {/* Data Table Container */}
+      {activeSubTab === 'transactions' ? (
+        <BudgetTransactionsPanel
+          token={token}
+          refreshKey={transactionsRefresh}
+          actions={canAdd && (
+            <button type="button" className="list-button list-button-primary" onClick={() => setShowUploadModal(true)}>
+              <Upload size={18} aria-hidden="true" /> อัปโหลดข้อมูลการเบิกจ่าย
+            </button>
+          )}
+        />
+      ) : (
       <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
         <div style={{ padding: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -508,69 +463,13 @@ const BudgetManagement = ({ token, onBack, user }) => {
                 )}
               </tbody>
             </table>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
-                  <th onClick={() => handleSort('count')} style={{ padding: '1rem 1.5rem', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>ลำดับ {sortConfig.key === 'count' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}</div>
-                  </th>
-                  <th onClick={() => handleSort('posting_date')} style={{ padding: '1rem 1.5rem', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>Postg Date {sortConfig.key === 'posting_date' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}</div>
-                  </th>
-                  <th onClick={() => handleSort('reference_doc_no')} style={{ padding: '1rem 1.5rem', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>Reference Doc No {sortConfig.key === 'reference_doc_no' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}</div>
-                  </th>
-                  <th onClick={() => handleSort('description')} style={{ padding: '1rem 1.5rem', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>รายละเอียด {sortConfig.key === 'description' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}</div>
-                  </th>
-                  <th onClick={() => handleSort('cost_center')} style={{ padding: '1rem 1.5rem', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>รหัสบัญชี {sortConfig.key === 'cost_center' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}</div>
-                  </th>
-                  <th onClick={() => handleSort('clearing_account_name')} style={{ padding: '1rem 1.5rem', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>ชื่อของบัญชีหักล้าง {sortConfig.key === 'clearing_account_name' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}</div>
-                  </th>
-                  <th onClick={() => handleSort('username')} style={{ padding: '1rem 1.5rem', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>ชื่อผู้ใช้ {sortConfig.key === 'username' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}</div>
-                  </th>
-                  <th onClick={() => handleSort('value_co_curr')} style={{ padding: '1rem 1.5rem', cursor: 'pointer', textAlign: 'right' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'flex-end' }}>จำนวนเงิน {sortConfig.key === 'value_co_curr' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}</div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan="8" style={{ padding: '4rem', textAlign: 'center' }}><Loader2 className="animate-spin" style={{ margin: '0 auto' }} /><p style={{ marginTop: '1rem' }}>Loading transactions...</p></td></tr>
-                ) : currentItems.length === 0 ? (
-                  <tr><td colSpan="8" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>ไม่พบข้อมูลการเบิกจ่าย</td></tr>
-                ) : (
-                  currentItems.map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }} className="table-row-hover">
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.count || idx + 1}</td>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.posting_date || '-'}</td>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.reference_doc_no || '-'}</td>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.description || '-'}</td>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.cost_center || '-'}</td>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.clearing_account_name || '-'}</td>
-                      <td style={{ padding: '1rem 1.5rem', fontSize: '0.85rem' }}>{item.username || '-'}</td>
-                      <td style={{
-                        padding: '1rem 1.5rem', textAlign: 'right', fontWeight: 600,
-                        color: parseFloat(item.value_co_curr || 0) < 0 ? 'var(--accent-success)' : 'var(--accent-warning)'
-                      }}>
-                        ฿{parseFloat(item.value_co_curr || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          )}
+          ) : null}
         </div>
 
         {/* Pagination */}
         {!loading && totalPages > 1 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, (activeSubTab === 'budgets' ? sortedBudgets.length : sortedTransactions.length))} of {(activeSubTab === 'budgets' ? sortedBudgets.length : sortedTransactions.length)} entries</span>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, sortedBudgets.length)} of {sortedBudgets.length} entries</span>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="glass" style={{ padding: '0.4rem', border: 'none', cursor: 'pointer', opacity: currentPage === 1 ? 0.3 : 1 }}><ChevronLeft size={16} /></button>
 
@@ -590,6 +489,7 @@ const BudgetManagement = ({ token, onBack, user }) => {
           </div>
         )}
       </div>
+      )}
 
       {/* Add/Edit Modal */}
       <AnimatePresence>
