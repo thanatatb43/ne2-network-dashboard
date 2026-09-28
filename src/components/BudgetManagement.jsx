@@ -5,6 +5,7 @@ import BudgetTransactionsPanel from './BudgetTransactionsPanel';
 import ModalFrame from './common/ModalFrame.jsx';
 import ConfirmDialog from './equipment-form/ConfirmDialog.jsx';
 import { useLeaveGuard, BUSY_LEAVE_MESSAGE } from '../navigationGuard';
+import { announceBudgetSourceReplaced } from './budget/budgetEvents';
 import './ListPage.css';
 import './BudgetManagement.css';
 
@@ -565,9 +566,11 @@ function UploadModal({ token, onClose, onUploaded }) {
       const response = await fetch(`${API}/api/budgets/upload-transactions`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.success === false) { setError(failure(response, result, 'อัปโหลดไม่สำเร็จ ข้อมูลเดิมยังไม่ถูกแทนที่')); return; }
+      // Source transaction IDs of this account + year are new from now on.
+      announceBudgetSourceReplaced({ cost_center: account, year: yearValue });
       onUploaded({ ...result, meta: { account: accountLabel, year: yearValue, file: file.name } });
     } catch {
-      setError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ ไม่ทราบว่าข้อมูลถูกแทนที่แล้วหรือไม่ กรุณาตรวจสอบในแท็บข้อมูลการเบิกจ่ายก่อนอัปโหลดซ้ำ');
+      setError('ไม่ได้รับคำตอบจากเซิร์ฟเวอร์ จึงไม่ทราบว่านำเข้าแล้วหรือไม่ กรุณาตรวจสอบในแท็บข้อมูลการเบิกจ่ายก่อนอัปโหลดซ้ำ');
     } finally {
       setBusy(false);
     }
@@ -624,8 +627,9 @@ function UploadModal({ token, onClose, onUploaded }) {
         cancelLabel="กลับไปแก้ไข"
         message={(
           <>
-            <p>ข้อมูลการเบิกจ่ายทั้งหมดของ <strong>{accountLabel}</strong> ปี <strong>{yearValue}</strong> จะถูกลบและแทนที่ด้วยข้อมูลจากไฟล์ <strong>{file?.name}</strong></p>
-            <p>การผูกธุรกรรมกับงานของบัญชีและปีนี้อาจได้รับผลกระทบ</p>
+            <p>ข้อมูลต้นทางการเบิกจ่ายเฉพาะ <strong>{accountLabel}</strong> ปี <strong>{yearValue}</strong> จะถูกแทนที่ด้วยข้อมูลจากไฟล์ <strong>{file?.name}</strong> บัญชีและปีอื่นไม่เปลี่ยน</p>
+            <p>ธุรกรรมที่ผูกกับสำนักงาน/งานไว้แล้วจะคงเดิม เพราะงานเก็บสำเนา ณ ตอนผูก ยอดในงานจึงไม่เปลี่ยนตามไฟล์ใหม่</p>
+            <p>ถ้านำเข้าไม่สำเร็จ ระบบจะคืนข้อมูลต้นทางเดิมทั้งชุด</p>
           </>
         )}
         onConfirm={upload}
@@ -646,8 +650,16 @@ function UploadModal({ token, onClose, onUploaded }) {
 function UploadResultModal({ result, onClose }) {
   const rows = Array.isArray(result.data) ? result.data : [];
   const count = result.count ?? result.total_rows ?? rows.length;
+  // The budget summary snapshot is built in a separate step after the source
+  // rows are committed; null means that step failed.
+  const snapshotFailed = Object.prototype.hasOwnProperty.call(result, 'budget_snapshot') && result.budget_snapshot === null;
   return (
-    <ModalFrame title="อัปโหลดข้อมูลการเบิกจ่ายแล้ว" icon={<FileText size={20} aria-hidden="true" />} subtitle={`${result.meta.account} · ปี ${result.meta.year} · ไฟล์ ${result.meta.file}`} size="xl" onClose={onClose}>
+    <ModalFrame title={snapshotFailed ? 'นำเข้าข้อมูลแล้ว แต่ยังไม่ครบทุกขั้นตอน' : 'อัปโหลดข้อมูลการเบิกจ่ายแล้ว'} icon={<FileText size={20} aria-hidden="true" />} subtitle={`${result.meta.account} · ปี ${result.meta.year} · ไฟล์ ${result.meta.file}`} size="xl" onClose={onClose}>
+      {snapshotFailed && (
+        <div className="mf-error bm-submit-error" role="alert">
+          <p>นำเข้าข้อมูลการเบิกจ่ายสำเร็จแล้ว แต่สร้างยอดสรุปงบประมาณไม่สำเร็จ ยอดในหน้าสรุปอาจยังไม่อัปเดต — ไม่ต้องอัปโหลดซ้ำ ให้แจ้งผู้ดูแลระบบตรวจสอบ</p>
+        </div>
+      )}
       <dl className="bm-result-stats">
         <div><dt>จำนวนแถวที่นำเข้า</dt><dd>{Number(count).toLocaleString('th-TH')}</dd></div>
         {result.message && <div><dt>ข้อความจากระบบ</dt><dd className="bm-result-message">{result.message}</dd></div>}

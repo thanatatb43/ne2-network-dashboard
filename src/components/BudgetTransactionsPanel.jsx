@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Loader2, RefreshCw, Search } from 'lucide-react';
+import { onBudgetSourceReplaced } from './budget/budgetEvents';
 import './ListPage.css';
 import './BudgetTransactionsPanel.css';
 
@@ -56,6 +57,8 @@ export default function BudgetTransactionsPanel({ token, refreshKey, actions }) 
   const [pageSize, setPageSize] = useState(initial.pageSize);
   const [sort, setSort] = useState({ key: initial.sort, order: initial.order });
   const [retry, setRetry] = useState(0);
+  // An upload (here or in another tab) replaced source rows: reload.
+  useEffect(() => onBudgetSourceReplaced(() => setRetry((n) => n + 1)), []);
   const [result, setResult] = useState({ key: '', rows: [], total: 0, totalPages: 1, error: '' });
   // null until the first response: literal-v1 means the server searches every
   // filtered record with q; otherwise fall back to the description filter.

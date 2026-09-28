@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Search, Loader2, X } from 'lucide-react';
 import { amountOf, formatBaht } from './jobReportShared';
+import { onBudgetSourceReplaced, inReplacedScope } from './budget/budgetEvents';
 import './JobReport.css';
 import './JobPickers.css';
 
@@ -30,6 +31,7 @@ const BudgetTransactionPicker = ({ token, selected, onChange, currentJobId = nul
   const [state, setState] = useState({ status: 'idle', items: [] });
   const [page, setPage] = useState(1);
   const [criteriaError, setCriteriaError] = useState('');
+  const [replaced, setReplaced] = useState(null);
   const inflight = useRef(null);
 
   useEffect(() => {
@@ -50,6 +52,18 @@ const BudgetTransactionPicker = ({ token, selected, onChange, currentJobId = nul
   }, [token]);
   useEffect(() => () => inflight.current?.abort(), []);
 
+  // An upload replaced source transactions (their IDs change): drop what
+  // was picked or listed from that account + year and ask for a new search.
+  const selectedRef = useRef(selected);
+  useEffect(() => { selectedRef.current = selected; });
+  useEffect(() => onBudgetSourceReplaced((scope) => {
+    const dropped = selectedRef.current.filter((t) => inReplacedScope(t, scope));
+    if (dropped.length) onChange(selectedRef.current.filter((t) => !inReplacedScope(t, scope)));
+    inflight.current?.abort();
+    setState({ status: 'idle', items: [] });
+    setReplaced({ scope, dropped: dropped.length });
+  }), [onChange]);
+
   const handleSearch = async () => {
     const params = new URLSearchParams();
     FIELDS.forEach(({ key }) => { if (form[key].trim()) params.append(key, form[key].trim()); });
@@ -57,6 +71,7 @@ const BudgetTransactionPicker = ({ token, selected, onChange, currentJobId = nul
     // recorded -- thousands of rows nobody can pick from.
     if (![...params.keys()].length) { setCriteriaError('ระบุอย่างน้อย 1 เงื่อนไขก่อนค้นหา'); return; }
     setCriteriaError('');
+    setReplaced(null);
     inflight.current?.abort();
     const controller = new AbortController();
     inflight.current = controller;
@@ -124,6 +139,12 @@ const BudgetTransactionPicker = ({ token, selected, onChange, currentJobId = nul
       {selectors.status === 'error' && <p className="jp-hint">โหลดรายการแนะนำไม่สำเร็จ ยังพิมพ์เงื่อนไขค้นหาเองได้</p>}
 
       <div aria-live="polite">
+        {replaced && (
+          <p className="jp-error" role="alert">
+            มีการนำเข้าข้อมูลการเบิกจ่ายของบัญชี {replaced.scope.cost_center} ปี {replaced.scope.year} ใหม่ รหัสธุรกรรมเดิมจึงใช้ไม่ได้
+            {replaced.dropped ? ` นำรายการที่เลือกไว้ ${replaced.dropped} รายการออกแล้ว` : ''} กรุณาค้นหาและเลือกใหม่
+          </p>
+        )}
         {criteriaError && <p className="jp-error" id={`${id}-criteria`} role="alert">{criteriaError}</p>}
         {state.status === 'loading' && <p className="jp-hint">กำลังค้นหา…</p>}
         {state.status === 'error' && (

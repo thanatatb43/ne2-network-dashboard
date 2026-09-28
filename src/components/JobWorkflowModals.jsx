@@ -250,7 +250,7 @@ export function CompleteModal({ job, token, onClose, onDone }) {
       followUps.push(send(`${API}/api/pea-jobs/transactions`, {
         method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' },
         body: JSON.stringify({ pea_site_id: job.pea_site_id, pea_job_id: job.id, budget_transaction_ids: transactions.map((t) => t.id) })
-      }, 'ผูกไม่สำเร็จ').then((r) => (r.ok ? null : `ธุรกรรมงบประมาณ ${transactions.length} รายการ (${transactions.map((t) => t.reference_doc_no || t.id).join(', ')}): ${r.message}`)));
+      }, 'ผูกไม่สำเร็จ').then((r) => (r.ok ? null : `ธุรกรรมงบประมาณ ${transactions.length} รายการ (${transactions.map((t) => t.reference_doc_no || t.id).join(', ')}): ${r.message} — ถ้ามีการนำเข้าข้อมูลการเบิกจ่ายใหม่ระหว่างนั้น รหัสธุรกรรมที่เลือกจะใช้ไม่ได้และต้องค้นหาใหม่`)));
     }
     const warnings = (await Promise.all(followUps)).filter(Boolean);
     setBusy(false);
