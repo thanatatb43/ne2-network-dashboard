@@ -25,7 +25,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { useEffect } from 'react';
 import { APP_NAME } from './config/branding';
 import ConfirmDialog from './components/equipment-form/ConfirmDialog.jsx';
-import { shouldConfirmLeave, clearNavigationGuard } from './navigationGuard';
+import { shouldConfirmLeave, clearNavigationGuard, navigationGuardMessage, initHistoryIndex, pushHistory, replaceHistory, historyDelta, syncHistoryIndex } from './navigationGuard';
 
 // "ชื่อหน้า | NE2 LDAP" per tab -- detail/edit pages use their page TYPE as
 // the title (not the specific record's name), which is an acceptable
@@ -163,6 +163,7 @@ function App() {
   const [leaveConfirm, setLeaveConfirm] = useState(null);
   const lastUrlRef = useRef(window.location.pathname + window.location.search);
   const bypassPopRef = useRef(false);
+  const restoringPopRef = useRef(false);
 
   const applyRoute = (route) => {
     setActiveTab(route.tab);
@@ -179,7 +180,7 @@ function App() {
   // Central navigation helper: updates state AND pushes a URL so the browser's
   // back/forward buttons can retrace the pages the user visited.
   const navigate = (tab, opts = {}) => {
-    if (shouldConfirmLeave('navigate')) { setLeaveConfirm({ run: () => { clearNavigationGuard(); navigate(tab, opts); } }); return; }
+    if (shouldConfirmLeave('navigate')) { setLeaveConfirm({ message: navigationGuardMessage(), run: () => { clearNavigationGuard(); navigate(tab, opts); } }); return; }
     let path;
     if (tab === 'deviceDetails') {
       path = `/device/${opts.deviceId}`;
@@ -209,7 +210,7 @@ function App() {
 
     applyRoute({ tab, ...opts });
     if (window.location.pathname !== path) {
-      window.history.pushState({}, '', path);
+      pushHistory({}, path);
     }
     lastUrlRef.current = window.location.pathname + window.location.search;
   };
@@ -219,10 +220,10 @@ function App() {
   // POST_LOGIN_REDIRECT_KEY), since that path was captured as a plain
   // string, not a tab name.
   const navigateToPath = (path) => {
-    if (shouldConfirmLeave('navigate')) { setLeaveConfirm({ run: () => { clearNavigationGuard(); navigateToPath(path); } }); return; }
+    if (shouldConfirmLeave('navigate')) { setLeaveConfirm({ message: navigationGuardMessage(), run: () => { clearNavigationGuard(); navigateToPath(path); } }); return; }
     applyRoute(pathToRoute(path));
     if (window.location.pathname !== path) {
-      window.history.pushState({}, '', path);
+      pushHistory({}, path);
     }
     lastUrlRef.current = window.location.pathname + window.location.search;
   };
@@ -242,7 +243,7 @@ function App() {
       path = TAB_PATHS[tab] || '/';
     }
     applyRoute({ tab, ...opts });
-    window.history.replaceState({}, '', path);
+    replaceHistory({}, path);
     lastUrlRef.current = window.location.pathname + window.location.search;
   };
 
@@ -363,18 +364,33 @@ function App() {
       applyRoute(pathToRoute(window.location.pathname));
       lastUrlRef.current = window.location.pathname + window.location.search;
     };
-    // Browser Back/Forward with unsaved changes: put the current page back
-    // in the address bar, ask, and only then let the Back through.
-    const onPopState = () => {
-      if (bypassPopRef.current) { bypassPopRef.current = false; applyPath(); return; }
+    // Browser Back/Forward with unsaved changes: move back to the form the
+    // same distance the other way (so neither the Back nor the Forward
+    // history changes), ask, and only then repeat the move. The step back to
+    // the form fires its own popstate, which is ignored.
+    const onPopState = (event) => {
+      if (restoringPopRef.current) { restoringPopRef.current = false; syncHistoryIndex(event.state); return; }
+      if (bypassPopRef.current) { bypassPopRef.current = false; syncHistoryIndex(event.state); applyPath(); return; }
       if (shouldConfirmLeave('popstate')) {
-        window.history.pushState(window.history.state, '', lastUrlRef.current);
-        setLeaveConfirm({ run: () => { clearNavigationGuard(); bypassPopRef.current = true; window.history.back(); } });
+        const message = navigationGuardMessage();
+        const delta = historyDelta(event.state);
+        if (delta) {
+          restoringPopRef.current = true;
+          window.history.go(-delta);
+          setLeaveConfirm({ message, run: () => { clearNavigationGuard(); bypassPopRef.current = true; window.history.go(delta); } });
+        } else {
+          // Entry without a recorded position (e.g. from before this code
+          // shipped): fall back to re-adding the form's entry.
+          pushHistory(window.history.state, lastUrlRef.current);
+          setLeaveConfirm({ message, run: () => { clearNavigationGuard(); bypassPopRef.current = true; window.history.back(); } });
+        }
         return;
       }
+      syncHistoryIndex(event.state);
       applyPath();
     };
 
+    initHistoryIndex();
     applyPath();
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -697,7 +713,7 @@ function App() {
         tone="danger"
         confirmLabel="ออกโดยไม่บันทึก"
         cancelLabel="อยู่ต่อเพื่อบันทึก"
-        message="ข้อมูลในฟอร์มที่แก้ไขแต่ยังไม่ได้กดบันทึกจะหายไป"
+        message={leaveConfirm?.message || "ข้อมูลในฟอร์มที่แก้ไขแต่ยังไม่ได้กดบันทึกจะหายไป"}
         onConfirm={() => { const run = leaveConfirm?.run; setLeaveConfirm(null); run?.(); }}
         onCancel={() => setLeaveConfirm(null)}
       />

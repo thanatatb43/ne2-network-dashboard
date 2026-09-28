@@ -3,6 +3,7 @@ import { toast } from 'react-hot-toast';
 import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Edit2, Loader2, MapPin, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import ModalFrame from '../common/ModalFrame.jsx';
 import ConfirmDialog from '../equipment-form/ConfirmDialog.jsx';
+import { useLeaveGuard } from '../../navigationGuard';
 import { normalizeLiveStatus, LIVE_STATUS_META } from '../deviceStatus';
 import { API, COORDINATES_PATTERN, settingsPermissions, failureMessage, readJson, writeJson } from './settingsShared';
 import '../ListPage.css';
@@ -316,6 +317,7 @@ function LocationFormModal({ site, provinces, token, onClose, onSaved }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const formRef = useRef(null);
   const dirty = Object.keys(initial).some((k) => initial[k] !== data[k]);
+  useLeaveGuard(dirty || busy, { message: busy ? 'กำลังบันทึกอยู่ ถ้าออกตอนนี้จะไม่เห็นผลว่าบันทึกสำเร็จหรือไม่' : '' });
 
   const change = (k, v) => {
     setData((d) => ({ ...d, [k]: v }));
