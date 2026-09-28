@@ -4,6 +4,7 @@
 .mf-sm { max-width: 380px; }
 .mf-md { max-width: 480px; }
 .mf-lg { max-width: 600px; }
+.mf-xl { max-width: 820px; }
 .mf-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .mf-head h2 { display: flex; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 1.125rem; }
 .mf-close { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-secondary); cursor: pointer; }

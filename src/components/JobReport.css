@@ -33,7 +33,7 @@
 .job-report-details-main, .job-report-details-side { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 
 .job-report-panel { background: var(--card-bg); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 20px; min-width: 0; }
-.job-report-panel h2 { margin: 0 0 12px; font-size: 1rem; font-weight: 700; }
+.job-report-panel :is(h2, h3) { margin: 0 0 12px; font-size: 1rem; font-weight: 700; }
 .job-report-panel-body { font-size: .875rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .job-report-field-list { display: flex; flex-direction: column; gap: 8px; font-size: .875rem; }
 .job-report-field-list dt { color: var(--text-secondary); display: inline; }
@@ -56,6 +56,19 @@
 .job-report-doc-hint { font-size: .75rem; color: var(--text-secondary); }
 .job-report-doc-newtab { display: inline-flex; align-items: center; gap: 4px; font-size: .8125rem; color: var(--accent-primary); margin-top: 8px; }
 .job-report-doc-block + .job-report-doc-block { margin-top: 16px; }
+.job-report-doc-label { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.job-report-panel .list-muted { margin: 0; font-size: .875rem; }
+.job-report-subsection.is-success { background: var(--bg-success-subtle); }
+.job-report-subsection.is-success .job-report-subsection-title { color: var(--list-success, var(--accent-success)); }
+.job-report-subsection.is-danger { background: var(--bg-danger-subtle); }
+.job-report-subsection.is-danger .job-report-subsection-title { color: var(--list-danger, var(--accent-danger)); }
+.job-report-subsection .job-report-panel-body { margin: 0; }
+.job-report-tx-desc { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Positive amounts are spending, negative ones credits. */
+.job-amount { font-weight: 700; white-space: nowrap; color: #b45309; }
+.job-amount.is-credit { color: var(--list-success, #15803d); }
+.dark-theme .job-amount { color: #fbbf24; }
+.dark-theme .job-amount.is-credit { color: var(--list-success, #86efac); }
 
 .job-report-photos-grid { display: flex; flex-wrap: wrap; gap: 10px; }
 .job-report-photo-button { padding: 0; border: 1px solid var(--border-subtle); border-radius: 10px; overflow: hidden; cursor: pointer; width: 96px; height: 96px; flex-shrink: 0; }

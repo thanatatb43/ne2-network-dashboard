@@ -1,185 +1,203 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Loader2, X, Check } from 'lucide-react';
-
-const inputStyle = {
-  width: '100%', padding: '0.5rem 0.7rem', background: 'var(--input-bg)',
-  border: '1px solid var(--input-border)', color: 'var(--text-primary)',
-  borderRadius: '0.5rem', outline: 'none', fontSize: '0.85rem'
-};
-
-const labelStyle = { display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' };
+import { useEffect, useId, useRef, useState } from 'react';
+import { Search, Loader2, X } from 'lucide-react';
+import { amountOf, formatBaht } from './jobReportShared';
+import './JobReport.css';
+import './JobPickers.css';
 
 const RESULTS_PER_PAGE = 10;
+const EMPTY_FORM = { year: '', reference_doc_no: '', description: '', clearing_account_name: '', username: '' };
+const FIELDS = [
+  { key: 'year', label: 'ปีงบประมาณ' },
+  { key: 'reference_doc_no', label: 'เลขที่เอกสาร' },
+  { key: 'description', label: 'รายละเอียด' },
+  { key: 'clearing_account_name', label: 'บัญชีหักล้าง' },
+  { key: 'username', label: 'ผู้บันทึก' }
+];
 
-// Search-and-multi-select UI for existing budget transactions, adapted from
-// BudgetDashboard.jsx's transaction search form (GET .../selectors for
-// datalist options, POST .../find for results). No backend field marks a
-// transaction as already linked to a job, so results may include ones
-// already attached elsewhere -- known limitation, nothing to do about it
-// client-side.
-const BudgetTransactionPicker = ({ token, selected, onChange }) => {
-  const [selectors, setSelectors] = useState({
-    year: [], clearing_account_name: [], username: [], reference_doc_no: [], description: []
-  });
-  const [form, setForm] = useState({ year: '', reference_doc_no: '', description: '', clearing_account_name: '', username: '' });
-  const [results, setResults] = useState(null);
-  const [searching, setSearching] = useState(false);
+// Search-and-multi-select for existing budget transactions. Keeps the
+// original POST /api/budgets/transactions/find (form-urlencoded, returns every
+// match for client paging) until the newer endpoint's mapping, paging and
+// permissions are confirmed to match. GET .../selectors only feeds the
+// suggestion lists, so the form still works when it fails.
+//
+// A plain button, not a <form>, since this is embedded inside the ปิดงาน
+// <form> -- nested forms are invalid HTML and break both submits.
+const BudgetTransactionPicker = ({ token, selected, onChange, currentJobId = null }) => {
+  const id = useId();
+  const [selectors, setSelectors] = useState({ status: 'loading', data: {} });
+  const [form, setForm] = useState(EMPTY_FORM);
+  // { status: 'idle' | 'loading' | 'error' | 'ready', items, error }
+  const [state, setState] = useState({ status: 'idle', items: [] });
   const [page, setPage] = useState(1);
+  const [criteriaError, setCriteriaError] = useState('');
+  const inflight = useRef(null);
 
   useEffect(() => {
-    const fetchSelectors = async () => {
+    const controller = new AbortController();
+    (async () => {
       try {
         const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/budgets/transactions/selectors`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {}
+          headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal
         });
-        const result = await response.json();
-        if (result.success) setSelectors(result.data || selectors);
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.success || typeof result.data !== 'object') throw new Error();
+        setSelectors({ status: 'ready', data: result.data });
       } catch (error) {
-        console.error('Error fetching transaction selectors:', error);
+        if (error.name !== 'AbortError') setSelectors({ status: 'error', data: {} });
       }
-    };
-    fetchSelectors();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    })();
+    return () => controller.abort();
   }, [token]);
+  useEffect(() => () => inflight.current?.abort(), []);
 
-  // A plain button + onClick, not a <form onSubmit>, since this component
-  // gets embedded inside JobManagement.jsx's ปิดงาน <form> -- nested <form>
-  // elements are invalid HTML and browsers silently drop the inner one,
-  // which breaks submit handling for both forms.
   const handleSearch = async () => {
-    setSearching(true);
-    setPage(1);
+    const params = new URLSearchParams();
+    FIELDS.forEach(({ key }) => { if (form[key].trim()) params.append(key, form[key].trim()); });
+    // Without any condition the endpoint returns every transaction ever
+    // recorded -- thousands of rows nobody can pick from.
+    if (![...params.keys()].length) { setCriteriaError('ระบุอย่างน้อย 1 เงื่อนไขก่อนค้นหา'); return; }
+    setCriteriaError('');
+    inflight.current?.abort();
+    const controller = new AbortController();
+    inflight.current = controller;
+    const timer = setTimeout(() => controller.abort(), 30000);
+    setState((s) => ({ ...s, status: 'loading' }));
     try {
-      const params = new URLSearchParams();
-      if (form.year) params.append('year', form.year);
-      if (form.reference_doc_no) params.append('reference_doc_no', form.reference_doc_no);
-      if (form.description) params.append('description', form.description);
-      if (form.clearing_account_name) params.append('clearing_account_name', form.clearing_account_name);
-      if (form.username) params.append('username', form.username);
-
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/budgets/transactions/find`, {
         method: 'POST',
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: params.toString()
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+        signal: controller.signal
       });
-      const result = await response.json();
-      setResults(result.success ? (result.data || []) : []);
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success || !Array.isArray(result.data)) throw new Error(result?.message);
+      if (inflight.current !== controller) return;
+      setState({ status: 'ready', items: result.data });
+      setPage(1);
     } catch (error) {
-      console.error('Error searching budget transactions:', error);
-      setResults([]);
+      if (inflight.current !== controller) return;
+      setState((s) => ({ ...s, status: 'error', error: error.name === 'AbortError' ? 'หมดเวลารอการตอบกลับจากเซิร์ฟเวอร์' : 'ค้นหาธุรกรรมไม่สำเร็จ' }));
     } finally {
-      setSearching(false);
+      clearTimeout(timer);
     }
   };
 
-  const isSelected = (item) => selected.some(t => t.id === item.id);
-  const toggle = (item) => {
-    onChange(isSelected(item) ? selected.filter(t => t.id !== item.id) : [...selected, item]);
-  };
-  const remove = (id) => onChange(selected.filter(t => t.id !== id));
+  const isSelected = (item) => selected.some((t) => t.id === item.id);
+  const toggle = (item) => onChange(isSelected(item) ? selected.filter((t) => t.id !== item.id) : [...selected, item]);
+  const remove = (itemId) => onChange(selected.filter((t) => t.id !== itemId));
 
-  const totalPages = results ? Math.ceil(results.length / RESULTS_PER_PAGE) : 1;
-  const pageResults = results ? results.slice((page - 1) * RESULTS_PER_PAGE, page * RESULTS_PER_PAGE) : [];
+  const totalPages = Math.max(1, Math.ceil(state.items.length / RESULTS_PER_PAGE));
+  const currentPage = Math.min(page, totalPages);
+  const pageItems = state.items.slice((currentPage - 1) * RESULTS_PER_PAGE, currentPage * RESULTS_PER_PAGE);
+  const selectedTotal = selected.reduce((sum, t) => sum + (amountOf(t) ?? 0), 0);
+  const options = (key) => (Array.isArray(selectors.data[key]) ? selectors.data[key] : []);
 
   return (
-    <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '0.6rem', marginBottom: '0.75rem' }}>
-        <div>
-          <label style={labelStyle}>ปีงบประมาณ</label>
-          <input type="text" list="budget-picker-years" value={form.year} onChange={(e) => setForm(f => ({ ...f, year: e.target.value }))} style={inputStyle} />
-          <datalist id="budget-picker-years">{selectors.year?.map(y => <option key={y} value={y} />)}</datalist>
-        </div>
-        <div>
-          <label style={labelStyle}>เลขที่เอกสาร</label>
-          <input type="text" list="budget-picker-refdoc" value={form.reference_doc_no} onChange={(e) => setForm(f => ({ ...f, reference_doc_no: e.target.value }))} style={inputStyle} />
-          <datalist id="budget-picker-refdoc">{selectors.reference_doc_no?.map((v, i) => <option key={i} value={v} />)}</datalist>
-        </div>
-        <div>
-          <label style={labelStyle}>รายละเอียด</label>
-          <input type="text" list="budget-picker-desc" value={form.description} onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))} style={inputStyle} />
-          <datalist id="budget-picker-desc">{selectors.description?.map((v, i) => <option key={i} value={v} />)}</datalist>
-        </div>
-        <div>
-          <label style={labelStyle}>บัญชีหักล้าง</label>
-          <input type="text" list="budget-picker-account" value={form.clearing_account_name} onChange={(e) => setForm(f => ({ ...f, clearing_account_name: e.target.value }))} style={inputStyle} />
-          <datalist id="budget-picker-account">{selectors.clearing_account_name?.map((v, i) => <option key={i} value={v} />)}</datalist>
-        </div>
-        <div>
-          <label style={labelStyle}>ผู้บันทึก</label>
-          <input type="text" list="budget-picker-username" value={form.username} onChange={(e) => setForm(f => ({ ...f, username: e.target.value }))} style={inputStyle} />
-          <datalist id="budget-picker-username">{selectors.username?.map((v, i) => <option key={i} value={v} />)}</datalist>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-          <button type="button" onClick={handleSearch} disabled={searching} className="glass" style={{ width: '100%', padding: '0.5rem', borderRadius: '0.5rem', border: 'none', background: 'var(--accent-primary)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 600 }}>
-            {searching ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} ค้นหา
+    <div className="jp-picker">
+      <div className="jp-grid">
+        {FIELDS.map(({ key, label }) => (
+          <div key={key} className={`jp-field${form[key] ? ' is-active' : ''}`}>
+            <label htmlFor={`${id}-${key}`}>{label}</label>
+            <input
+              id={`${id}-${key}`}
+              type="text"
+              list={options(key).length ? `${id}-${key}-list` : undefined}
+              value={form[key]}
+              onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSearch(); } }}
+              aria-describedby={criteriaError ? `${id}-criteria` : undefined}
+            />
+            {options(key).length > 0 && (
+              <datalist id={`${id}-${key}-list`}>{options(key).map((v, i) => <option key={i} value={v} />)}</datalist>
+            )}
+          </div>
+        ))}
+        <div className="jp-grid-actions">
+          <button type="button" className="jp-button" onClick={handleSearch} disabled={state.status === 'loading'}>
+            {state.status === 'loading' ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Search size={16} aria-hidden="true" />} ค้นหา
           </button>
-        </div>
-      </div>
-
-      {results !== null && (
-        <div style={{ marginBottom: '0.75rem' }}>
-          {results.length === 0 ? (
-            <p style={{ margin: '0.5rem 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>ไม่พบธุรกรรมที่ตรงกับเงื่อนไข</p>
-          ) : (
-            <>
-              <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: '0.5rem' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8rem' }}>
-                  <thead>
-                    <tr style={{ background: 'var(--glass-bg-subtle)' }}>
-                      <th style={{ padding: '0.5rem 0.75rem', width: '30px' }}></th>
-                      <th style={{ padding: '0.5rem 0.75rem' }}>เลขที่เอกสาร</th>
-                      <th style={{ padding: '0.5rem 0.75rem' }}>รายละเอียด</th>
-                      <th style={{ padding: '0.5rem 0.75rem' }}>ผู้บันทึก</th>
-                      <th style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>จำนวนเงิน</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pageResults.map(item => {
-                      const isSel = isSelected(item);
-                      return (
-                        <tr
-                          key={item.id}
-                          onClick={() => toggle(item)}
-                          style={{ borderTop: '1px solid var(--border-subtle)', cursor: 'pointer', background: isSel ? 'var(--bg-accent-subtle)' : undefined }}
-                        >
-                          <td style={{ padding: '0.5rem 0.75rem' }}>
-                            {isSel ? <Check size={14} style={{ color: 'var(--accent-primary)' }} /> : <span style={{ display: 'inline-block', width: 14, height: 14, border: '1px solid var(--border-subtle)', borderRadius: '3px' }} />}
-                          </td>
-                          <td style={{ padding: '0.5rem 0.75rem', fontFamily: 'monospace' }}>{item.reference_doc_no || '-'}</td>
-                          <td style={{ padding: '0.5rem 0.75rem', color: 'var(--text-secondary)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.description}>{item.description || '-'}</td>
-                          <td style={{ padding: '0.5rem 0.75rem' }}>{item.username || '-'}</td>
-                          <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', fontWeight: 700, color: parseFloat(item.value_co_curr || 0) < 0 ? 'var(--accent-success)' : 'var(--accent-warning)' }}>
-                            ฿{parseFloat(item.value_co_curr || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {totalPages > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem' }}>
-                  <button type="button" disabled={page === 1} onClick={() => setPage(p => p - 1)} className="glass" style={{ padding: '0.3rem 0.6rem', borderRadius: '0.4rem', border: 'none', cursor: page === 1 ? 'not-allowed' : 'pointer', opacity: page === 1 ? 0.3 : 1, fontSize: '0.75rem' }}>ก่อนหน้า</button>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>หน้า {page} จาก {totalPages}</span>
-                  <button type="button" disabled={page === totalPages} onClick={() => setPage(p => p + 1)} className="glass" style={{ padding: '0.3rem 0.6rem', borderRadius: '0.4rem', border: 'none', cursor: page === totalPages ? 'not-allowed' : 'pointer', opacity: page === totalPages ? 0.3 : 1, fontSize: '0.75rem' }}>ถัดไป</button>
-                </div>
-              )}
-            </>
+          {Object.values(form).some(Boolean) && (
+            <button type="button" className="jp-link" onClick={() => { setForm(EMPTY_FORM); setCriteriaError(''); }}>ล้างเงื่อนไข</button>
           )}
         </div>
+      </div>
+      {selectors.status === 'error' && <p className="jp-hint">โหลดรายการแนะนำไม่สำเร็จ ยังพิมพ์เงื่อนไขค้นหาเองได้</p>}
+
+      <div aria-live="polite">
+        {criteriaError && <p className="jp-error" id={`${id}-criteria`} role="alert">{criteriaError}</p>}
+        {state.status === 'loading' && <p className="jp-hint">กำลังค้นหา…</p>}
+        {state.status === 'error' && (
+          <p className="jp-error" role="alert">{state.error} <button type="button" className="jp-link" onClick={handleSearch}>ลองใหม่</button></p>
+        )}
+        {state.status === 'ready' && (
+          <p className="jp-hint">{state.items.length ? `พบ ${state.items.length.toLocaleString('th-TH')} รายการ` : 'ไม่พบธุรกรรมที่ตรงกับเงื่อนไข'}</p>
+        )}
+      </div>
+
+      {state.status === 'ready' && state.items.length > 0 && (
+        <>
+          <div className="jp-table-scroll" tabIndex={0} role="region" aria-label="ผลการค้นหาธุรกรรม เลื่อนแนวนอนเพื่อดูทุกคอลัมน์">
+            <table className="jp-table">
+              <caption className="jp-sr-only">ผลการค้นหาธุรกรรม หน้า {currentPage} จาก {totalPages} เลือกช่องหน้ารายการเพื่อผูกกับงาน</caption>
+              <thead>
+                <tr>
+                  <th scope="col"><span className="jp-sr-only">เลือก</span></th>
+                  <th scope="col">วันที่ผ่านรายการ</th>
+                  <th scope="col">เลขที่เอกสาร</th>
+                  <th scope="col">รายละเอียด</th>
+                  <th scope="col">ผู้บันทึก</th>
+                  <th scope="col" className="jp-num">จำนวนเงิน</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageItems.map((item) => {
+                  const amount = amountOf(item);
+                  const linkedElsewhere = item.pea_job_id && String(item.pea_job_id) !== String(currentJobId);
+                  return (
+                    <tr key={item.id} className={isSelected(item) ? 'is-selected' : undefined}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={isSelected(item)}
+                          onChange={() => toggle(item)}
+                          aria-label={`เลือกเอกสาร ${item.reference_doc_no || item.id} ${formatBaht(amount)}`}
+                        />
+                      </td>
+                      <td>{item.posting_date || '—'}</td>
+                      <td className="jp-mono">{item.reference_doc_no || '—'}</td>
+                      <td className="jp-desc" title={item.description}>
+                        {item.description || '—'}
+                        {linkedElsewhere && <span className="jp-linked">ผูกกับงาน #{item.pea_job_id} แล้ว</span>}
+                      </td>
+                      <td>{item.username || '—'}</td>
+                      <td className={`jp-num job-amount${amount !== null && amount < 0 ? ' is-credit' : ''}`}>{formatBaht(amount)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <nav className="jp-pages" aria-label="แบ่งหน้าผลการค้นหาธุรกรรม">
+              <button type="button" className="jp-button is-quiet" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>ก่อนหน้า</button>
+              <span>หน้า {currentPage} / {totalPages}</span>
+              <button type="button" className="jp-button is-quiet" disabled={currentPage >= totalPages} onClick={() => setPage(currentPage + 1)}>ถัดไป</button>
+            </nav>
+          )}
+        </>
       )}
 
       {selected.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-          {selected.map(item => (
-            <span key={item.id} className="glass" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.3rem 0.6rem', borderRadius: '1rem', fontSize: '0.75rem' }}>
-              {item.reference_doc_no || item.id} (฿{parseFloat(item.value_co_curr || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
-              <X size={12} style={{ cursor: 'pointer' }} onClick={() => remove(item.id)} />
-            </span>
-          ))}
+        <div className="jp-selected">
+          <p className="jp-selected-title">เลือกแล้ว {selected.length} รายการ · รวม {formatBaht(selectedTotal)}</p>
+          <ul className="jp-chips">
+            {selected.map((item) => (
+              <li key={item.id} className="jp-chip">
+                <span>{item.reference_doc_no || `#${item.id}`} ({formatBaht(amountOf(item))})</span>
+                <button type="button" onClick={() => remove(item.id)} aria-label={`นำเอกสาร ${item.reference_doc_no || item.id} ออก`}><X size={14} aria-hidden="true" /></button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>

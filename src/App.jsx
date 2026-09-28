@@ -108,6 +108,17 @@ const pathToRoute = (pathname) => {
   const siteMatch = pathname.match(/^\/management\/computers\/([^/]+)$/);
   if (siteMatch) return { tab: 'management', mgmtView: 'computer_management', mgmtSiteId: siteMatch[1] };
 
+  // mgmtSiteId doubles as the item id one level inside a management view:
+  // a site for computer_management, a job for job_management.
+  const mgmtJobMatch = pathname.match(/^\/management\/jobs\/([^/]+)$/);
+  if (mgmtJobMatch) return { tab: 'management', mgmtView: 'job_management', mgmtSiteId: mgmtJobMatch[1] };
+
+  // Settings sub-pages: /settings/users, /settings/users/:id, /settings/locations
+  const settingsMatch = pathname.match(/^\/settings\/(users|locations)(?:\/([^/]+))?$/);
+  if (settingsMatch && !(settingsMatch[1] === 'locations' && settingsMatch[2])) {
+    return { tab: 'settings', settingsView: settingsMatch[1], settingsItemId: settingsMatch[2] ? decodeURIComponent(settingsMatch[2]) : null };
+  }
+
   const mgmtEntry = Object.entries(MGMT_VIEW_PATHS).find(([, path]) => path === pathname);
   if (mgmtEntry) return { tab: 'management', mgmtView: mgmtEntry[0], mgmtSiteId: null };
 
@@ -132,6 +143,8 @@ function App() {
   const [budgetView, setBudgetView] = useState('summary');
   const [mgmtView, setMgmtView] = useState('overview');
   const [mgmtSiteId, setMgmtSiteId] = useState(null);
+  const [settingsView, setSettingsView] = useState('overview');
+  const [settingsItemId, setSettingsItemId] = useState(null);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -159,6 +172,8 @@ function App() {
     setBudgetView(route.tab === 'budget' ? (route.budgetView || 'summary') : 'summary');
     setMgmtView(route.tab === 'management' ? (route.mgmtView || 'overview') : 'overview');
     setMgmtSiteId(route.tab === 'management' ? (route.mgmtSiteId || null) : null);
+    setSettingsView(route.tab === 'settings' ? (route.settingsView || 'overview') : 'overview');
+    setSettingsItemId(route.tab === 'settings' ? (route.settingsItemId || null) : null);
   };
 
   // Central navigation helper: updates state AND pushes a URL so the browser's
@@ -176,10 +191,12 @@ function App() {
       path = `/equipment/${opts.equipmentId}/edit`;
     } else if (tab === 'budget') {
       path = BUDGET_VIEW_PATHS[opts.budgetView || 'summary'];
+    } else if (tab === 'settings' && opts.settingsView && opts.settingsView !== 'overview') {
+      path = `/settings/${opts.settingsView}${opts.settingsItemId ? `/${encodeURIComponent(opts.settingsItemId)}` : ''}`;
     } else if (tab === 'management') {
       const view = opts.mgmtView || 'overview';
-      path = view === 'computer_management' && opts.mgmtSiteId
-        ? `${MGMT_VIEW_PATHS.computer_management}/${opts.mgmtSiteId}`
+      path = (view === 'computer_management' || view === 'job_management') && opts.mgmtSiteId
+        ? `${MGMT_VIEW_PATHS[view]}/${encodeURIComponent(opts.mgmtSiteId)}`
         : MGMT_VIEW_PATHS[view];
     } else {
       path = TAB_PATHS[tab] || '/';
@@ -819,7 +836,13 @@ function App() {
               <Analytics user={user} token={token} />
             </motion.div>
           ) : activeTab === 'settings' ? (
-            <AdminSettings token={token} user={user} />
+            <AdminSettings
+              token={token}
+              user={user}
+              view={settingsView}
+              itemId={settingsItemId}
+              onViewChange={(view, itemId = null) => navigate('settings', { settingsView: view, settingsItemId: itemId })}
+            />
           ) : activeTab === 'downtime-history' ? (
             <motion.div
               key="downtime-history"

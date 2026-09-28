@@ -1,0 +1,88 @@
+/* Job list (JobManagement.jsx) -- builds on ListPage.css + JobReport.css */
+.jm-back { margin-bottom: 20px; }
+.jm-page .list-table.jm-table { min-width: 1140px; }
+.jm-page .jm-table th:nth-child(1) { width: 64px; }
+.jm-page .jm-table th:nth-child(2) { width: 26%; }
+.jm-page .jm-table th:nth-child(3) { width: 180px; }
+.jm-page .jm-table th:nth-child(4) { width: 110px; }
+.jm-page .jm-table th:nth-child(5) { width: 18%; }
+.jm-page .jm-table th:nth-child(6) { width: 100px; }
+.jm-page .jm-table th:nth-child(7) { width: 150px; }
+.jm-page .jm-table th:nth-child(8) { width: 184px; }
+.jm-page .list-table .list-name { max-width: 100%; }
+.jm-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: .8125rem; }
+.jm-cell-main { display: block; white-space: nowrap; }
+.jm-num { text-align: right; font-variant-numeric: tabular-nums; }
+.jm-num .list-sort { flex-direction: row-reverse; }
+th.jm-num { text-align: right; }
+.jm-sort-idle { opacity: .4; }
+.jm-actions-col { text-align: center; }
+.jm-row-actions { display: flex; justify-content: center; gap: 4px; }
+.jm-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.jm-icon:hover { border-color: var(--input-border); background: var(--bg-accent-subtle); color: var(--text-primary); }
+.jm-icon.is-danger { color: var(--list-danger); }
+.jm-icon.is-danger:hover { background: var(--bg-danger-subtle); }
+.jm-page .list-page-size select { min-height: 44px; }
+.jm-confirm-target { margin: 0 0 8px; color: var(--text-primary); font-weight: 600; }
+.jm-confirm-error { margin: 8px 0 0; color: var(--accent-danger); font-weight: 600; }
+.ef-dialog-body > p:last-child { margin-bottom: 0; }
+
+/* Job page (JobManagementDetails.jsx) */
+.jm-title { flex: 1 1 320px; min-width: 0; }
+.jm-details .job-report-details-header .list-actions { align-self: flex-start; }
+.jm-danger-outline { color: var(--list-danger); border-color: var(--border-danger); }
+.jm-danger-outline:hover:not(:disabled) { background: var(--bg-danger-subtle) !important; border-color: var(--list-danger) !important; }
+.jm-group { margin-bottom: 28px; }
+.jm-group-title { margin: 0 0 12px; font-size: 1.125rem; font-weight: 700; }
+.jm-steps { display: flex; flex-direction: column; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.jm-steps li { display: grid; grid-template-columns: minmax(170px, auto) 1fr; align-items: center; gap: 8px 16px; }
+.jm-steps .list-button { justify-content: flex-start; }
+.jm-steps p { margin: 0; font-size: .875rem; }
+.jm-notice { display: flex; align-items: flex-start; gap: 12px; padding: 16px; margin-bottom: 20px; border-radius: 12px; border: 1px solid; }
+.jm-notice > div { flex: 1; min-width: 0; }
+.jm-notice ul { margin: 8px 0 0; padding-left: 20px; }
+.jm-notice p { margin: 8px 0 0; color: var(--text-secondary); }
+.jm-notice .jm-icon { width: 36px; height: 36px; margin: -6px -6px 0 0; }
+.jm-notice.is-success { border-color: var(--list-success); background: var(--bg-success-subtle); color: var(--list-success); }
+.jm-notice.is-warning { border-color: #b45309; background: var(--bg-warning-subtle, var(--bg-secondary-subtle)); color: #92400e; }
+.dark-theme .jm-notice.is-warning { color: #fde68a; }
+.jm-notice :is(li, strong) { color: inherit; }
+.jm-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 0; padding: 20px 20px 8px; }
+.jm-totals > div { padding: 12px 16px; border-radius: 12px; background: var(--glass-bg-subtle); }
+.jm-totals dt { color: var(--text-secondary); font-size: .8125rem; }
+.jm-totals dd { margin: 4px 0 0; font-size: 1.125rem; font-weight: 700; }
+.jm-finance-hint { margin: 0; padding: 4px 20px 0; }
+.jm-details .list-toolbar { padding-bottom: 12px; }
+.jm-page .list-table.jm-tx-table { min-width: 980px; table-layout: auto; }
+.jm-page .jm-tx-table td { white-space: normal; overflow: visible; }
+.jm-page .jm-tx-table .jm-sub { max-width: 220px; }
+.jm-desc { max-width: 280px; overflow: hidden !important; text-overflow: ellipsis; white-space: nowrap !important; color: var(--text-secondary); }
+.jm-details .list-footer .list-muted { white-space: nowrap; }
+
+/* Workflow dialogs (JobWorkflowModals.jsx) */
+.jw-submit-error { margin-bottom: 16px; align-items: flex-start; text-align: left; }
+.jw-fieldset { margin: 0 0 16px; padding: 12px 16px 16px; border: 1px solid var(--border-subtle); border-radius: 12px; min-width: 0; }
+.jw-fieldset legend { padding: 0 6px; font-size: .9375rem; font-weight: 700; }
+.jw-fieldset.is-invalid { border-color: var(--accent-danger); }
+.jw-assignees { display: flex; flex-direction: column; gap: 4px; margin: 0 0 8px; padding: 0; list-style: none; }
+.jw-assignees li { display: grid; grid-template-columns: 1fr 150px auto; align-items: end; gap: 8px; }
+.jw-assignees li:not(:has(.jw-icon-button)) { grid-template-columns: 1fr 150px; }
+.jw-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-bottom: 14px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-secondary); cursor: pointer; }
+.jw-icon-button:hover { color: var(--accent-danger); border-color: var(--accent-danger); }
+.jw-help { margin: 8px 0 0; }
+.jw-file-label { display: block; margin-bottom: 6px; font-size: .875rem; font-weight: 600; }
+.mf-field input.jw-file, input.jw-file { min-height: 44px; padding: 6px; width: 100%; box-sizing: border-box; border: 1px dashed var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font: inherit; font-size: .875rem; }
+input.jw-file::file-selector-button { min-height: 32px; margin-right: 12px; padding: 4px 12px; border: 1px solid var(--input-border); border-radius: 6px; background: var(--card-bg); color: var(--text-primary); font: inherit; font-weight: 600; cursor: pointer; }
+.jw-fieldset .jp-chips, .mf-field .jp-chips { margin-top: 8px; }
+.jw-optional-title { margin: 8px 0 12px; color: var(--text-secondary); font-size: .875rem; }
+.jw-danger { background: #b91c1c; border-color: #b91c1c; color: #fff; }
+.jw-danger:hover:not(:disabled) { background: #991b1b !important; color: #fff; }
+
+@media (max-width: 600px) {
+  .jm-steps li { grid-template-columns: 1fr; }
+  .jm-steps .list-button { justify-content: center; }
+  .jw-assignees li, .jw-assignees li:not(:has(.jw-icon-button)) { grid-template-columns: 1fr; align-items: stretch; }
+  .jw-icon-button { width: 100%; margin-bottom: 8px; }
+  .jm-totals { padding: 16px 16px 8px; }
+  .jm-finance-hint { padding: 4px 16px 0; }
+}

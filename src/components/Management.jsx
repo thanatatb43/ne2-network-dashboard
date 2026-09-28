@@ -236,7 +236,23 @@ const Management = ({ user, token, onDeviceClick, onEquipmentClick, onAddStock, 
         )}
 
         {view === 'job_management' && (
-          <JobManagement token={token} onBack={() => setView('overview')} user={user} />
+          <JobManagement
+            token={token}
+            user={user}
+            jobId={siteId}
+            onEquipmentClick={onEquipmentClick}
+            onOpenJob={(id) => {
+              onViewChange && onViewChange('job_management', id);
+              // Marks the job page as opened from the list, so its back
+              // button can return with history.back() (keeping the list's
+              // place) instead of stacking another list entry.
+              window.history.replaceState({ ...window.history.state, jmFromList: true }, '');
+            }}
+            onBack={() => {
+              if (siteId && window.history.state?.jmFromList) window.history.back();
+              else setView(siteId ? 'job_management' : 'overview');
+            }}
+          />
         )}
 
         {view === 'computer_management' && (

@@ -1,138 +1,132 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Loader2, Plus, Check, X } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { Search, Loader2, X } from 'lucide-react';
+import './JobPickers.css';
 
-const inputStyle = {
-  width: '100%', padding: '0.6rem 1rem', background: 'var(--input-bg)',
-  border: '1px solid var(--input-border)', color: 'var(--text-primary)',
-  borderRadius: '0.5rem', outline: 'none', fontSize: '0.9rem'
-};
+const LIMIT = 20;
 
-// Search-and-select equipment picker scoped to one PEA site, extracted from
-// JobFormModal.jsx's original inline problem-equipment picker since it's
-// now needed twice (problem_equipment at open time, equipment used for
-// repair at close time) -- same search box + result list + selected-chip
-// shape either way, only the caller's label/hint text differs.
+// Search-and-select equipment picker scoped to one PEA site, used twice:
+// problem_equipment when a job is opened (JobFormModal) and the equipment
+// used for the repair when it's closed (JobWorkflowModals).
 //
 // Fetches only on an explicit "ค้นหา" click (or Enter in the box), not on
 // mount/site-change -- opening the form shouldn't silently pull the site's
-// whole equipment list before the user has asked for anything.
-const EquipmentPicker = ({ siteId, token, selected, onChange, emptySiteHint }) => {
+// whole equipment list before the user has asked for anything. The selection
+// lives in the caller, so it survives new searches.
+const EquipmentPicker = ({ siteId, token, selected, onChange, emptySiteHint, label = 'ค้นหาอุปกรณ์' }) => {
+  const id = useId();
   const [searchInput, setSearchInput] = useState('');
-  const [results, setResults] = useState(null);
-  const [loading, setLoading] = useState(false);
+  // { status: 'idle' | 'loading' | 'error' | 'ready', items, total, query }
+  const [state, setState] = useState({ status: 'idle', items: [], total: 0, query: '' });
+  const inflight = useRef(null);
 
   // A stale result set from a previous site would be misleading once the
   // site changes, so clear back to the "not searched yet" state.
   useEffect(() => {
-    setResults(null);
+    inflight.current?.abort();
+    setState({ status: 'idle', items: [], total: 0, query: '' });
     setSearchInput('');
   }, [siteId]);
+  useEffect(() => () => inflight.current?.abort(), []);
 
   const runSearch = async () => {
     if (!siteId) return;
-    setLoading(true);
+    inflight.current?.abort();
+    const controller = new AbortController();
+    inflight.current = controller;
+    const timer = setTimeout(() => controller.abort(), 20000);
+    const query = searchInput.trim();
+    setState((s) => ({ ...s, status: 'loading' }));
     try {
-      const params = new URLSearchParams();
-      params.append('pea_site_id', siteId);
-      params.append('limit', '20');
-      if (searchInput.trim()) params.append('search', searchInput.trim());
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment?${params.toString()}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      const params = new URLSearchParams({ pea_site_id: siteId, limit: String(LIMIT) });
+      if (query) params.set('search', query);
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment?${params}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal
       });
-      const result = await response.json();
-      setResults(result.data || []);
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !Array.isArray(result?.data)) throw new Error(result?.message || `HTTP ${response.status}`);
+      if (inflight.current !== controller) return;
+      const total = Number(result.pagination?.total);
+      setState({ status: 'ready', items: result.data, total: Number.isFinite(total) ? total : result.data.length, query });
     } catch (error) {
-      console.error('Error fetching equipment for picker:', error);
-      setResults([]);
+      if (inflight.current !== controller) return;
+      setState((s) => ({ ...s, status: 'error', error: error.name === 'AbortError' ? 'หมดเวลารอการตอบกลับจากเซิร์ฟเวอร์' : 'ค้นหาอุปกรณ์ไม่สำเร็จ' }));
     } finally {
-      setLoading(false);
+      clearTimeout(timer);
     }
   };
 
-  // Enter-to-search, without submitting whatever outer <form> this picker
-  // is embedded in (JobFormModal.jsx / JobManagement.jsx's ปิดงาน form).
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      runSearch();
-    }
-  };
-
-  const isSelected = (item) => selected.some(e => e.id === item.id);
-  const toggle = (item) => {
-    onChange(isSelected(item) ? selected.filter(e => e.id !== item.id) : [...selected, item]);
-  };
-  const remove = (id) => onChange(selected.filter(e => e.id !== id));
+  const isSelected = (item) => selected.some((e) => e.id === item.id);
+  const toggle = (item) => onChange(isSelected(item) ? selected.filter((e) => e.id !== item.id) : [...selected, item]);
+  const remove = (itemId) => onChange(selected.filter((e) => e.id !== itemId));
 
   return (
-    <>
+    <div className="jp-picker">
       {!siteId ? (
-        <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{emptySiteHint || 'เลือกสำนักงาน ก่อน จึงจะค้นหาอุปกรณ์ของสาขานั้นได้'}</p>
+        <p className="jp-hint">{emptySiteHint || 'เลือกสำนักงานก่อน จึงจะค้นหาอุปกรณ์ของสาขานั้นได้'}</p>
       ) : (
         <>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <div style={{ position: 'relative', flex: 1 }}>
-              <Search size={16} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
+          <div className="jp-search">
+            <label className="jp-sr-only" htmlFor={`${id}-q`}>{label}</label>
+            <div className="jp-search-input">
+              <Search size={16} aria-hidden="true" />
               <input
-                type="text"
-                placeholder="ค้นหาอุปกรณ์ในสาขานี้..."
+                id={`${id}-q`}
+                type="search"
+                placeholder="ชื่ออุปกรณ์ในสาขานี้ (เว้นว่างเพื่อดูทั้งหมด)"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                style={{ ...inputStyle, padding: '0.5rem 0.75rem 0.5rem 2.25rem', fontSize: '0.85rem' }}
+                // Enter searches without submitting the outer form.
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } }}
               />
             </div>
-            <button
-              type="button"
-              onClick={runSearch}
-              disabled={loading}
-              className="glass"
-              style={{ padding: '0.5rem 0.9rem', borderRadius: '0.5rem', border: 'none', background: 'var(--accent-primary)', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 600 }}
-            >
-              {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} ค้นหา
+            <button type="button" className="jp-button" onClick={runSearch} disabled={state.status === 'loading'}>
+              {state.status === 'loading' ? <Loader2 size={16} className="animate-spin" aria-hidden="true" /> : <Search size={16} aria-hidden="true" />} ค้นหา
             </button>
           </div>
-          {results !== null && (
-            <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              {results.length === 0 ? (
-                <p style={{ margin: '0.5rem 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>ไม่พบอุปกรณ์</p>
-              ) : (
-                results.map(item => {
-                  const isSel = isSelected(item);
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => toggle(item)}
-                      className="glass"
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0.75rem',
-                        borderRadius: '0.4rem', cursor: 'pointer', fontSize: '0.8rem',
-                        border: isSel ? '1px solid var(--accent-primary)' : undefined,
-                        background: isSel ? 'var(--bg-accent-subtle)' : undefined
-                      }}
-                    >
-                      <span>{item.name || '-'} <span style={{ color: 'var(--text-secondary)' }}>({item.equipment_type || '-'})</span></span>
-                      {isSel ? <Check size={14} style={{ color: 'var(--accent-primary)' }} /> : <Plus size={14} style={{ color: 'var(--text-secondary)' }} />}
-                    </div>
-                  );
-                })
-              )}
-            </div>
+
+          <div aria-live="polite">
+            {state.status === 'loading' && <p className="jp-hint">กำลังค้นหา…</p>}
+            {state.status === 'error' && (
+              <p className="jp-error" role="alert">{state.error} <button type="button" className="jp-link" onClick={runSearch}>ลองใหม่</button></p>
+            )}
+            {state.status === 'ready' && state.items.length === 0 && (
+              <p className="jp-hint">{state.query ? `ไม่พบอุปกรณ์ที่ตรงกับ "${state.query}" ในสาขานี้` : 'สาขานี้ยังไม่มีอุปกรณ์ในระบบ'}</p>
+            )}
+            {state.status === 'ready' && state.items.length > 0 && state.total > state.items.length && (
+              <p className="jp-hint">แสดง {state.items.length} จาก {state.total} รายการ ระบุคำค้นให้แคบลงถ้าไม่พบรายการที่ต้องการ</p>
+            )}
+          </div>
+
+          {state.status === 'ready' && state.items.length > 0 && (
+            <ul className="jp-results" aria-label="ผลการค้นหาอุปกรณ์">
+              {state.items.map((item) => (
+                <li key={item.id}>
+                  <label className={`jp-option${isSelected(item) ? ' is-selected' : ''}`}>
+                    <input type="checkbox" checked={isSelected(item)} onChange={() => toggle(item)} />
+                    <span className="jp-option-name">{item.name || '-'}</span>
+                    <span className="jp-option-meta">{[item.equipment_type, item.asset_number].filter(Boolean).join(' · ') || '—'}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
           )}
         </>
       )}
 
       {selected.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-          {selected.map(item => (
-            <span key={item.id} className="glass" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.3rem 0.6rem', borderRadius: '1rem', fontSize: '0.75rem' }}>
-              {item.name || '-'}
-              <X size={12} style={{ cursor: 'pointer' }} onClick={() => remove(item.id)} />
-            </span>
-          ))}
+        <div className="jp-selected">
+          <p className="jp-selected-title">เลือกแล้ว {selected.length} รายการ</p>
+          <ul className="jp-chips">
+            {selected.map((item) => (
+              <li key={item.id} className="jp-chip">
+                <span>{item.name || '-'}</span>
+                <button type="button" onClick={() => remove(item.id)} aria-label={`นำ ${item.name || 'อุปกรณ์นี้'} ออก`}><X size={14} aria-hidden="true" /></button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
-    </>
+    </div>
   );
 };
 

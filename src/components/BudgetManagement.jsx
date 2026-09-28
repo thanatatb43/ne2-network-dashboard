@@ -1,815 +1,675 @@
-import BudgetTransactionsPanel from './BudgetTransactionsPanel';
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { toast } from 'react-hot-toast';
-import {
-  ArrowLeft, Loader2, Edit2, Trash2, Plus, Save,
-  AlertTriangle, ChevronLeft, ChevronRight, Search,
-  ArrowUpDown, ArrowUp, ArrowDown, Wallet, X, Upload, FileText
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Edit2, FileText, Loader2, Plus, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react';
+import BudgetTransactionsPanel from './BudgetTransactionsPanel';
+import ModalFrame from './common/ModalFrame.jsx';
+import ConfirmDialog from './equipment-form/ConfirmDialog.jsx';
+import './ListPage.css';
+import './BudgetManagement.css';
+
+const API = import.meta.env.VITE_API_BASE_URL;
+const VIEW_KEY = 'budget_mgmt_view.v1';
+const PAGE_SIZES = [10, 25, 50, 100];
+const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+// Upload targets the backend accepts (same three as before).
+const UPLOAD_ACCOUNTS = [
+  { value: '53051060', label: '53051060 ค่าบำรุงฯ/ซ่อม-IT' },
+  { value: '53032070', label: '53032070 ค่าInst.Equipสื่อสาร' },
+  { value: '53032080', label: '53032080 คชจ.ใช้ Internet' }
+];
+const UPLOAD_EXTS = ['.xlsx', '.xls', '.csv'];
+const MAX_UPLOAD = 100 * 1024 * 1024;
+
+const num = (v) => { const n = Number.parseFloat(v); return Number.isFinite(n) ? n : null; };
+const baht = (n) => (n === null ? '—' : `฿${n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+// Rows are monthly snapshots (day is 0 in real data), so show month + period
+// rather than inventing a day.
+const snapshotLabel = (b) => {
+  const m = Number(b.month);
+  const month = m >= 1 && m <= 12 ? THAI_MONTHS[m - 1] : '';
+  return [month, b.year].filter(Boolean).join(' ') || '—';
+};
+const periodLabel = (p) => { const n = num(p); return n === null ? (p || '—') : String(Math.trunc(n) === n ? Math.trunc(n) : n); };
+const figures = (b) => {
+  const allocated = num(b.budget_allocated);
+  const used = num(b.budget_used);
+  const remaining = allocated !== null && used !== null ? allocated - used : null;
+  const usedPct = allocated ? (used / allocated) * 100 : null;
+  return { allocated, used, remaining, usedPct };
+};
+
+const SORTS = {
+  snapshot: { label: 'ข้อมูล ณ', value: (b) => (Number(b.year) || 0) * 100 + (Number(b.month) || 0) },
+  account_code: { label: 'รหัสบัญชี', value: (b) => b.account_code || '' },
+  account_name: { label: 'ชื่อบัญชี', value: (b) => b.account_name || '' },
+  allocated: { label: 'งบที่ได้รับ', value: (b) => figures(b).allocated },
+  used: { label: 'ใช้ไป', value: (b) => figures(b).used },
+  remaining: { label: 'คงเหลือ', value: (b) => figures(b).remaining }
+};
+
+const readView = () => {
+  const fallback = { tab: 'budgets', search: '', year: '', pageSize: 10, sort: { key: 'snapshot', order: 'desc' } };
+  try {
+    const v = JSON.parse(sessionStorage.getItem(VIEW_KEY)) || {};
+    return {
+      tab: v.tab === 'transactions' ? 'transactions' : 'budgets',
+      search: typeof v.search === 'string' ? v.search.slice(0, 200) : '',
+      year: typeof v.year === 'string' ? v.year : '',
+      pageSize: PAGE_SIZES.includes(v.pageSize) || v.pageSize === 0 ? v.pageSize : 10,
+      sort: SORTS[v.sort?.key] && ['asc', 'desc'].includes(v.sort?.order) ? v.sort : fallback.sort
+    };
+  } catch {
+    return fallback;
+  }
+};
+
+const failure = (response, result, fallback) => {
+  if (response?.status === 401) return 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่';
+  if (response?.status === 403) return 'บัญชีนี้ไม่มีสิทธิ์ทำรายการนี้';
+  return result?.message || result?.error || fallback;
+};
 
 const BudgetManagement = ({ token, onBack, user }) => {
-  const [budgets, setBudgets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [editingBudget, setEditingBudget] = useState(null);
-  const [formData, setFormData] = useState({
-    cost_center_group: '',
-    account_code: '',
-    account_name: '',
-    budget_used: '',
-    budget_allocated: '',
-    year: new Date().getFullYear().toString(),
-    month: (new Date().getMonth() + 1).toString(),
-    period: (new Date().getMonth() + 1).toString(),
-    day: ''
-  });
-  const [selectors, setSelectors] = useState({
-    cost_center_groups: [],
-    account_codes: [],
-    account_names: [],
-    accounts_mapped: [],
-    years: []
-  });
-  const [actionLoading, setActionLoading] = useState(false);
-  const [budgetToDelete, setBudgetToDelete] = useState(null);
-  const [responseModal, setResponseModal] = useState(null);
-  const [showUploadModal, setShowUploadModal] = useState(false);
-  const [uploadFormData, setUploadFormData] = useState({
-    file: null,
-    cost_center: '53051060',
-    year: new Date().getFullYear().toString()
-  });
-
-  // Transactions state
-  const [transactionsRefresh, setTransactionsRefresh] = useState(0);
-  const [activeSubTab, setActiveSubTab] = useState('budgets'); // 'budgets' or 'transactions'
-  const [uploadResult, setUploadResult] = useState(null);
-  const [showResultModal, setShowResultModal] = useState(false);
-  const [showUploadConfirm, setShowUploadConfirm] = useState(false);
-
-  // Pagination and search states
-  const [currentPage, setCurrentPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
-
-  // Permissions logic
   const isSuperAdmin = user?.role === 'super_admin';
-  const isOperator = user?.role === 'operator';
-  const canAdd = isSuperAdmin || isOperator;
-  const canEdit = isSuperAdmin || isOperator;
+  const canWrite = isSuperAdmin || user?.role === 'operator';
   const canDelete = isSuperAdmin;
 
-  const [showFormModal, setShowFormModal] = useState(false);
-
-  const fetchBudgets = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/budgets`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await response.json();
-      if (result.success) {
-        setBudgets(result.data || []);
-      } else {
-        setBudgets(Array.isArray(result) ? result : []);
-      }
-    } catch (error) {
-      console.error('Error fetching budgets:', error);
-      toast.error('Failed to load budget data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchSelectors = async () => {
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/budgets/selectors`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await response.json();
-      if (result.success) {
-        setSelectors({
-          cost_center_groups: result.data.cost_center_groups || [],
-          account_codes: result.data.account_codes || [],
-          account_names: result.data.account_names || [],
-          accounts_mapped: result.data.accounts_mapped || [],
-          years: result.data.years || []
-        });
-      }
-    } catch (error) {
-      console.error('Error fetching selectors:', error);
-    }
-  };
+  const [view] = useState(readView);
+  const [tab, setTab] = useState(view.tab);
+  const [search, setSearch] = useState(view.search);
+  const [year, setYear] = useState(view.year);
+  const [pageSize, setPageSize] = useState(view.pageSize);
+  const [sort, setSort] = useState(view.sort);
+  const [page, setPage] = useState(1);
+  const [state, setState] = useState({ status: 'loading', items: [], error: '' });
+  const [selectors, setSelectors] = useState({ cost_center_groups: [], account_codes: [], account_names: [], accounts_mapped: [], years: [] });
+  const [editing, setEditing] = useState(null); // null | { budget: null | row }
+  const [toDelete, setToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadResult, setUploadResult] = useState(null);
+  const [txRefresh, setTxRefresh] = useState(0);
+  const inflight = useRef(null);
 
   useEffect(() => {
-    if (activeSubTab === 'budgets') fetchBudgets();
-    fetchSelectors();
-  }, [activeSubTab]);
+    try { sessionStorage.setItem(VIEW_KEY, JSON.stringify({ tab, search, year, pageSize, sort })); } catch { /* optional */ }
+  }, [tab, search, year, pageSize, sort]);
 
-  const handleSort = (key) => {
-    let direction = 'asc';
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
+  const load = useCallback(async () => {
+    inflight.current?.abort();
+    const controller = new AbortController();
+    inflight.current = controller;
+    const timer = setTimeout(() => controller.abort(), 20000);
+    setState((s) => ({ ...s, status: s.items.length ? 'refreshing' : 'loading' }));
+    try {
+      const response = await fetch(`${API}/api/budgets`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+      const result = await response.json().catch(() => null);
+      const list = Array.isArray(result) ? result : result?.data;
+      if (!response.ok || !Array.isArray(list)) throw new Error(failure(response, result, `HTTP ${response.status}`));
+      if (inflight.current !== controller) return;
+      setState({ status: 'ready', items: list.filter(Boolean), error: '' });
+    } catch (err) {
+      if (inflight.current !== controller) return;
+      const message = err.name === 'AbortError' ? 'หมดเวลารอการตอบกลับจากเซิร์ฟเวอร์' : err.message || 'โหลดข้อมูลงบประมาณไม่สำเร็จ';
+      setState((s) => ({ ...s, status: s.items.length ? 'stale' : 'error', error: message }));
+    } finally {
+      clearTimeout(timer);
     }
-    setSortConfig({ key, direction });
-  };
+  }, [token]);
 
-  const filteredBudgets = budgets.filter(item => {
-    const search = searchTerm.toLowerCase();
-    return (
-      item.account_name?.toLowerCase().includes(search) ||
-      item.account_code?.toLowerCase().includes(search) ||
-      item.cost_center_group?.toLowerCase().includes(search) ||
-      item.year?.toString().includes(search)
-    );
+  useEffect(() => {
+    load();
+    return () => { const c = inflight.current; inflight.current = null; c?.abort(); };
+  }, [load]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${API}/api/budgets/selectors`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
+      .then((r) => r.json())
+      .then((r) => { if (r?.success && r.data) setSelectors((s) => ({ ...s, ...r.data })); })
+      .catch(() => { /* suggestions only */ });
+    return () => controller.abort();
+  }, [token]);
+
+  const years = [...new Set(state.items.map((b) => String(b.year)).filter(Boolean))].sort((a, b) => b - a);
+  const q = search.trim().toLowerCase();
+  const filtered = state.items.filter((b) => (!year || String(b.year) === year)
+    && (!q || [b.account_name, b.account_code, b.cost_center_group, b.year].some((v) => String(v ?? '').toLowerCase().includes(q))));
+  const get = SORTS[sort.key].value;
+  const sorted = [...filtered].sort((a, b) => {
+    const [x, y] = [get(a), get(b)];
+    if (x === null) return y === null ? 0 : 1;
+    if (y === null) return -1;
+    const cmp = typeof x === 'string' ? x.localeCompare(y, 'th') : x - y;
+    return sort.order === 'asc' ? cmp : -cmp;
   });
+  const size = pageSize || sorted.length || 1;
+  const totalPages = Math.max(1, Math.ceil(sorted.length / size));
+  const current = Math.min(page, totalPages);
+  const rows = sorted.slice((current - 1) * size, current * size);
+  const hasData = state.items.length > 0;
+  const filtering = Boolean(q || year);
 
-  const sortedBudgets = [...filteredBudgets].sort((a, b) => {
-    if (!sortConfig.key) return 0;
-    const aVal = a[sortConfig.key];
-    const bVal = b[sortConfig.key];
-    if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
-    if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
-    return 0;
-  });
+  const sortHeader = (key, className) => (
+    <th scope="col" className={className} aria-sort={sort.key === key ? (sort.order === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button type="button" className="list-sort" onClick={() => { setSort((s) => ({ key, order: s.key === key && s.order === 'asc' ? 'desc' : 'asc' })); setPage(1); }}>
+        {SORTS[key].label}
+        {sort.key !== key ? <ArrowUpDown size={14} aria-hidden="true" className="bm-sort-idle" /> : sort.order === 'asc' ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />}
+      </button>
+    </th>
+  );
 
-  const currentItems = sortedBudgets.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-  const totalPages = Math.ceil(sortedBudgets.length / itemsPerPage);
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => {
-      const newData = { ...prev, [name]: value };
-
-      // Auto-fill account_name if account_code is mapped
-      if (name === 'account_code') {
-        const mapping = selectors.accounts_mapped.find(m => m.account_code === value);
-        if (mapping) {
-          newData.account_name = mapping.account_name;
-        }
-      }
-      return newData;
-    });
-  };
-
-  const resetForm = () => {
-    setFormData({
-      cost_center_group: '',
-      account_code: '',
-      account_name: '',
-      budget_used: '',
-      budget_allocated: '',
-      year: new Date().getFullYear().toString(),
-      month: (new Date().getMonth() + 1).toString(),
-      period: (new Date().getMonth() + 1).toString(),
-      day: ''
-    });
-    setEditingBudget(null);
-    setShowFormModal(false);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setActionLoading(true);
-
-    const API_URL = import.meta.env.VITE_API_BASE_URL;
-    const url = editingBudget
-      ? `${API_URL}/api/budgets/${editingBudget.id}`
-      : `${API_URL}/api/budgets`;
-
-    const method = editingBudget ? 'PUT' : 'POST';
-
-    // Build URLSearchParams as requested (qs.stringify equivalent)
-    const params = new URLSearchParams();
-    Object.keys(formData).forEach(key => {
-      params.append(key, formData[key]);
-    });
-
+  const confirmDelete = async () => {
+    setDeleting(true);
+    setDeleteError('');
     try {
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: params.toString()
-      });
-
-      const result = await response.json();
-      if (result.success || response.ok) {
-        toast.success(editingBudget ? 'Budget updated successfully' : 'Budget added successfully');
-        resetForm();
-        fetchBudgets();
-      } else {
-        toast.error(result.message || 'Failed to save budget');
-      }
-    } catch (error) {
-      console.error('Error saving budget:', error);
-      toast.error('Network error while saving budget');
+      const response = await fetch(`${API}/api/budgets/${toDelete.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success === false) throw new Error(failure(response, result, 'ลบข้อมูลงบประมาณไม่สำเร็จ'));
+      toast.success('ลบข้อมูลงบประมาณแล้ว');
+      setToDelete(null);
+      load();
+    } catch (err) {
+      setDeleteError(err.message === 'Failed to fetch' ? 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ ข้อมูลยังไม่ถูกลบ' : err.message);
     } finally {
-      setActionLoading(false);
+      setDeleting(false);
     }
   };
 
-  const handleDelete = async () => {
-    if (!budgetToDelete) return;
-    setActionLoading(true);
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/budgets/${budgetToDelete.id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const result = await response.json();
-      if (result.success || response.ok) {
-        toast.success('Budget deleted successfully');
-        setBudgetToDelete(null);
-        fetchBudgets();
-      } else {
-        toast.error(result.message || 'Failed to delete budget');
-      }
-    } catch (error) {
-      console.error('Error deleting budget:', error);
-      toast.error('Network error while deleting budget');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleUpload = async (e) => {
-    if (e) e.preventDefault();
-
-    if (!uploadFormData.file) {
-      toast.error('กรุณาเลือกไฟล์ที่ต้องการอัพโหลด');
-      return;
-    }
-
-    const fileSizeLimit = 100 * 1024 * 1024; // 100MB
-    if (uploadFormData.file.size > fileSizeLimit) {
-      toast.error('ไฟล์มีขนาดใหญ่เกิน 100MB');
-      return;
-    }
-
-    setActionLoading(true);
-    const data = new FormData();
-    data.append('file', uploadFormData.file);
-    data.append('cost_center', uploadFormData.cost_center);
-    data.append('year', uploadFormData.year);
-
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/budgets/upload-transactions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: data
-      });
-
-      const result = await response.json();
-      if (result.success || response.ok) {
-        toast.success('อัพโหลดข้อมูลสำเร็จ');
-        setShowUploadModal(false);
-        setUploadResult(result);
-        setShowResultModal(true);
-        setUploadFormData({ file: null, cost_center: '53051060', year: new Date().getFullYear().toString() });
-        if (activeSubTab === 'budgets') {
-          fetchBudgets();
-        } else {
-          setTransactionsRefresh(n => n + 1);
-        }
-      } else {
-        toast.error(result.message || 'เกิดข้อผิดพลาดในการอัพโหลด');
-      }
-    } catch (error) {
-      console.error('Upload error:', error);
-      toast.error('Network error during upload');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const startEdit = (budget) => {
-    setEditingBudget(budget);
-    setFormData({
-      cost_center_group: budget.cost_center_group || '',
-      account_code: budget.account_code || '',
-      account_name: budget.account_name || '',
-      budget_used: budget.budget_used || '',
-      budget_allocated: budget.budget_allocated || '',
-      year: budget.year?.toString() || '',
-      month: budget.month?.toString() || '',
-      period: budget.period?.toString() || '',
-      day: budget.day || ''
-    });
-    setShowFormModal(true);
-  };
+  const uploadButton = canWrite && (
+    <button type="button" className="list-button" onClick={() => setUploadOpen(true)}>
+      <Upload size={18} aria-hidden="true" /> อัปโหลดข้อมูลการเบิกจ่าย
+    </button>
+  );
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-      <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <button onClick={onBack} className="glass" style={{ padding: '0.5rem 1rem', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <ArrowLeft size={16} /> กลับ
-        </button>
-        <h2 style={{ margin: 0, fontSize: '1.5rem' }}>จัดการงบประมาณและข้อมูลการเบิกจ่าย</h2>
-      </div>
-
-      {/* Sub Tabs */}
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', padding: '0 0.5rem' }}>
-        <button
-          onClick={() => { setActiveSubTab('budgets'); setCurrentPage(1); setSearchTerm(''); }}
-          style={{
-            padding: '0.75rem 1.5rem', background: 'none', border: 'none', cursor: 'pointer',
-            color: activeSubTab === 'budgets' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-            borderBottom: activeSubTab === 'budgets' ? '2px solid var(--accent-primary)' : '2px solid transparent',
-            fontWeight: 600, fontSize: '0.95rem', transition: 'all 0.3s'
-          }}
-        >
-          งบประมาณ (Budgets)
-        </button>
-        <button
-          onClick={() => { setActiveSubTab('transactions'); setCurrentPage(1); setSearchTerm(''); }}
-          style={{
-            padding: '0.75rem 1.5rem', background: 'none', border: 'none', cursor: 'pointer',
-            color: activeSubTab === 'transactions' ? 'var(--accent-primary)' : 'var(--text-secondary)',
-            borderBottom: activeSubTab === 'transactions' ? '2px solid var(--accent-primary)' : '2px solid transparent',
-            fontWeight: 600, fontSize: '0.95rem', transition: 'all 0.3s'
-          }}
-        >
-          ข้อมูลการเบิกจ่าย (Transactions)
-        </button>
-      </div>
-
-      {activeSubTab === 'transactions' ? (
-        <BudgetTransactionsPanel
-          token={token}
-          refreshKey={transactionsRefresh}
-          actions={canAdd && (
-            <button type="button" className="list-button list-button-primary" onClick={() => setShowUploadModal(true)}>
-              <Upload size={18} aria-hidden="true" /> อัปโหลดข้อมูลการเบิกจ่าย
+    <div className="list-page bm-page">
+      <button type="button" className="list-button bm-back" onClick={onBack}><ArrowLeft size={16} aria-hidden="true" /> กลับไปหน้าการจัดการ</button>
+      <header className="list-header">
+        <div>
+          <h1>จัดการงบประมาณ</h1>
+          <p>ข้อมูลงบประมาณรายเดือนของแต่ละบัญชี และข้อมูลการเบิกจ่ายที่นำเข้าจากไฟล์</p>
+        </div>
+        <div className="list-actions">
+          {tab === 'budgets' && (
+            <button type="button" className="list-button" onClick={load} disabled={state.status === 'loading' || state.status === 'refreshing'}>
+              <RefreshCw size={18} aria-hidden="true" className={state.status === 'refreshing' ? 'animate-spin' : ''} /> รีเฟรช
             </button>
           )}
-        />
+          {uploadButton}
+          {tab === 'budgets' && canWrite && (
+            <button type="button" className="list-button list-button-primary" onClick={() => setEditing({ budget: null })}>
+              <Plus size={18} aria-hidden="true" /> เพิ่มงบประมาณ
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className="bm-tabs" role="group" aria-label="เลือกข้อมูลที่ต้องการจัดการ">
+        {[['budgets', 'งบประมาณ'], ['transactions', 'ข้อมูลการเบิกจ่าย']].map(([key, label]) => (
+          <button key={key} type="button" className="bm-tab" aria-pressed={tab === key} onClick={() => setTab(key)}>{label}</button>
+        ))}
+      </div>
+
+      {tab === 'transactions' ? (
+        <BudgetTransactionsPanel token={token} refreshKey={txRefresh} />
       ) : (
-      <div className="card glass" style={{ padding: 0, overflow: 'hidden', borderRadius: '0.75rem' }}>
-        <div style={{ padding: '1.25rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <div className="glass" style={{ display: 'flex', alignItems: 'center', padding: '0.4rem 0.8rem', gap: '0.5rem', borderRadius: '0.5rem' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Show:</span>
-              <select value={itemsPerPage} onChange={(e) => setItemsPerPage(Number(e.target.value))} style={{ background: 'none', border: 'none', color: 'var(--text-primary)', outline: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
-                {[10, 25, 50, 100].map(v => <option key={v} value={v} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{v}</option>)}
-                <option value={999999} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>All</option>
-              </select>
+        <>
+          {(state.status === 'error' || state.status === 'stale') && (
+            <div className="list-error" role="alert">
+              <AlertCircle size={20} aria-hidden="true" />
+              <div><strong>{state.status === 'stale' ? 'รีเฟรชไม่สำเร็จ แสดงข้อมูลเดิม' : 'โหลดข้อมูลงบประมาณไม่สำเร็จ'}</strong><p>{state.error}</p></div>
+              <button type="button" className="list-button" onClick={load}>ลองใหม่</button>
             </div>
-            {canAdd && (
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                {activeSubTab === 'budgets' ? (
-                  <button
-                    onClick={() => { resetForm(); setShowFormModal(true); }}
-                    className="glass"
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: '0.5rem',
-                      padding: '0.5rem 1rem', background: 'var(--accent-primary)',
-                      border: 'none', color: '#fff', borderRadius: '0.5rem',
-                      fontWeight: 600, cursor: 'pointer'
-                    }}
-                  >
-                    <Plus size={18} /> เพิ่มงบประมาณ
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setShowUploadModal(true)}
-                    className="glass"
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: '0.5rem',
-                      padding: '0.5rem 1rem', background: 'var(--accent-primary)',
-                      border: 'none', color: '#fff', borderRadius: '0.5rem',
-                      fontWeight: 600, cursor: 'pointer'
-                    }}
-                  >
-                    <Upload size={18} /> อัพโหลดข้อมูลการเบิกจ่ายงบ
-                  </button>
-                )}
+          )}
+
+          <section className="list-panel" aria-label="รายการงบประมาณ">
+            <div className="list-toolbar">
+              <label className={`list-field list-search${search ? ' is-active' : ''}`}>
+                <span>ค้นหา</span>
+                <div className="list-search-input">
+                  <Search size={18} aria-hidden="true" />
+                  <input type="search" placeholder="ชื่อบัญชี รหัสบัญชี หรือกลุ่มศูนย์ต้นทุน" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+                </div>
+              </label>
+              <label className={`list-field${year ? ' is-active' : ''}`}>
+                <span>ปี</span>
+                <select value={year} onChange={(e) => { setYear(e.target.value); setPage(1); }}>
+                  <option value="">ทุกปี</option>
+                  {years.map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </label>
+              {filtering && <button type="button" className="list-button" onClick={() => { setSearch(''); setYear(''); setPage(1); }}>ล้างตัวกรอง</button>}
+            </div>
+            {hasData && (
+              <div className="list-result-info">
+                <span role="status">{filtering ? `พบ ${sorted.length} จาก ${state.items.length} รายการ` : `ทั้งหมด ${state.items.length} รายการ`}</span>
+                <span>ข้อมูลแต่ละแถวคือยอด ณ เดือนที่บันทึก</span>
               </div>
             )}
-          </div>
-          <div style={{ position: 'relative', width: '300px' }}>
-            <Search size={18} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
-            <input type="text" placeholder={activeSubTab === 'budgets' ? "Search budgets..." : "Search transactions..."} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '0.6rem 1rem 0.6rem 2.5rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem', outline: 'none' }} />
-          </div>
-        </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          {activeSubTab === 'budgets' ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-              <thead>
-                <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
-                  <th onClick={() => handleSort('year')} style={{ padding: '1rem 1.5rem', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>ปี {sortConfig.key === 'year' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} /> : <ArrowDown size={14} />) : <ArrowUpDown size={14} opacity={0.3} />}</div>
-                  </th>
-                  <th style={{ padding: '1rem 1.5rem' }}>Period</th>
-                  <th style={{ padding: '1rem 1.5rem' }}>วันที่ (Date)</th>
-                  <th style={{ padding: '1rem 1.5rem' }}>Cost Center Group</th>
-                  <th style={{ padding: '1rem 1.5rem' }}>รหัสบัญชี</th>
-                  <th style={{ padding: '1rem 1.5rem' }}>ชื่อบัญชี</th>
-                  <th style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>งบประมาณที่ได้รับ</th>
-                  <th style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>งบประมาณที่ใช้ไป</th>
-                  <th style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>คงเหลือ</th>
-                  <th style={{ padding: '1rem 1.5rem', textAlign: 'center' }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan="10" style={{ padding: '4rem', textAlign: 'center' }}><Loader2 className="animate-spin" style={{ margin: '0 auto' }} /><p style={{ marginTop: '1rem' }}>Loading budgets...</p></td></tr>
-                ) : currentItems.length === 0 ? (
-                  <tr><td colSpan="10" style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-secondary)' }}>ไม่พบข้อมูลรายจ่าย</td></tr>
-                ) : (
-                  currentItems.map((item) => (
-                    <tr key={item.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }} className="table-row-hover">
-                      <td style={{ padding: '1rem 1.5rem' }}>{item.year}</td>
-                      <td style={{ padding: '1rem 1.5rem' }}>{item.period || '-'}</td>
-                      <td style={{ padding: '1rem 1.5rem' }}>
-                        {item.year}-{String(item.month).padStart(2, '0')}-{String(item.day || '01').padStart(2, '0')}
-                      </td>
-                      <td style={{ padding: '1rem 1.5rem' }}>{item.cost_center_group}</td>
-                      <td style={{ padding: '1rem 1.5rem' }}>{item.account_code}</td>
-                      <td style={{ padding: '1rem 1.5rem' }}>{item.account_name}</td>
-                      <td style={{ padding: '1rem 1.5rem', textAlign: 'right', color: 'var(--accent-success)', fontWeight: 600 }}>
-                        ฿{parseFloat(item.budget_allocated || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td style={{ padding: '1rem 1.5rem', textAlign: 'right', color: 'var(--accent-warning)', fontWeight: 600 }}>
-                        ฿{parseFloat(item.budget_used || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td style={{ padding: '1rem 1.5rem', textAlign: 'right' }}>
-                        <div style={{
-                          fontWeight: 700,
-                          color: (parseFloat(item.budget_allocated || 0) - parseFloat(item.budget_used || 0)) < 0 ? 'var(--accent-danger)' : 'var(--accent-primary)'
-                        }}>
-                          ฿{(parseFloat(item.budget_allocated || 0) - parseFloat(item.budget_used || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                          {parseFloat(item.budget_allocated || 0) > 0
-                            ? (((parseFloat(item.budget_allocated) - parseFloat(item.budget_used)) / parseFloat(item.budget_allocated)) * 100).toFixed(1)
-                            : '0.0'}% remaining
-                        </div>
-                      </td>
-                      <td style={{ padding: '1rem 1.5rem', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
-                          <button onClick={() => startEdit(item)} disabled={!canEdit} className="glass" style={{ padding: '0.4rem', border: 'none', color: 'var(--text-secondary)', cursor: canEdit ? 'pointer' : 'not-allowed', opacity: canEdit ? 1 : 0.3 }} title="Edit"><Edit2 size={14} /></button>
-                          <button onClick={() => setBudgetToDelete(item)} disabled={!canDelete} className="glass" style={{ padding: '0.4rem', border: 'none', color: 'var(--accent-danger)', cursor: canDelete ? 'pointer' : 'not-allowed', opacity: canDelete ? 1 : 0.3 }} title="Delete"><Trash2 size={14} /></button>
-                        </div>
-                      </td>
+            {state.status === 'loading' ? (
+              <div className="bm-state" role="status"><Loader2 size={24} className="animate-spin" aria-hidden="true" /><p>กำลังโหลดข้อมูลงบประมาณ…</p></div>
+            ) : !hasData ? (
+              state.status === 'error' ? null : (
+                <div className="bm-state"><p><strong>ยังไม่มีข้อมูลงบประมาณ</strong></p>{canWrite && <button type="button" className="list-button list-button-primary" onClick={() => setEditing({ budget: null })}><Plus size={18} aria-hidden="true" /> เพิ่มงบประมาณ</button>}</div>
+              )
+            ) : sorted.length === 0 ? (
+              <div className="bm-state"><p><strong>ไม่พบข้อมูลที่ตรงกับเงื่อนไข</strong></p><button type="button" className="list-button" onClick={() => { setSearch(''); setYear(''); }}>ล้างตัวกรอง</button></div>
+            ) : (
+              <div className="list-table-scroll" tabIndex={0} role="region" aria-label="ตารางงบประมาณ เลื่อนแนวนอนเพื่อดูทุกคอลัมน์">
+                <table className="list-table bm-table">
+                  <caption className="list-sr-only">งบประมาณรายเดือน หน้า {current} จาก {totalPages}</caption>
+                  <thead>
+                    <tr>
+                      {sortHeader('snapshot')}
+                      <th scope="col">กลุ่มศูนย์ต้นทุน</th>
+                      {sortHeader('account_code')}
+                      {sortHeader('account_name')}
+                      {sortHeader('allocated', 'bm-num')}
+                      {sortHeader('used', 'bm-num')}
+                      {sortHeader('remaining', 'bm-num')}
+                      {(canWrite || canDelete) && <th scope="col" className="bm-actions-col">จัดการ</th>}
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          ) : null}
-        </div>
+                  </thead>
+                  <tbody>
+                    {rows.map((b) => {
+                      const f = figures(b);
+                      const over = f.remaining !== null && f.remaining < 0;
+                      const label = `${b.account_name || b.account_code || 'บัญชี'} ${snapshotLabel(b)}`;
+                      return (
+                        <tr key={b.id} className={over ? 'list-row-down' : undefined}>
+                          <td><span className="bm-cell-main">{snapshotLabel(b)}</span><span className="list-muted">งวด {periodLabel(b.period)}</span></td>
+                          <td className="list-ip">{b.cost_center_group || '—'}</td>
+                          <td className="list-ip">{b.account_code || '—'}</td>
+                          <td className="bm-name" title={b.account_name || ''}>{b.account_name || '—'}</td>
+                          <td className="bm-num">{baht(f.allocated)}</td>
+                          <td className="bm-num">{baht(f.used)}</td>
+                          <td className="bm-num">
+                            <span className={`bm-cell-main${over ? ' bm-over' : ''}`}>{baht(f.remaining)}</span>
+                            <span className={over ? 'bm-over bm-small' : 'list-muted'}>{f.usedPct === null ? 'ไม่มีงบที่ได้รับ' : over ? `ใช้เกินงบ (${f.usedPct.toFixed(1)}%)` : `ใช้ไป ${f.usedPct.toFixed(1)}%`}</span>
+                          </td>
+                          {(canWrite || canDelete) && (
+                            <td>
+                              <div className="bm-row-actions">
+                                {canWrite && <button type="button" className="bm-icon" onClick={() => setEditing({ budget: b })} aria-label={`แก้ไข ${label}`} title="แก้ไข"><Edit2 size={18} aria-hidden="true" /></button>}
+                                {canDelete && <button type="button" className="bm-icon is-danger" onClick={() => { setDeleteError(''); setToDelete(b); }} aria-label={`ลบ ${label}`} title="ลบ"><Trash2 size={18} aria-hidden="true" /></button>}
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
-        {/* Pagination */}
-        {!loading && totalPages > 1 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, sortedBudgets.length)} of {sortedBudgets.length} entries</span>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="glass" style={{ padding: '0.4rem', border: 'none', cursor: 'pointer', opacity: currentPage === 1 ? 0.3 : 1 }}><ChevronLeft size={16} /></button>
-
-              <select
-                value={currentPage}
-                onChange={(e) => setCurrentPage(Number(e.target.value))}
-                className="glass"
-                style={{ background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', padding: '0.2rem 0.5rem', borderRadius: '0.4rem', fontSize: '0.85rem', cursor: 'pointer', outline: 'none' }}
-              >
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-                  <option key={p} value={p} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>Page {p} of {totalPages}</option>
-                ))}
-              </select>
-
-              <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="glass" style={{ padding: '0.4rem', border: 'none', cursor: 'pointer', opacity: currentPage === totalPages ? 0.3 : 1 }}><ChevronRight size={16} /></button>
-            </div>
-          </div>
-        )}
-      </div>
+            {sorted.length > 0 && (
+              <footer className="list-footer">
+                <span className="list-muted">{(current - 1) * size + 1}–{(current - 1) * size + rows.length} จาก {sorted.length} รายการ</span>
+                <label className="list-page-size">
+                  แสดง
+                  <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+                    {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
+                    <option value={0}>ทั้งหมด</option>
+                  </select>
+                  รายการต่อหน้า
+                </label>
+                <nav className="list-pagination" aria-label="แบ่งหน้ารายการงบประมาณ">
+                  <button type="button" className="list-button" disabled={current <= 1} onClick={() => setPage(current - 1)}>ก่อนหน้า</button>
+                  <span className="list-muted">หน้า {current} / {totalPages}</span>
+                  <button type="button" className="list-button" disabled={current >= totalPages} onClick={() => setPage(current + 1)}>ถัดไป</button>
+                </nav>
+              </footer>
+            )}
+          </section>
+        </>
       )}
 
-      {/* Add/Edit Modal */}
-      <AnimatePresence>
-        {showFormModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="card glass" style={{ maxWidth: '650px', width: '100%', padding: '2rem', position: 'relative' }}>
-              <button onClick={resetForm} style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}><X size={20} /></button>
+      {editing && (
+        <BudgetFormModal
+          budget={editing.budget}
+          selectors={selectors}
+          token={token}
+          onClose={() => setEditing(null)}
+          onSaved={(message) => { setEditing(null); toast.success(message); load(); }}
+        />
+      )}
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                <div style={{ background: 'rgba(168, 85, 247, 0.1)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-primary)' }}>
-                  {editingBudget ? <Edit2 size={24} /> : <Plus size={24} />}
-                </div>
-                <h3 style={{ margin: 0, fontSize: '1.5rem' }}>{editingBudget ? 'แก้ไขข้อมูลงบประมาณ' : 'เพิ่มข้อมูลงบประมาณใหม่'}</h3>
-              </div>
-
-              <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1.25rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>กลุ่มศูนย์ต้นทุน</label>
-                  <input type="text" list="cost_center_groups" name="cost_center_group" value={formData.cost_center_group} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
-                  <datalist id="cost_center_groups">
-                    {selectors.cost_center_groups.map(g => <option key={g} value={g} />)}
-                  </datalist>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Account Code (ส่วนประกอบต้นทุน)</label>
-                  <input type="text" list="account_codes" name="account_code" value={formData.account_code} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
-                  <datalist id="account_codes">
-                    {selectors.account_codes.map(c => <option key={c} value={c} />)}
-                  </datalist>
-                </div>
-                <div style={{ gridColumn: 'span 2' }}>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Account Name</label>
-                  <input type="text" list="account_names" name="account_name" value={formData.account_name} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
-                  <datalist id="account_names">
-                    {selectors.account_names.map(n => <option key={n} value={n} />)}
-                  </datalist>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Budget Used (ต้นทุนจริง)</label>
-                  <input type="number" step="0.01" name="budget_used" value={formData.budget_used} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Budget Allocated (ต/ทตามแผน)</label>
-                  <input type="number" step="0.01" name="budget_allocated" value={formData.budget_allocated} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Year</label>
-                  <input type="text" list="years" name="year" value={formData.year} onChange={handleInputChange} required className="glass" style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
-                  <datalist id="years">
-                    {selectors.years.map(y => <option key={y} value={y} />)}
-                  </datalist>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>Month / Period</label>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <input type="text" name="month" placeholder="Month" value={formData.month} onChange={handleInputChange} required className="glass" style={{ flex: 1, padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
-                    <input type="text" name="period" placeholder="Period" value={formData.period} onChange={handleInputChange} required className="glass" style={{ flex: 1, padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem' }} />
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '1rem', gridColumn: 'span 2', marginTop: '1rem' }}>
-                  <button type="submit" disabled={actionLoading} className="glass" style={{ flex: 1, padding: '1rem', background: 'var(--accent-primary)', color: '#fff', border: 'none', borderRadius: '0.75rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                    {actionLoading ? <Loader2 size={18} className="animate-spin" /> : <><Save size={18} /> {editingBudget ? 'บันทึกการแก้ไข' : 'เพิ่มข้อมูลงบประมาณ'}</>}
-                  </button>
-                  <button type="button" onClick={resetForm} className="glass" style={{ padding: '1rem 2rem', background: 'var(--bg-accent-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderRadius: '0.75rem', cursor: 'pointer' }}>ยกเลิก</button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
+      <ConfirmDialog
+        open={Boolean(toDelete)}
+        title="ลบข้อมูลงบประมาณนี้?"
+        tone="danger"
+        busy={deleting}
+        confirmLabel={deleting ? 'กำลังลบ…' : 'ลบข้อมูล'}
+        cancelLabel="ไม่ลบ"
+        message={toDelete && (
+          <>
+            <p className="bm-confirm-target">{toDelete.account_code} {toDelete.account_name} · {snapshotLabel(toDelete)} (งวด {periodLabel(toDelete.period)})</p>
+            <p>งบที่ได้รับ {baht(figures(toDelete).allocated)} · ใช้ไป {baht(figures(toDelete).used)}</p>
+            <p>ยอดของเดือนนี้จะหายไปจากหน้าสรุปงบประมาณ และกู้คืนจากหน้านี้ไม่ได้</p>
+            {deleteError && <p className="bm-confirm-error" role="alert">{deleteError}</p>}
+          </>
         )}
-      </AnimatePresence>
+        onConfirm={confirmDelete}
+        onCancel={() => setToDelete(null)}
+      />
 
-      {/* Delete Confirmation Modal */}
-      <AnimatePresence>
-        {budgetToDelete && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="card glass" style={{ maxWidth: '400px', width: '100%', padding: '2rem', textAlign: 'center', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-              <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--accent-danger)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem' }}><Trash2 size={32} /></div>
-              <h2 style={{ margin: '0 0 1rem' }}>ยืนยันการลบข้อมูล</h2>
-              <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>คุณต้องการลบข้อมูลบัญชี "{budgetToDelete.account_name}" ใช่หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้</p>
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <button onClick={handleDelete} disabled={actionLoading} className="glass" style={{ flex: 1, padding: '0.75rem', background: 'var(--accent-danger)', color: '#fff', border: 'none', borderRadius: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>{actionLoading ? <Loader2 size={18} className="animate-spin" /> : 'ใช่, ลบข้อมูล'}</button>
-                <button onClick={() => setBudgetToDelete(null)} className="glass" style={{ flex: 1, padding: '0.75rem', background: 'rgba(255,255,255,0.05)', color: 'var(--text-secondary)', border: 'none', borderRadius: '0.75rem', cursor: 'pointer' }}>ยกเลิก</button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Upload Transactions Modal */}
-      <AnimatePresence>
-        {showUploadModal && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem' }}>
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="card glass" style={{ maxWidth: '500px', width: '100%', padding: '2rem', position: 'relative' }}>
-              <button onClick={() => setShowUploadModal(false)} style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}><X size={20} /></button>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                <div style={{ background: 'rgba(168, 85, 247, 0.1)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-primary)' }}>
-                  <Upload size={24} />
-                </div>
-                <h3 style={{ margin: 0, fontSize: '1.5rem' }}>อัพโหลดข้อมูลการเบิกจ่ายงบ</h3>
-              </div>
-
-              <form onSubmit={handleUpload} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>ปีงบประมาณ (Year)</label>
-                  <select
-                    value={uploadFormData.year}
-                    onChange={(e) => setUploadFormData({ ...uploadFormData, year: e.target.value })}
-                    className="glass"
-                    style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem', outline: 'none' }}
-                  >
-                    {Array.from({ length: new Date().getFullYear() - 2023 + 1 }, (_, i) => 2023 + i).map(y => (
-                      <option key={y} value={y} style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>{y}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>รหัสบัญชี</label>
-                  <select
-                    value={uploadFormData.cost_center}
-                    onChange={(e) => setUploadFormData({ ...uploadFormData, cost_center: e.target.value })}
-                    className="glass"
-                    style={{ width: '100%', padding: '0.75rem', background: 'var(--input-bg)', border: '1px solid var(--input-border)', color: 'var(--text-primary)', borderRadius: '0.5rem', outline: 'none' }}
-                  >
-                    <option value="53051060" style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>53051060 ค่าบำรุงฯ/ซ่อม-IT</option>
-                    <option value="53032070" style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>53032070 ค่าInst.Equipสื่อ</option>
-                    <option value="53032080" style={{ background: 'var(--card-bg)', color: 'var(--text-primary)' }}>53032080 คชจ.ใช้ Internet</option>
-                  </select>
-                </div>
-
-                <div
-                  style={{
-                    border: '2px dashed var(--input-border)',
-                    borderRadius: '1rem',
-                    padding: '2rem',
-                    textAlign: 'center',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    background: uploadFormData.file ? 'rgba(168, 85, 247, 0.05)' : 'transparent'
-                  }}
-                  onClick={() => document.getElementById('file-upload').click()}
-                >
-                  <input
-                    id="file-upload"
-                    type="file"
-                    accept=".xlsx, .csv, .xls"
-                    style={{ display: 'none' }}
-                    onChange={(e) => setUploadFormData({ ...uploadFormData, file: e.target.files[0] })}
-                  />
-                  <FileText size={32} style={{ margin: '0 auto 1rem', color: uploadFormData.file ? 'var(--accent-primary)' : 'var(--text-secondary)' }} />
-                  {uploadFormData.file ? (
-                    <div>
-                      <p style={{ margin: 0, fontWeight: 600 }}>{uploadFormData.file.name}</p>
-                      <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{(uploadFormData.file.size / (1024 * 1024)).toFixed(2)} MB</p>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setUploadFormData({ ...uploadFormData, file: null });
-                          const input = document.getElementById('file-upload');
-                          if (input) input.value = '';
-                        }}
-                        className="glass"
-                        style={{
-                          marginTop: '1rem',
-                          padding: '0.4rem 1rem',
-                          border: 'none',
-                          color: 'var(--accent-danger)',
-                          fontSize: '0.8rem',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          margin: '1rem auto 0',
-                          borderRadius: '0.5rem'
-                        }}
-                      >
-                        <X size={14} /> ล้างค่า (Clear)
-                      </button>
-                    </div>
-                  ) : (
-                    <div>
-                      <p style={{ margin: 0 }}>คลิกเพื่อเลือกไฟล์</p>
-                      <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>รองรับไฟล์ .xlsx, .csv, .xls (สูงสุด 100MB)</p>
-                      <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: '#f10b0bff' }}>กรุณาตรวจสอบไฟล์ที่อัพโหลดจะต้องตัดส่วนที่ไม่ใช่หัว Column และส่วนท้ายที่ไม่ใช่ข้อมูล และปีงบประมาณ, รหัสบัญชีที่เลือกจะต้องตรงกับไฟล์ที่จะอัพโหลด</p>
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!uploadFormData.file) {
-                        toast.error('กรุณาเลือกไฟล์ที่ต้องการอัพโหลด');
-                        return;
-                      }
-                      setShowUploadConfirm(true);
-                    }}
-                    disabled={actionLoading || !uploadFormData.file}
-                    className="glass"
-                    style={{ flex: 1, padding: '1rem', background: 'var(--accent-primary)', color: '#fff', border: 'none', borderRadius: '0.75rem', fontWeight: 700, cursor: (actionLoading || !uploadFormData.file) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', opacity: (actionLoading || !uploadFormData.file) ? 0.5 : 1 }}
-                  >
-                    {actionLoading ? <Loader2 size={18} className="animate-spin" /> : <><Upload size={18} /> เริ่มอัพโหลด</>}
-                  </button>
-                  <button type="button" onClick={() => setShowUploadModal(false)} className="glass" style={{ padding: '1rem 2rem', background: 'var(--bg-accent-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderRadius: '0.75rem', cursor: 'pointer' }}>ยกเลิก</button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Upload Confirmation Modal */}
-      <AnimatePresence>
-        {showUploadConfirm && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1rem' }}>
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="card glass" style={{ maxWidth: '450px', width: '100%', padding: '2rem', textAlign: 'center', border: '1px solid rgba(234, 179, 8, 0.2)' }}>
-              <div style={{ width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(234, 179, 8, 0.1)', color: 'var(--accent-warning)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem' }}><AlertTriangle size={32} /></div>
-              <h2 style={{ margin: '0 0 1rem' }}>ยืนยันการอัพโหลดข้อมูล</h2>
-              <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', lineHeight: '1.6' }}>
-                ตรวจสอบข้อมูลถูกต้อง<br />
-                รหัสบัญชี <strong>{uploadFormData.cost_center}</strong> ของปี <strong>{uploadFormData.year}</strong><br />
-                จะถูกล้างและแทนที่ด้วยข้อมูลใหม่
-              </p>
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <button
-                  onClick={() => {
-                    setShowUploadConfirm(false);
-                    handleUpload();
-                  }}
-                  disabled={actionLoading}
-                  className="glass"
-                  style={{ flex: 1, padding: '0.75rem', background: 'var(--accent-primary)', color: '#fff', border: 'none', borderRadius: '0.75rem', fontWeight: 700, cursor: 'pointer' }}
-                >
-                  {actionLoading ? <Loader2 size={18} className="animate-spin" /> : 'ยืนยันอัพโหลด'}
-                </button>
-                <button
-                  onClick={() => setShowUploadConfirm(false)}
-                  className="glass"
-                  style={{ flex: 1, padding: '0.75rem', background: 'var(--bg-accent-subtle)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderRadius: '0.75rem', cursor: 'pointer' }}
-                >
-                  ยกเลิก
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Upload Result Modal */}
-      <AnimatePresence>
-        {showResultModal && uploadResult && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100, padding: '1rem' }}>
-            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }} className="card glass" style={{ maxWidth: '800px', width: '100%', padding: '2rem', position: 'relative' }}>
-              <button onClick={() => setShowResultModal(false)} style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}><X size={20} /></button>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.5rem' }}>
-                <div style={{ background: 'rgba(34, 197, 94, 0.1)', padding: '0.5rem', borderRadius: '0.5rem', color: 'var(--accent-success)' }}>
-                  <FileText size={24} />
-                </div>
-                <h3 style={{ margin: 0, fontSize: '1.5rem' }}>ผลการอัพโหลดข้อมูล</h3>
-              </div>
-
-              <div style={{ marginBottom: '1.5rem' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-                  <div className="glass" style={{ padding: '1rem', borderRadius: '0.75rem', textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>จำนวนแถวที่ประมวลผล</p>
-                    <h2 style={{ margin: '0.25rem 0 0', color: 'var(--accent-primary)' }}>{uploadResult.count || uploadResult.total_rows || (uploadResult.data ? uploadResult.data.length : 0)}</h2>
-                  </div>
-                  <div className="glass" style={{ padding: '1rem', borderRadius: '0.75rem', textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>สถานะ</p>
-                    <h2 style={{ margin: '0.25rem 0 0', color: 'var(--accent-success)' }}>สำเร็จ</h2>
-                  </div>
-                </div>
-
-                {uploadResult.data && Array.isArray(uploadResult.data) && uploadResult.data.length > 0 && (
-                  <div>
-                    <p style={{ marginBottom: '0.75rem', fontWeight: 600 }}>ข้อมูลที่อัพโหลด:</p>
-                    <div style={{ maxHeight: '400px', overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: '0.5rem' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
-                        <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--card-bg)' }}>
-                          <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                            <th style={{ padding: '0.5rem', textAlign: 'left' }}>Postg Date</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'left' }}>Reference No</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'left' }}>Description</th>
-                            <th style={{ padding: '0.5rem', textAlign: 'right' }}>Amount</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {uploadResult.data.map((item, idx) => (
-                             <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle)', opacity: 0.8 }}>
-                              <td style={{ padding: '0.5rem' }}>{item.posting_date || '-'}</td>
-                              <td style={{ padding: '0.5rem' }}>{item.reference_doc_no || '-'}</td>
-                              <td style={{ padding: '0.5rem' }}>{item.description || '-'}</td>
-                              <td style={{
-                                padding: '0.5rem', textAlign: 'right',
-                                color: parseFloat(item.value_co_curr || 0) < 0 ? 'var(--accent-success)' : 'inherit'
-                              }}>
-                                ฿{parseFloat(item.value_co_curr || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <button onClick={() => setShowResultModal(false)} className="glass" style={{ width: '100%', padding: '1rem', background: 'var(--accent-primary)', color: '#fff', border: 'none', borderRadius: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
-                ตกลง
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+      {uploadOpen && (
+        <UploadModal
+          token={token}
+          onClose={() => setUploadOpen(false)}
+          onUploaded={(result) => {
+            setUploadOpen(false);
+            setUploadResult(result);
+            toast.success('อัปโหลดข้อมูลการเบิกจ่ายแล้ว');
+            setTxRefresh((n) => n + 1);
+            load();
+          }}
+        />
+      )}
+      {uploadResult && <UploadResultModal result={uploadResult} onClose={() => setUploadResult(null)} />}
+    </div>
   );
 };
+
+// ---------------------------------------------------------------------------
+// Add / edit one monthly budget row (POST /api/budgets, PUT /api/budgets/:id,
+// form-urlencoded as before).
+// ---------------------------------------------------------------------------
+const EMPTY = () => {
+  const now = new Date();
+  return { cost_center_group: '', account_code: '', account_name: '', budget_allocated: '', budget_used: '', year: String(now.getFullYear()), month: String(now.getMonth() + 1), period: String(now.getMonth() + 1), day: '' };
+};
+const fromBudget = (b) => ({
+  cost_center_group: b.cost_center_group || '', account_code: b.account_code || '', account_name: b.account_name || '',
+  budget_allocated: b.budget_allocated ?? '', budget_used: b.budget_used ?? '',
+  year: b.year?.toString() || '', month: b.month?.toString() || '', period: periodLabel(b.period) === '—' ? '' : periodLabel(b.period), day: b.day ?? ''
+});
+const FIELDS = [
+  { name: 'cost_center_group', label: 'กลุ่มศูนย์ต้นทุน', list: 'cost_center_groups', mono: true },
+  { name: 'account_code', label: 'รหัสบัญชี (ส่วนประกอบต้นทุน)', list: 'account_codes', mono: true },
+  { name: 'account_name', label: 'ชื่อบัญชี', list: 'account_names', wide: true },
+  { name: 'budget_allocated', label: 'งบที่ได้รับ (ตามแผน) บาท', number: true },
+  { name: 'budget_used', label: 'ใช้ไป (ต้นทุนจริง) บาท', short: 'ยอดที่ใช้ไป', number: true },
+  { name: 'year', label: 'ปี (ค.ศ.)', list: 'years', inputMode: 'numeric' },
+  { name: 'month', label: 'เดือน (1–12)', inputMode: 'numeric' },
+  { name: 'period', label: 'งวด', inputMode: 'numeric' }
+];
+
+const validate = (d) => {
+  const e = {};
+  FIELDS.forEach(({ name, label, short }) => { if (!String(d[name]).trim()) e[name] = `กรุณาระบุ${short || label.replace(/ \(.*\)| บาท/g, '')}`; });
+  ['budget_allocated', 'budget_used'].forEach((k) => { if (!e[k] && (num(d[k]) === null || num(d[k]) < 0)) e[k] = 'ต้องเป็นจำนวนเงินตั้งแต่ 0 ขึ้นไป'; });
+  if (!e.year && !/^\d{4}$/.test(String(d.year).trim())) e.year = 'ระบุปี ค.ศ. 4 หลัก เช่น 2026';
+  if (!e.month && !(Number(d.month) >= 1 && Number(d.month) <= 12 && Number.isInteger(Number(d.month)))) e.month = 'ระบุเดือน 1–12';
+  if (!e.period && num(d.period) === null) e.period = 'ระบุงวดเป็นตัวเลข';
+  return e;
+};
+
+function BudgetFormModal({ budget, selectors, token, onClose, onSaved }) {
+  const id = useId();
+  const [initial] = useState(() => (budget ? fromBudget(budget) : EMPTY()));
+  const [data, setData] = useState(initial);
+  const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const formRef = useRef(null);
+  const dirty = Object.keys(initial).some((k) => String(initial[k]) !== String(data[k]));
+
+  const change = (name, value) => {
+    setData((prev) => {
+      const next = { ...prev, [name]: value };
+      // Fill the name only when the code maps to exactly one name.
+      if (name === 'account_code') {
+        const names = [...new Set((selectors.accounts_mapped || []).filter((m) => m.account_code === value).map((m) => m.account_name))];
+        if (names.length === 1 && !prev.account_name) next.account_name = names[0];
+      }
+      return next;
+    });
+    if (errors[name]) setErrors((e) => { const n = { ...e }; delete n[name]; return n; });
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    const found = validate(data);
+    setErrors(found);
+    if (Object.keys(found).length) {
+      formRef.current?.querySelector(`#${CSS.escape(`${id}-${Object.keys(found)[0]}`)}`)?.focus();
+      return;
+    }
+    setBusy(true);
+    setSubmitError('');
+    const params = new URLSearchParams();
+    Object.entries(data).forEach(([k, v]) => params.append(k, String(v).trim()));
+    try {
+      const response = await fetch(budget ? `${API}/api/budgets/${budget.id}` : `${API}/api/budgets`, {
+        method: budget ? 'PUT' : 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString()
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success === false) { setSubmitError(failure(response, result, 'บันทึกไม่สำเร็จ')); return; }
+      onSaved(budget ? 'บันทึกการแก้ไขงบประมาณแล้ว' : 'เพิ่มข้อมูลงบประมาณแล้ว');
+    } catch {
+      setSubmitError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ ข้อมูลที่กรอกยังอยู่ในฟอร์มนี้');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const requestClose = () => (dirty ? setConfirmDiscard(true) : onClose());
+  const options = (list) => [...new Set((selectors[list] || []).map(String))];
+
+  return (
+    <>
+      <ModalFrame
+        title={budget ? 'แก้ไขข้อมูลงบประมาณ' : 'เพิ่มข้อมูลงบประมาณ'}
+        icon={budget ? <Edit2 size={20} aria-hidden="true" /> : <Plus size={20} aria-hidden="true" />}
+        subtitle={budget ? `${budget.account_code} ${budget.account_name} · ${snapshotLabel(budget)}` : 'ยอดของบัญชีหนึ่ง ณ เดือนที่บันทึก'}
+        size="lg" busy={busy} guardClose={dirty} onClose={requestClose}
+      >
+        <form ref={formRef} onSubmit={submit} noValidate>
+          {submitError && <div className="mf-error bm-submit-error" role="alert"><p>{submitError}</p></div>}
+          <div className="bm-form-grid">
+            {FIELDS.map((f) => (
+              <div key={f.name} className={`mf-field${f.wide ? ' bm-wide' : ''}${errors[f.name] ? ' is-invalid' : ''}`}>
+                <label htmlFor={`${id}-${f.name}`}>{f.label} <span className="br-required" aria-hidden="true">*</span></label>
+                <input
+                  id={`${id}-${f.name}`}
+                  type="text"
+                  inputMode={f.number ? 'decimal' : f.inputMode}
+                  className={f.mono || f.number ? 'bm-mono' : undefined}
+                  list={f.list && options(f.list).length ? `${id}-${f.list}` : undefined}
+                  value={data[f.name]}
+                  required
+                  aria-invalid={errors[f.name] ? 'true' : undefined}
+                  aria-describedby={errors[f.name] ? `${id}-${f.name}-error` : undefined}
+                  onChange={(e) => change(f.name, e.target.value)}
+                />
+                {f.list && options(f.list).length > 0 && <datalist id={`${id}-${f.list}`}>{options(f.list).map((v) => <option key={v} value={v} />)}</datalist>}
+                {errors[f.name] && <p id={`${id}-${f.name}-error`} className="mf-field-error">{errors[f.name]}</p>}
+              </div>
+            ))}
+          </div>
+          <div className="mf-actions">
+            <button type="button" className="mf-button" onClick={requestClose} disabled={busy}>ยกเลิก</button>
+            <button type="submit" className="mf-button mf-primary" disabled={busy}>
+              {busy && <Loader2 size={16} className="animate-spin" aria-hidden="true" />} {budget ? 'บันทึกการแก้ไข' : 'เพิ่มงบประมาณ'}
+            </button>
+          </div>
+        </form>
+      </ModalFrame>
+      <ConfirmDialog
+        open={confirmDiscard}
+        title="ทิ้งข้อมูลที่กรอก?"
+        message="ข้อมูลที่แก้ไขในฟอร์มนี้ยังไม่ได้บันทึกและจะหายไป"
+        confirmLabel="ทิ้งข้อมูล" cancelLabel="กรอกต่อ" tone="danger"
+        onConfirm={() => { setConfirmDiscard(false); onClose(); }}
+        onCancel={() => setConfirmDiscard(false)}
+      />
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Upload transactions (POST /api/budgets/upload-transactions). The backend
+// replaces every transaction of the chosen account + year, so the last step
+// asks for confirmation with that scope spelled out.
+// ---------------------------------------------------------------------------
+function UploadModal({ token, onClose, onUploaded }) {
+  const id = useId();
+  const thisYear = new Date().getFullYear();
+  const [yearValue, setYearValue] = useState(String(thisYear));
+  const [account, setAccount] = useState(UPLOAD_ACCOUNTS[0].value);
+  const [file, setFile] = useState(null);
+  const [fileError, setFileError] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const fileRef = useRef(null);
+  const accountLabel = UPLOAD_ACCOUNTS.find((a) => a.value === account)?.label || account;
+
+  const pick = (e) => {
+    const chosen = e.target.files?.[0] || null;
+    if (!chosen) return;
+    const okType = UPLOAD_EXTS.some((ext) => chosen.name.toLowerCase().endsWith(ext));
+    const problem = !okType ? `ไฟล์ "${chosen.name}" ต้องเป็น .xlsx, .xls หรือ .csv` : chosen.size > MAX_UPLOAD ? `ไฟล์ "${chosen.name}" มีขนาดเกิน 100MB` : '';
+    setFileError(problem);
+    setFile(problem ? null : chosen);
+    if (problem) e.target.value = '';
+  };
+
+  const review = (e) => {
+    e.preventDefault();
+    if (!file) { setFileError('กรุณาเลือกไฟล์ที่ต้องการอัปโหลด'); fileRef.current?.focus(); return; }
+    setConfirming(true);
+  };
+
+  const upload = async () => {
+    setConfirming(false);
+    setBusy(true);
+    setError('');
+    const body = new FormData();
+    body.append('file', file);
+    body.append('cost_center', account);
+    body.append('year', yearValue);
+    try {
+      const response = await fetch(`${API}/api/budgets/upload-transactions`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.success === false) { setError(failure(response, result, 'อัปโหลดไม่สำเร็จ ข้อมูลเดิมยังไม่ถูกแทนที่')); return; }
+      onUploaded({ ...result, meta: { account: accountLabel, year: yearValue, file: file.name } });
+    } catch {
+      setError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ ไม่ทราบว่าข้อมูลถูกแทนที่แล้วหรือไม่ กรุณาตรวจสอบในแท็บข้อมูลการเบิกจ่ายก่อนอัปโหลดซ้ำ');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dirty = Boolean(file);
+  const requestClose = () => (dirty ? setConfirmDiscard(true) : onClose());
+
+  return (
+    <>
+      <ModalFrame title="อัปโหลดข้อมูลการเบิกจ่าย" icon={<Upload size={20} aria-hidden="true" />} subtitle="แทนที่ข้อมูลการเบิกจ่ายทั้งหมดของบัญชีและปีที่เลือกด้วยข้อมูลจากไฟล์" size="md" busy={busy} guardClose={dirty} onClose={requestClose}>
+        <form onSubmit={review} noValidate>
+          {error && <div className="mf-error bm-submit-error" role="alert"><p>{error}</p></div>}
+          <div className="mf-field">
+            <label htmlFor={`${id}-year`}>ปีงบประมาณ</label>
+            <select id={`${id}-year`} className="bm-select" value={yearValue} onChange={(e) => setYearValue(e.target.value)}>
+              {Array.from({ length: thisYear - 2023 + 1 }, (_, i) => String(thisYear - i)).map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+          <div className="mf-field">
+            <label htmlFor={`${id}-account`}>รหัสบัญชี</label>
+            <select id={`${id}-account`} className="bm-select" value={account} onChange={(e) => setAccount(e.target.value)}>
+              {UPLOAD_ACCOUNTS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+            </select>
+          </div>
+          <div className={`mf-field${fileError ? ' is-invalid' : ''}`}>
+            <label htmlFor={`${id}-file`}>ไฟล์ข้อมูลการเบิกจ่าย <span className="br-required" aria-hidden="true">*</span></label>
+            <input ref={fileRef} id={`${id}-file`} className="bm-file" type="file" accept={UPLOAD_EXTS.join(',')} onChange={pick} aria-describedby={`${id}-file-help${fileError ? ` ${id}-file-error` : ''}`} />
+            {fileError && <p id={`${id}-file-error`} className="mf-field-error" role="alert">{fileError}</p>}
+            {file && (
+              <p className="bm-file-chosen"><FileText size={16} aria-hidden="true" /> {file.name} · {(file.size / (1024 * 1024)).toFixed(2)} MB
+                <button type="button" className="bm-icon" onClick={() => { setFile(null); if (fileRef.current) fileRef.current.value = ''; }} aria-label={`นำไฟล์ ${file.name} ออก`}><X size={16} aria-hidden="true" /></button>
+              </p>
+            )}
+            <div id={`${id}-file-help`} className="bm-file-help">
+              <p>.xlsx, .xls หรือ .csv ไม่เกิน 100MB</p>
+              <p className="bm-warning-text">ตัดแถวที่ไม่ใช่หัวคอลัมน์ด้านบนและส่วนท้ายที่ไม่ใช่ข้อมูลออกก่อน และปี/รหัสบัญชีที่เลือกต้องตรงกับข้อมูลในไฟล์</p>
+            </div>
+          </div>
+          <div className="mf-actions">
+            <button type="button" className="mf-button" onClick={requestClose} disabled={busy}>ยกเลิก</button>
+            <button type="submit" className="mf-button mf-primary" disabled={busy}>
+              {busy ? <><Loader2 size={16} className="animate-spin" aria-hidden="true" /> กำลังอัปโหลด…</> : <><Upload size={16} aria-hidden="true" /> ตรวจสอบและอัปโหลด</>}
+            </button>
+          </div>
+        </form>
+      </ModalFrame>
+      <ConfirmDialog
+        open={confirming}
+        title="แทนที่ข้อมูลการเบิกจ่าย?"
+        tone="warning"
+        confirmLabel="ยืนยันแทนที่ข้อมูล"
+        cancelLabel="กลับไปแก้ไข"
+        message={(
+          <>
+            <p>ข้อมูลการเบิกจ่ายทั้งหมดของ <strong>{accountLabel}</strong> ปี <strong>{yearValue}</strong> จะถูกลบและแทนที่ด้วยข้อมูลจากไฟล์ <strong>{file?.name}</strong></p>
+            <p>การผูกธุรกรรมกับงานของบัญชีและปีนี้อาจได้รับผลกระทบ</p>
+          </>
+        )}
+        onConfirm={upload}
+        onCancel={() => setConfirming(false)}
+      />
+      <ConfirmDialog
+        open={confirmDiscard}
+        title="ยกเลิกการอัปโหลด?"
+        message="ไฟล์ที่เลือกไว้จะไม่ถูกอัปโหลด"
+        confirmLabel="ยกเลิกการอัปโหลด" cancelLabel="อยู่ต่อ" tone="danger"
+        onConfirm={() => { setConfirmDiscard(false); onClose(); }}
+        onCancel={() => setConfirmDiscard(false)}
+      />
+    </>
+  );
+}
+
+function UploadResultModal({ result, onClose }) {
+  const rows = Array.isArray(result.data) ? result.data : [];
+  const count = result.count ?? result.total_rows ?? rows.length;
+  return (
+    <ModalFrame title="อัปโหลดข้อมูลการเบิกจ่ายแล้ว" icon={<FileText size={20} aria-hidden="true" />} subtitle={`${result.meta.account} · ปี ${result.meta.year} · ไฟล์ ${result.meta.file}`} size="xl" onClose={onClose}>
+      <dl className="bm-result-stats">
+        <div><dt>จำนวนแถวที่นำเข้า</dt><dd>{Number(count).toLocaleString('th-TH')}</dd></div>
+        {result.message && <div><dt>ข้อความจากระบบ</dt><dd className="bm-result-message">{result.message}</dd></div>}
+      </dl>
+      {rows.length > 0 && (
+        <div className="bm-result-scroll" tabIndex={0} role="region" aria-label="ข้อมูลที่นำเข้า เลื่อนเพื่อดูทั้งหมด">
+          <table className="bm-result-table">
+            <caption className="list-sr-only">ข้อมูลการเบิกจ่ายที่นำเข้า {rows.length} แถว</caption>
+            <thead><tr><th scope="col">วันที่ผ่านรายการ</th><th scope="col">เลขที่เอกสาร</th><th scope="col">รายละเอียด</th><th scope="col" className="bm-num">จำนวนเงิน</th></tr></thead>
+            <tbody>
+              {rows.map((item, i) => (
+                <tr key={i}>
+                  <td>{item.posting_date || '—'}</td>
+                  <td className="list-ip">{item.reference_doc_no || '—'}</td>
+                  <td>{item.description || '—'}</td>
+                  <td className="bm-num">{baht(num(item.value_co_curr))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="mf-actions"><button type="button" className="mf-button mf-primary" onClick={onClose} data-autofocus>ตกลง</button></div>
+    </ModalFrame>
+  );
+}
 
 export default BudgetManagement;
