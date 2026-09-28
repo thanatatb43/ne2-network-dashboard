@@ -1,70 +1,62 @@
-import React, { useEffect, useState } from 'react';
-import { Loader2, AlertTriangle } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Loader2, AlertTriangle, ShieldCheck } from 'lucide-react';
+import './Auth.css';
 
 // Landing page for the PEA SSO redirect. The backend sends the browser back
 // here with #token=xxx&user=<url-encoded JSON> in the URL fragment (never in
 // the query string or path, so it never gets logged server-side). This page
-// just extracts that pair and hands it to the same onAuthSuccess used by the
-// normal username/password login, so both flows end up in identical state.
+// extracts that pair and hands it to the same onAuthSuccess used by the
+// username/password login, so both flows end up in identical state.
+//
+// The fragment is wiped from the address bar straight away (success or not)
+// so the token can't linger in history, and it is read only once: a retry is
+// always the user's own click back into SSO, never an automatic loop.
 const SsoCallback = ({ onAuthSuccess, onBackToLogin }) => {
   const [error, setError] = useState(null);
+  const handled = useRef(false);
+  const onAuthSuccessRef = useRef(onAuthSuccess);
+  useEffect(() => { onAuthSuccessRef.current = onAuthSuccess; });
 
   useEffect(() => {
+    if (handled.current) return;
+    handled.current = true;
     const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
     const params = new URLSearchParams(hash);
+    if (hash) window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+
     const token = params.get('token');
     const userRaw = params.get('user');
-
-    if (!token || !userRaw) {
-      setError('ไม่พบข้อมูลการเข้าสู่ระบบจาก PEA SSO กรุณาลองใหม่อีกครั้ง');
-      return;
-    }
-
+    if (params.get('error')) { setError('PEA SSO ปฏิเสธการเข้าสู่ระบบหรือยกเลิกกลางทาง'); return; }
+    if (!token || !userRaw) { setError('ไม่พบข้อมูลการเข้าสู่ระบบจาก PEA SSO ลิงก์นี้อาจถูกใช้ไปแล้วหรือเปิดโดยตรง'); return; }
     try {
       const userData = JSON.parse(userRaw);
-      onAuthSuccess(userData, token, 'sso');
-    } catch (err) {
-      console.error('Failed to parse SSO user data:', err);
-      setError('ข้อมูลผู้ใช้จาก PEA SSO ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
+      if (!userData || typeof userData !== 'object') throw new Error('bad user');
+      onAuthSuccessRef.current(userData, token, 'sso');
+    } catch {
+      setError('ข้อมูลผู้ใช้ที่ได้รับจาก PEA SSO ไม่ถูกต้อง');
     }
-  }, [onAuthSuccess]);
+  }, []);
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '60vh',
-      gap: '1rem',
-      textAlign: 'center'
-    }}>
-      {error ? (
-        <>
-          <AlertTriangle size={40} color="var(--accent-danger)" />
-          <p style={{ color: 'var(--text-secondary)', maxWidth: '400px' }}>{error}</p>
-          <button
-            onClick={onBackToLogin}
-            className="glass"
-            style={{
-              padding: '0.75rem 2rem',
-              borderRadius: '0.75rem',
-              background: 'var(--accent-primary)',
-              color: '#fff',
-              border: 'none',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            กลับไปหน้าเข้าสู่ระบบ
-          </button>
-        </>
-      ) : (
-        <>
-          <Loader2 className="animate-spin" size={40} color="var(--accent-primary)" />
-          <p style={{ color: 'var(--text-secondary)' }}>กำลังเข้าสู่ระบบผ่าน PEA SSO...</p>
-        </>
-      )}
+    <div className="auth-page">
+      <div className="auth-card">
+        {error ? (
+          <div className="auth-state" role="alert">
+            <AlertTriangle size={40} aria-hidden="true" color="var(--accent-danger)" />
+            <h1 className="auth-state-title">เข้าสู่ระบบด้วย PEA SSO ไม่สำเร็จ</h1>
+            <p>{error}</p>
+            <a href={`${import.meta.env.VITE_API_BASE_URL}/api/auth/sso/login`} className="auth-primary">
+              <ShieldCheck size={20} aria-hidden="true" /> ลองเข้าสู่ระบบด้วย PEA SSO อีกครั้ง
+            </a>
+            <button type="button" className="auth-secondary" onClick={onBackToLogin}>กลับไปหน้าเข้าสู่ระบบ</button>
+          </div>
+        ) : (
+          <div className="auth-state" role="status">
+            <Loader2 className="animate-spin" size={40} aria-hidden="true" color="var(--accent-primary)" />
+            <p>กำลังเข้าสู่ระบบผ่าน PEA SSO…</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };

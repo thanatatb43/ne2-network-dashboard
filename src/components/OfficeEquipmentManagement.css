@@ -1,0 +1,11 @@
+.oem-back { margin-bottom: 20px; }
+.oem-page .list-table.oem-table { min-width: 640px; table-layout: fixed; }
+.oem-table th:nth-child(1) { width: 40%; }
+.oem-table th:nth-child(4) { width: 120px; }
+.oem-table .list-name { max-width: 100%; }
+.oem-num { text-align: right; font-variant-numeric: tabular-nums; }
+th.oem-num .list-sort { flex-direction: row-reverse; }
+.oem-sort-idle { opacity: .4; }
+.oem-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 20px; border-top: 1px solid var(--border-subtle); color: var(--text-secondary); text-align: center; }
+.oem-state p { margin: 0; }
+.oem-page .list-page-size select, .oem-page .list-pagination select { min-height: 44px; }

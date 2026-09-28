@@ -4,6 +4,7 @@ import {ArrowLeft,RefreshCw,Search,X} from 'lucide-react';
 import SearchableDropdown from '../SearchableDropdown';
 import useBudgetResource,{loadResults} from './useBudgetResource';
 import {readQuery,params,filterKeys,request,money,monthLabel,columns,sorts} from './budgetData';
+import {pushHistory,replaceHistory} from '../../navigationGuard';
 import '../ListPage.css';
 import './BudgetDashboard.css';
 
@@ -51,7 +52,7 @@ export default function BudgetDashboard(){
   const navigate=(next,mode=searching?'search':'summary',replace=false)=>{
     savePosition();const path=`/budget-dashboard${mode==='search'?'/search':''}?${params(next)}`;
     if(path===location.pathname+location.search)return;
-    history[replace?'replaceState':'pushState']({},'',path);window.dispatchEvent(new PopStateEvent('popstate'));
+    (replace?replaceHistory:pushHistory)({},path);window.dispatchEvent(new PopStateEvent('popstate'));
     requestAnimationFrame(()=>{heading.current?.focus();window.scrollTo({top:0,behavior:'instant'});});
   };
   const drill=(extra={})=>navigate({...readQuery(),...Object.fromEntries([...filterKeys,'q','transaction_id'].map(k=>[k,''])),fiscal_year:year,...extra,page:1},'search');

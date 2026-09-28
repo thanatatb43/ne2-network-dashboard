@@ -76,7 +76,7 @@ const GUIDE_SECTIONS = [
         name: 'ประวัติการขัดข้อง',
         desc: 'ประวัติเหตุการณ์อุปกรณ์เครือข่ายขัดข้อง (down) ย้อนหลัง',
         steps: [
-          'เลือกปีหรือช่วงวันที่ (ไม่เกิน 366 วัน) ค้นหาสำนักงาน/IP กรองจังหวัดและสถานะ แล้วกด "ค้นหา" ช่องที่มีค่าจะไฮไลท์; "ล้างตัวกรอง" กลับปีปัจจุบัน',
+          'เลือกปีหรือช่วงวันที่ (ไม่เกิน 366 วัน) ค้นหาสำนักงาน/IP กรองจังหวัดและสถานะ แล้วกด "ค้นหา" ช่องที่มีค่าจะไฮไลท์; "ล้างตัวกรอง" กลับปีปัจจุบันโดยคงการเรียงรายการที่เลือกไว้',
           'เลือกนับ "ขัดข้องในช่วง" เพื่อรวมเหตุที่เริ่มก่อนช่วง หรือ "เริ่มขัดข้องในช่วง" เพื่อดูเฉพาะเหตุที่เริ่มใหม่ ยอดสรุป กราฟ และรายการใช้ข้อมูลชุดเดียวกันตามเวลาที่แสดง',
           'การ์ด "ประวัติที่ยังไม่ปิดทั้งระบบ" ไม่ใช้ตัวกรองและไม่ใช่ผล ping สด ส่วนเวลาสะสมรวมรายเหตุการณ์เฉพาะส่วนที่ทับช่วงที่เลือก จึงอาจมากกว่าเวลาปฏิทิน',
           'คลิกแท่งเดือน/จุดวัน หรือเปิด "ดูข้อมูลกราฟเป็นตาราง / เลือกช่วง" เพื่อดูเหตุที่เริ่มในช่วงนั้น กด "กลับช่วงวันที่เดิม" เพื่อยกเลิกการเจาะดู; ช่องว่างในกราฟไม่ยืนยันว่าไม่มีการขัดข้อง',
@@ -181,7 +181,7 @@ const GUIDE_SECTIONS = [
         desc: 'เพิ่ม ลบ แก้ไข อุปกรณ์คอมพิวเตอร์และอุปกรณ์ต่อพ่วงของแต่ละสำนักงาน',
         steps: [
           'ไปที่เมนู "การจัดการ" > "จัดการงานและอุปกรณ์" แล้วเลือกการ์ด "การจัดการอุปกรณ์คอมพิวเตอร์"',
-          'เลือกสำนักงานจากรายการ (ค้นหาชื่อ/จังหวัดได้) เพื่อดูอุปกรณ์ของสำนักงานนั้น — รายชื่อสำนักงานแบ่งหน้า ปรับจำนวนที่แสดงต่อหน้าและเลือกหน้าที่ต้องการดูได้',
+          'กดชื่อสำนักงานเพื่อดูอุปกรณ์ของสำนักงานนั้น (เปิดแท็บใหม่ได้) — ค้นหาชื่อ/จังหวัด กรองตามประเภทสำนักงานหรือมี/ไม่มีอุปกรณ์ กดหัวตารางเพื่อเรียง และเลือกจำนวนต่อหน้าได้ ระบบจำตัวกรอง การเรียง และหน้าไว้ และกลับมาที่สำนักงานเดิมเมื่อกดย้อนกลับ',
           'ใช้ช่องค้นหาและตัวกรอง "ประเภท" เพื่อจำกัดรายการ (ช่องที่มีค่าจะถูกไฮไลท์) — ปรับจำนวนต่อหน้าและเปลี่ยนหน้าได้ที่ด้านล่างตาราง ระบบจำตัวกรองและหน้าของแต่ละสำนักงานไว้เมื่อกลับมาหน้าเดิม บนมือถือรายการแสดงเป็นการ์ด',
           'กดปุ่ม "เพิ่มอุปกรณ์" เพื่อเพิ่มรายการใหม่ — ฟอร์มเพิ่ม/แก้ไขใช้แบบเดียวกับหน้าแก้ไขอุปกรณ์ปกติ โดยล็อกสำนักงานไว้ ส่วน "เครือข่าย" แสดงวงเครือข่ายของสำนักงานและช่วง IP ตามแผนเมื่อประเภทหรือแผนกตรงกับกลุ่มในแผน (เป็นแผนอ้างอิง ไม่ได้ตรวจว่า IP ว่าง และไม่กรอก IP ให้เอง) — หลังสร้างสำเร็จจะเพิ่มรูปอุปกรณ์/รูปสถานที่ต่อได้ทันที การอัปโหลดหรือลบรูปบันทึกทันทีแยกจากปุ่ม "บันทึก" — ถ้ามีข้อมูลที่ยังไม่บันทึก ระบบจะถามก่อนออกจากฟอร์ม ทั้งเมื่อกด "ยกเลิก" เลือกเมนูอื่น หรือกดย้อนกลับของเบราว์เซอร์ — สถานะอุปกรณ์แก้ไม่ได้ขณะมีการยืมค้างหรือระบบตรวจรายการยืมไม่สำเร็จ',
           'คลิกชื่ออุปกรณ์หรือไอคอนรูปตาเพื่อดูรายละเอียด (มีปุ่ม QR Code, ประวัติผู้ถือครอง และแก้ไข) หรือกดไอคอนแก้ไข/ลบท้ายแถว (ลบได้เฉพาะผู้ดูแลระบบสูงสุด)',
@@ -285,10 +285,10 @@ const About = () => {
   }, []);
 
   const stats = [
-    { label: 'Online Users', value: summary?.data?.online_users ?? '0', icon: Users, color: '#10b981' },
-    { label: 'Visits Today', value: (summary?.data?.views_today ?? 0).toLocaleString(), icon: Calendar, color: '#3b82f6' },
-    { label: 'Visits This Month', value: (summary?.data?.views_month ?? 0).toLocaleString(), icon: Clock, color: '#eab308' },
-    { label: 'Total Site Visits', value: (summary?.data?.total_views ?? 0).toLocaleString(), icon: Eye, color: '#a855f7' }
+    { label: 'ผู้ใช้ที่ออนไลน์ขณะนี้', value: summary?.data?.online_users ?? '—', icon: Users, color: '#10b981' },
+    { label: 'การเข้าชมวันนี้', value: summary?.data?.views_today == null ? '—' : Number(summary.data.views_today).toLocaleString('th-TH'), icon: Calendar, color: '#3b82f6' },
+    { label: 'การเข้าชมเดือนนี้', value: summary?.data?.views_month == null ? '—' : Number(summary.data.views_month).toLocaleString('th-TH'), icon: Clock, color: '#eab308' },
+    { label: 'การเข้าชมทั้งหมด', value: summary?.data?.total_views == null ? '—' : Number(summary.data.total_views).toLocaleString('th-TH'), icon: Eye, color: '#a855f7' }
   ];
 
   const containerVariants = {
@@ -437,7 +437,7 @@ const About = () => {
             <div style={{ background: 'rgba(59, 130, 246, 0.1)', padding: '0.75rem', borderRadius: '1rem', color: '#3b82f6' }}>
               <BarChart size={28} />
             </div>
-            <h2 className="krub-bold" style={{ margin: 0, fontSize: '1.5rem' }}>Site Viewer Statistics</h2>
+            <h2 className="krub-bold" style={{ margin: 0, fontSize: '1.5rem' }}>สถิติการเข้าชมระบบ</h2>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', position: 'relative', minHeight: '180px' }}>
@@ -460,7 +460,7 @@ const About = () => {
 
           <div style={{ marginTop: '2rem', padding: '1rem', borderRadius: '0.75rem', background: 'rgba(59, 130, 246, 0.05)', border: '1px solid rgba(59, 130, 246, 0.1)', fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
             <History size={16} color="#3b82f6" />
-            <span>Operational metrics synchronized with real-time backend analytics.</span>
+            <span>สถิติจากระบบบันทึกการเข้าชมของเซิร์ฟเวอร์</span>
           </div>
         </motion.div>
 
@@ -470,7 +470,7 @@ const About = () => {
             <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '0.75rem', borderRadius: '1rem', color: '#10b981' }}>
               <Code2 size={28} />
             </div>
-            <h2 className="krub-bold" style={{ margin: 0, fontSize: '1.5rem' }}>Technical Stack</h2>
+            <h2 className="krub-bold" style={{ margin: 0, fontSize: '1.5rem' }}>เทคโนโลยีที่ใช้พัฒนา</h2>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '2rem' }}>
