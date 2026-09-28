@@ -108,7 +108,7 @@ const useDrawerA11y = (active, containerRef, onEscape) => {
 
 const fmtCount = (v) => (v === null || v === undefined ? '—' : v.toLocaleString('th-TH'));
 
-const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => {
+const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose, sessionInfo = null }) => {
   const isMobile = useIsMobile(MOBILE_BREAKPOINT);
   const containerRef = useRef(null);
   const drawerActive = isOpen && isMobile;
@@ -487,6 +487,11 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose }) => 
                           textOverflow: 'ellipsis'
                         }}>
                           {[user.position, user.pea_division].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
+                      {sessionInfo && !sessionInfo.expired && (
+                        <div className="sidebar-session" title="การเข้าสู่ระบบแต่ละครั้งใช้ได้ 24 ชั่วโมง และจะออกจากระบบอัตโนมัติเมื่อไม่มีการใช้งาน 30 นาที">
+                          ใช้ได้ถึง {new Date(sessionInfo.expiresAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} น.
                         </div>
                       )}
                     </div>

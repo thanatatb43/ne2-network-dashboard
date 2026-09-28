@@ -25,6 +25,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { useEffect } from 'react';
 import { APP_NAME } from './config/branding';
 import ConfirmDialog from './components/equipment-form/ConfirmDialog.jsx';
+import { readAuthCode, requestToken, requestUrl, isApiRequest, classify401, endSessionMessage, normalizeSession, idleRemaining, AUTH_MESSAGES } from './authSession';
 import { shouldConfirmLeave, clearNavigationGuard, navigationGuardMessage, initHistoryIndex, pushHistory, replaceHistory, entryIndex, currentHistoryIndex, syncHistoryIndex, popstateDecision } from './navigationGuard';
 
 // "ชื่อหน้า | NE2 LDAP" per tab -- detail/edit pages use their page TYPE as
@@ -44,6 +45,9 @@ const PAGE_TITLES = {
 // tab was closed (see the localStorage restore effect below).
 const SESSION_TIMEOUT_MS = 1800000; // 30 minutes
 const LAST_ACTIVITY_KEY = 'last_activity';
+// Session metadata from login/verify (expires_at etc.), never decoded from the JWT.
+const SESSION_META_KEY = 'session_meta';
+const API_BASE = import.meta.env.VITE_API_BASE_URL;
 // Where to send the user after a successful login, when they were sent to
 // /login mid-task (e.g. clicking "edit" while logged out). Stored in
 // localStorage rather than React state because the SSO flow does a full
@@ -147,7 +151,19 @@ function App() {
   const [settingsItemId, setSettingsItemId] = useState(null);
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [sessionInfo, setSessionInfo] = useState(() => { try { return normalizeSession(JSON.parse(localStorage.getItem(SESSION_META_KEY))); } catch { return null; } });
+  // The token the app is using right now -- a 401 for any other token is
+  // a late answer for an older session and must not end this one.
+  const tokenRef = useRef(null);
+  function rememberSession(session) {
+    const info = normalizeSession(session);
+    setSessionInfo(info);
+    try {
+      if (info) localStorage.setItem(SESSION_META_KEY, JSON.stringify(session));
+      else localStorage.removeItem(SESSION_META_KEY);
+    } catch { /* display only */ }
+  }
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => window.innerWidth > 1024);
   // True right after navigate('jobDetails', ...) pushed a new entry on top
   // of the report-issue list (i.e. the list is genuinely the previous
   // history entry) -- lets the detail page's "back" button call
@@ -267,7 +283,6 @@ function App() {
   // user deliberately collapsed with the new toggle button.
   useEffect(() => {
     let wasDesktop = window.innerWidth > 1024;
-    setIsSidebarOpen(wasDesktop);
 
     const handleResize = () => {
       const isDesktop = window.innerWidth > 1024;
@@ -291,6 +306,7 @@ function App() {
       localStorage.removeItem('token');
       localStorage.removeItem('auth_provider');
       localStorage.removeItem(LAST_ACTIVITY_KEY);
+      localStorage.removeItem(SESSION_META_KEY);
     };
 
     // The 30-minute idle timer below only runs in-memory, so closing the tab
@@ -315,9 +331,16 @@ function App() {
     // dead token never comes back looking logged in (this also refreshes
     // role/pea_branch/position from the DB instead of whatever was baked
     // into the JWT at login time).
+    const restoreCached = () => {
+      if (savedUser && savedUser !== 'undefined') {
+        try { setUser(JSON.parse(savedUser)); } catch (parseErr) { console.error(parseErr); }
+      }
+      tokenRef.current = savedToken;
+      setToken(savedToken);
+    };
     const verifySession = async () => {
       try {
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/auth/verify`, {
+        const response = await fetch(`${API_BASE}/api/auth/verify`, {
           headers: { 'Authorization': `Bearer ${savedToken}` }
         });
         if (response.ok) {
@@ -329,21 +352,28 @@ function App() {
           } else if (savedUser && savedUser !== 'undefined') {
             try { setUser(JSON.parse(savedUser)); } catch (parseErr) { console.error(parseErr); }
           }
+          rememberSession(result.session);
+          tokenRef.current = savedToken;
           setToken(savedToken);
-        } else {
-          // 401: expired / missing / forged / blacklisted token -- don't
-          // let a dead session masquerade as a live one.
+        } else if (response.status === 401) {
+          // Expired / revoked / invalid / account gone -- don't let a dead
+          // session masquerade as a live one, and say why.
+          const code = await readAuthCode(response);
           clearStaleSession();
+          setSessionInfo(null);
+          if (code !== 'AUTH_TOKEN_MISSING') toast.error(endSessionMessage(code), { id: 'session-ended', duration: 8000 });
+        } else {
+          // 503 (auth check unavailable) or another server problem: this
+          // says nothing about the token, so keep the cached session.
+          restoreCached();
+          toast.error(response.status === 503 ? AUTH_MESSAGES.AUTH_SERVICE_UNAVAILABLE : 'ตรวจสอบการเข้าสู่ระบบไม่ได้ในขณะนี้ ใช้ข้อมูลที่จำไว้ไปก่อน', { id: 'session-check' });
         }
       } catch (err) {
         // A network hiccup on page load shouldn't force a logout -- fall
         // back to the locally-cached session; the global 401 interceptor
         // will still catch it if the token turns out to actually be bad.
         console.error('Failed to verify session on load:', err);
-        if (savedUser && savedUser !== 'undefined') {
-          try { setUser(JSON.parse(savedUser)); } catch (parseErr) { console.error(parseErr); }
-        }
-        setToken(savedToken);
+        restoreCached();
       }
     };
 
@@ -498,13 +528,25 @@ function App() {
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
 
-  const handleAuthSuccess = (userData, userToken, provider = 'local') => {
+  const handleAuthSuccess = (userData, userToken, provider = 'local', session = null) => {
     if (!userData || !userToken) {
       console.error('Invalid auth data received');
       return;
     }
+    tokenRef.current = userToken;
     setUser(userData);
     setToken(userToken);
+    localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
+    if (session) {
+      rememberSession(session);
+    } else {
+      // The SSO fragment carries only token/user; the expiry comes from verify.
+      rememberSession(null);
+      fetch(`${API_BASE}/api/auth/verify`, { headers: { Authorization: `Bearer ${userToken}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((r) => { if (r?.session && tokenRef.current === userToken) rememberSession(r.session); })
+        .catch(() => { /* expiry display only */ });
+    }
     localStorage.setItem('user', JSON.stringify(userData));
     localStorage.setItem('token', userToken);
     // Remembered so handleLogout knows whether it also needs to clear the
@@ -523,6 +565,25 @@ function App() {
     }
   };
 
+
+  // The server says this session's token can't be used any more: clear it
+  // locally (no logout call -- there is nothing left to revoke), explain
+  // why, and bring the user back to the same page after logging in again.
+  const endSession = (code) => {
+    if (!tokenRef.current) return;
+    clearNavigationGuard();
+    setLeaveConfirm(null);
+    tokenRef.current = null;
+    const returnPath = `${window.location.pathname}${window.location.search}`;
+    setUser(null);
+    setToken(null);
+    setSessionInfo(null);
+    ['user', 'token', 'auth_provider', LAST_ACTIVITY_KEY, SESSION_META_KEY].forEach((k) => localStorage.removeItem(k));
+    if (!returnPath.startsWith('/login') && !returnPath.startsWith('/sso-callback')) localStorage.setItem(POST_LOGIN_REDIRECT_KEY, returnPath);
+    toast.error(endSessionMessage(code), { id: 'session-ended', icon: '🔒', duration: 8000, position: 'top-center' });
+    navigate('login');
+  };
+
   const handleLogout = () => {
     // Once logged out a draft can't be saved; never block the logout itself,
     // and drop any pending "leave this page?" action from the old session.
@@ -533,12 +594,15 @@ function App() {
 
     // Clear local session immediately so logout never hangs waiting on the
     // network (e.g. Wi-Fi/VPN dropped during idle timeout).
+    tokenRef.current = null;
     setUser(null);
     setToken(null);
+    setSessionInfo(null);
     localStorage.removeItem('user');
     localStorage.removeItem('token');
     localStorage.removeItem('auth_provider');
     localStorage.removeItem(LAST_ACTIVITY_KEY);
+    localStorage.removeItem(SESSION_META_KEY);
     localStorage.removeItem(POST_LOGIN_REDIRECT_KEY);
     sessionStorage.removeItem('session_id');
     sessionStorage.removeItem('view_tracked');
@@ -587,54 +651,29 @@ function App() {
   // Kept fresh every render so the fetch interceptor below (installed once
   // on mount) always calls the CURRENT handleLogout/user, not a stale
   // closure from whenever the effect first ran.
-  const handleLogoutRef = React.useRef(handleLogout);
-  handleLogoutRef.current = handleLogout;
-  const userRef = React.useRef(user);
-  userRef.current = user;
+  const endSessionRef = useRef(null);
+  useEffect(() => { endSessionRef.current = endSession; });
 
   // A locally "logged in" session doesn't guarantee the backend still
-  // considers the token valid -- e.g. a tab left open past the token's
-  // server-side expiry, or a token that was revoked. Previously this only
-  // surfaced as a raw "Invalid or expired token" error the moment someone
-  // tried to add/edit something, while the UI still looked fully logged in.
-  // This intercepts every fetch() call app-wide (no per-component changes
-  // needed) and force-logs-out the instant ANY authenticated request comes
-  // back 401, so a dead session never keeps masquerading as a live one.
+  // considers the token valid (it lives 24 h and can be revoked by logout).
+  // This watches every API response app-wide: a 401 whose code says the
+  // CURRENT token is dead ends the session locally. It ignores 401s for
+  // requests that carried no token or an older token (a slow answer from
+  // before the user logged in again) and the login/logout endpoints, and
+  // never touches the session on 403 (no permission) or 503 (auth check
+  // unavailable). It never calls logout: a dead token has nothing to revoke,
+  // and revoking on a stale answer would end a live session.
   useEffect(() => {
-    const isHandlingExpiryRef = { current: false };
     const originalFetch = window.fetch;
-
-    window.fetch = async (...args) => {
-      const response = await originalFetch(...args);
-      if (response.status === 401) {
-        const options = args[1];
-        const headers = options?.headers;
-        const hasAuthHeader = !!headers && (
-          (typeof headers.get === 'function' && headers.get('Authorization')) ||
-          headers['Authorization']
-        );
-        if (hasAuthHeader && userRef.current && !isHandlingExpiryRef.current) {
-          isHandlingExpiryRef.current = true;
-          toast.error('เซสชันหมดอายุหรือไม่ถูกต้อง กรุณาเข้าสู่ระบบใหม่อีกครั้ง', {
-            icon: '🔒',
-            duration: 6000,
-            position: 'top-center',
-            style: {
-              background: 'var(--card-bg)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--accent-warning)',
-              fontSize: '1rem',
-              fontWeight: 500,
-              fontFamily: '"Krub", sans-serif'
-            }
-          });
-          handleLogoutRef.current();
-          setTimeout(() => { isHandlingExpiryRef.current = false; }, 3000);
-        }
+    window.fetch = async (input, init) => {
+      const response = await originalFetch(input, init);
+      if (response.status === 401 && isApiRequest(input, API_BASE)) {
+        const code = await readAuthCode(response);
+        const decision = classify401({ code, requestTokenValue: requestToken(input, init), currentToken: tokenRef.current, url: requestUrl(input) });
+        if (decision === 'end-session') endSessionRef.current?.(code);
       }
       return response;
     };
-
     return () => { window.fetch = originalFetch; };
   }, []);
 
@@ -649,7 +688,10 @@ function App() {
         // Stamp last-activity so a closed-then-reopened tab can tell whether
         // the 30-minute idle window already elapsed (see restore effect above).
         localStorage.setItem(LAST_ACTIVITY_KEY, Date.now().toString());
-        timeoutId = setTimeout(() => {
+        const check = () => {
+          // Another tab may have been in use: the idle window is shared.
+          const remaining = idleRemaining(localStorage.getItem(LAST_ACTIVITY_KEY), SESSION_TIMEOUT_MS);
+          if (remaining > 0) { timeoutId = setTimeout(check, remaining); return; }
           handleLogout();
           toast('เซสชันของคุณหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกครั้งเนื่องจากไม่มีการใช้งาน', {
             icon: '🔒',
@@ -664,7 +706,8 @@ function App() {
               fontFamily: '"Krub", sans-serif'
             }
           });
-        }, SESSION_TIMEOUT_MS);
+        };
+        timeoutId = setTimeout(check, SESSION_TIMEOUT_MS);
       }
     };
 
@@ -755,6 +798,7 @@ function App() {
       )}
 
       <Sidebar
+        sessionInfo={sessionInfo}
         activeTab={activeTab}
         onNavigate={navigate}
         user={user}

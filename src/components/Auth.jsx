@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { User, Lock, ArrowRight, ArrowLeft, Loader2, ShieldCheck, KeyRound, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { APP_NAME, APP_NAME_TH } from '../config/branding';
+import { authCodeOf, AUTH_MESSAGES } from '../authSession';
 import './Auth.css';
 
 const API = import.meta.env.VITE_API_BASE_URL;
@@ -23,6 +24,14 @@ const Auth = ({ onAuthSuccess }) => {
     else localButtonRef.current?.focus();
   }, [screen]);
   const switchTo = (next) => { switched.current = true; setError(''); setShowPassword(false); setScreen(next); };
+
+  // A failed attempt never leaves the password on screen or in memory; the
+  // username stays so the user can simply try again.
+  const forgetPassword = () => {
+    setFormData((f) => ({ ...f, password: '' }));
+    setShowPassword(false);
+    requestAnimationFrame(() => document.getElementById(`${id}-password`)?.focus());
+  };
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -54,16 +63,19 @@ const Auth = ({ onAuthSuccess }) => {
         const userData = result.user || result.data?.user || (result.username ? result : result.data) || { username: formData.username.trim() };
         const userToken = result.token || result.data?.token || result.access_token || result.data?.access_token;
         if (typeof userData === 'object' && !userData?.username) userData.username = formData.username.trim();
-        onAuthSuccess(userData, userToken);
-      } else {
-        setError(response.status === 401 || response.status === 400
-          ? (result.message || 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง')
-          : (result.message || `เข้าสู่ระบบไม่สำเร็จ (HTTP ${response.status})`));
-        // Never keep a rejected password around.
-        setFormData((f) => ({ ...f, password: '' }));
+        onAuthSuccess(userData, userToken, 'local', result.session || result.data?.session || null);
+        return;
       }
+      const code = authCodeOf(result);
+      setError(code && AUTH_MESSAGES[code]
+        ? AUTH_MESSAGES[code]
+        : response.status === 503 ? AUTH_MESSAGES.AUTH_SERVICE_UNAVAILABLE
+          : response.status === 401 || response.status === 400 ? (result.message || AUTH_MESSAGES.AUTH_INVALID_CREDENTIALS)
+            : `เข้าสู่ระบบไม่สำเร็จ (HTTP ${response.status})`);
+      forgetPassword();
     } catch {
-      setError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+      setError('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ กรุณาตรวจสอบเครือข่ายแล้วลองใหม่');
+      forgetPassword();
     } finally {
       setLoading(false);
     }

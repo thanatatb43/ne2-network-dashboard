@@ -127,7 +127,7 @@ function JobList({ token, user, onBack, onOpenJob }) {
       try {
         const response = await fetch(`${API}/api/pea-jobs?${requestKey}`, { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal });
         const data = await response.json().catch(() => null);
-        if (response.status === 401 || response.status === 403) throw Object.assign(new Error(), { kind: 'auth' });
+        if (response.status === 401 || response.status === 403) throw Object.assign(new Error(), { kind: response.status === 403 ? 'forbidden' : 'session' });
         if (!response.ok || !data?.success || !Array.isArray(data.data)) throw new Error();
         if (!active) return;
         const total = Number(data.pagination?.total ?? data.data.length);
@@ -136,7 +136,7 @@ function JobList({ token, user, onBack, onOpenJob }) {
         setResult({ jobs: data.data, total, totalPages, page, key: requestKey, updated: new Date() });
       } catch (err) {
         if (!active) return;
-        setError(err.kind === 'auth' ? 'บัญชีนี้ไม่มีสิทธิ์ดูรายการงาน หรือเซสชันหมดอายุ' : err.name === 'AbortError' ? 'หมดเวลารอการตอบกลับจากเซิร์ฟเวอร์' : 'โหลดรายการงานไม่สำเร็จ');
+        setError(err.kind === 'forbidden' ? 'บัญชีนี้ไม่มีสิทธิ์ดูรายการงาน' : err.kind === 'session' ? 'เซสชันใช้งานไม่ได้ กรุณาเข้าสู่ระบบใหม่' : err.name === 'AbortError' ? 'หมดเวลารอการตอบกลับจากเซิร์ฟเวอร์' : 'โหลดรายการงานไม่สำเร็จ');
       } finally {
         clearTimeout(timer);
         if (active) setLoading(false);
