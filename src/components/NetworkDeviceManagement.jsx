@@ -3,7 +3,7 @@ import { toast } from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Copy, Edit2, FileSpreadsheet, Loader2, Plus, RefreshCw, Save, Search, Terminal, Trash2 } from 'lucide-react';
 import ConfirmDialog from './equipment-form/ConfirmDialog.jsx';
-import { setNavigationGuard, clearNavigationGuard, pushHistory, entryIndex, currentHistoryIndex } from '../navigationGuard';
+import { setNavigationGuard, clearNavigationGuard, pushHistory } from '../navigationGuard';
 import './ListPage.css';
 import './NetworkDeviceManagement.css';
 
@@ -135,26 +135,15 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
 
   // The form has no URL of its own: a marker history entry lets browser Back
   // close the form instead of leaving the page.
-  const dirtyRef = useRef(false);
-  useEffect(() => { dirtyRef.current = Boolean(dirty); });
-  const leavingRef = useRef(false);
-  const restoringRef = useRef(false);
-  const markerIndexRef = useRef(null);
+  // Unsaved edits are guarded by App (it stops the popstate before it gets
+  // here and asks); by the time this runs the move is allowed, so any entry
+  // other than the form's marker closes the form.
   useEffect(() => {
     if (!editing) return undefined;
     const onPop = (event) => {
-      if (restoringRef.current) { restoringRef.current = false; return; }
-      if (leavingRef.current) { leavingRef.current = false; setEditing(null); setConfirmDiscard(false); return; }
-      // Back with unsaved edits: step forward to the marker entry again (the
-      // same distance, so Forward history is untouched) and ask first.
-      const landed = entryIndex(event.state);
-      if (dirtyRef.current && landed !== null && markerIndexRef.current !== null && landed < markerIndexRef.current) {
-        restoringRef.current = true;
-        window.history.go(markerIndexRef.current - landed);
-        setConfirmDiscard(true);
-        return;
-      }
+      if (event.state?.ndmEditing) return;
       setEditing(null);
+      setConfirmDiscard(false);
     };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
@@ -165,14 +154,13 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
     const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
     window.addEventListener('beforeunload', warn);
     // Sidebar/in-app navigation asks via App; Back is handled above.
-    const release = setNavigationGuard(() => true, { handlesPopstate: true });
+    const release = setNavigationGuard(() => true);
     return () => { window.removeEventListener('beforeunload', warn); release(); };
   }, [dirty]);
 
   const openForm = (device) => {
     if (!canEdit) return;
     pushHistory({ ndmEditing: true }, window.location.pathname);
-    markerIndexRef.current = currentHistoryIndex();
     const next = device ? draftFrom(device) : emptyDraft();
     setDraft(next); setBaseline(next); setErrors({}); setFormError('');
     setEditing({ id: device ? device.id : null, name: device?.pea_name || '' });
@@ -181,7 +169,7 @@ const NetworkDeviceManagement = ({ token, onBack, user, onDeviceClick }) => {
   const closeForm = () => {
     clearNavigationGuard();
     setConfirmDiscard(false);
-    if (window.history.state?.ndmEditing) { leavingRef.current = true; window.history.back(); } else setEditing(null);
+    if (window.history.state?.ndmEditing) window.history.back(); else setEditing(null);
   };
 
   const requestClose = () => (dirty ? setConfirmDiscard(true) : closeForm());

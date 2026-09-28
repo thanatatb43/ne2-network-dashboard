@@ -4,8 +4,8 @@ import { useEffect } from 'react';
 // that returns true while it holds unsaved edits; App asks before any in-app
 // navigation or browser Back/Forward leaves the page.
 //
-// handlesPopstate: the form manages browser Back itself (e.g. a form opened
-// inside a page with its own history marker), so App should not intercept Back.
+// handlesPopstate: the form manages browser Back itself, so App should not
+// intercept Back (no current form needs this -- App coordinates all popstate).
 // message: what the leave prompt says, e.g. while a save is still running.
 let current = null;
 
@@ -20,6 +20,10 @@ export function shouldConfirmLeave(kind) {
   if (kind === 'popstate' && current.handlesPopstate) return false;
   try { return Boolean(current.isDirty()); } catch { return false; }
 }
+
+// For a request still in flight: leaving doesn't cancel it, the outcome just
+// won't be shown.
+export const BUSY_LEAVE_MESSAGE = 'กำลังส่งข้อมูลอยู่ ถ้าออกตอนนี้จะไม่เห็นผลว่าบันทึกสำเร็จหรือไม่ และการออกจากหน้าไม่ได้ยกเลิกคำขอที่ส่งไปแล้ว ข้อมูลอาจถูกบันทึกแล้ว';
 
 export const navigationGuardMessage = () => current?.message || '';
 
@@ -77,4 +81,17 @@ export const currentHistoryIndex = () => currentIndex;
 export function syncHistoryIndex(state) {
   const idx = indexOf(state);
   if (idx !== null) currentIndex = idx;
+}
+
+// What App's popstate coordinator does with a browser move:
+//  follow         -- no unsaved changes: apply the new URL
+//  ignore         -- the move back to the form (our own restore) arriving
+//  fallback       -- landed on an entry without a recorded position
+//  restore-and-ask -- go back to the form by -delta, ask, and on "leave"
+//                     repeat the user's move with go(delta)
+export function popstateDecision({ guarded, here, landed }) {
+  if (!guarded) return { type: 'follow' };
+  if (landed === here) return { type: 'ignore' };
+  if (landed === null || here === null) return { type: 'fallback' };
+  return { type: 'restore-and-ask', delta: landed - here };
 }

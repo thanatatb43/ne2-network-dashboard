@@ -4,7 +4,7 @@ import { AlertCircle, ArrowDown, ArrowLeft, ArrowUp, ArrowUpDown, Edit2, FileTex
 import BudgetTransactionsPanel from './BudgetTransactionsPanel';
 import ModalFrame from './common/ModalFrame.jsx';
 import ConfirmDialog from './equipment-form/ConfirmDialog.jsx';
-import { useLeaveGuard } from '../navigationGuard';
+import { useLeaveGuard, BUSY_LEAVE_MESSAGE } from '../navigationGuard';
 import './ListPage.css';
 import './BudgetManagement.css';
 
@@ -420,7 +420,7 @@ function BudgetFormModal({ budget, selectors, token, onClose, onSaved }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const formRef = useRef(null);
   const dirty = Object.keys(initial).some((k) => String(initial[k]) !== String(data[k]));
-  useLeaveGuard(dirty || busy, { message: busy ? 'กำลังบันทึกอยู่ ถ้าออกตอนนี้จะไม่เห็นผลว่าบันทึกสำเร็จหรือไม่' : '' });
+  useLeaveGuard(dirty || busy, { message: busy ? BUSY_LEAVE_MESSAGE : '' });
 
   const change = (name, value) => {
     setData((prev) => {
@@ -574,7 +574,7 @@ function UploadModal({ token, onClose, onUploaded }) {
   };
 
   const dirty = Boolean(file);
-  useLeaveGuard(dirty || busy, { message: busy ? 'กำลังอัปโหลดอยู่ ถ้าออกตอนนี้จะไม่เห็นผลว่านำเข้าสำเร็จหรือไม่' : 'ไฟล์ที่เลือกไว้จะไม่ถูกอัปโหลด' });
+  useLeaveGuard(dirty || busy, { message: busy ? BUSY_LEAVE_MESSAGE : 'ไฟล์ที่เลือกไว้จะไม่ถูกอัปโหลด' });
   const requestClose = () => (dirty ? setConfirmDiscard(true) : onClose());
 
   return (

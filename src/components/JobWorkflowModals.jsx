@@ -4,7 +4,7 @@ import ModalFrame from './common/ModalFrame.jsx';
 import ConfirmDialog from './equipment-form/ConfirmDialog.jsx';
 import EquipmentPicker from './EquipmentPicker';
 import BudgetTransactionPicker from './BudgetTransactionPicker';
-import { useLeaveGuard } from '../navigationGuard';
+import { useLeaveGuard, BUSY_LEAVE_MESSAGE } from '../navigationGuard';
 import './JobManagement.css';
 
 const API = import.meta.env.VITE_API_BASE_URL;
@@ -49,7 +49,7 @@ const send = async (url, init, fallback) => {
 // Leaving the page (menu, Back/Forward, reload) asks too.
 function WorkflowFrame({ title, icon, subtitle, size = 'lg', dirty, busy, onClose, children }) {
   const [confirming, setConfirming] = useState(false);
-  useLeaveGuard(dirty || busy, { message: busy ? 'กำลังบันทึกอยู่ ถ้าออกตอนนี้จะไม่เห็นผลว่าบันทึกสำเร็จหรือไม่' : 'ข้อมูลที่กรอกในหน้าต่าง "' + title + '" จะหายไป และสถานะงานจะไม่เปลี่ยน' });
+  useLeaveGuard(dirty || busy, { message: busy ? BUSY_LEAVE_MESSAGE : 'ข้อมูลที่กรอกในหน้าต่าง "' + title + '" จะหายไป และสถานะงานจะไม่เปลี่ยน' });
   const requestClose = () => (dirty ? setConfirming(true) : onClose());
   return (
     <>

@@ -25,7 +25,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { useEffect } from 'react';
 import { APP_NAME } from './config/branding';
 import ConfirmDialog from './components/equipment-form/ConfirmDialog.jsx';
-import { shouldConfirmLeave, clearNavigationGuard, navigationGuardMessage, initHistoryIndex, pushHistory, replaceHistory, historyDelta, syncHistoryIndex } from './navigationGuard';
+import { shouldConfirmLeave, clearNavigationGuard, navigationGuardMessage, initHistoryIndex, pushHistory, replaceHistory, entryIndex, currentHistoryIndex, syncHistoryIndex, popstateDecision } from './navigationGuard';
 
 // "ชื่อหน้า | NE2 LDAP" per tab -- detail/edit pages use their page TYPE as
 // the title (not the specific record's name), which is an acceptable
@@ -163,7 +163,6 @@ function App() {
   const [leaveConfirm, setLeaveConfirm] = useState(null);
   const lastUrlRef = useRef(window.location.pathname + window.location.search);
   const bypassPopRef = useRef(false);
-  const restoringPopRef = useRef(false);
 
   const applyRoute = (route) => {
     setActiveTab(route.tab);
@@ -364,26 +363,32 @@ function App() {
       applyRoute(pathToRoute(window.location.pathname));
       lastUrlRef.current = window.location.pathname + window.location.search;
     };
-    // Browser Back/Forward with unsaved changes: move back to the form the
-    // same distance the other way (so neither the Back nor the Forward
-    // history changes), ask, and only then repeat the move. The step back to
-    // the form fires its own popstate, which is ignored.
+    // The one place that decides what a browser Back/Forward/history.go()
+    // does. It listens in the capture phase so it runs before any page's own
+    // popstate listener. With unsaved changes it stops the event (the page
+    // and its form stay mounted, the route doesn't change), moves back to
+    // the form's entry the same distance the other way -- Back and Forward
+    // history both stay intact, even for multi-step jumps -- and asks. Only
+    // "leave" repeats the user's original move to the destination they chose.
     const onPopState = (event) => {
-      if (restoringPopRef.current) { restoringPopRef.current = false; syncHistoryIndex(event.state); return; }
       if (bypassPopRef.current) { bypassPopRef.current = false; syncHistoryIndex(event.state); applyPath(); return; }
-      if (shouldConfirmLeave('popstate')) {
+      const decision = popstateDecision({ guarded: shouldConfirmLeave('popstate'), here: currentHistoryIndex(), landed: entryIndex(event.state) });
+      if (decision.type !== 'follow') {
+        event.stopImmediatePropagation();
+        // Our own move back to the form arriving: nothing else to do.
+        if (decision.type === 'ignore') return;
         const message = navigationGuardMessage();
-        const delta = historyDelta(event.state);
-        if (delta) {
-          restoringPopRef.current = true;
-          window.history.go(-delta);
-          setLeaveConfirm({ message, run: () => { clearNavigationGuard(); bypassPopRef.current = true; window.history.go(delta); } });
-        } else {
-          // Entry without a recorded position (e.g. from before this code
-          // shipped): fall back to re-adding the form's entry.
-          pushHistory(window.history.state, lastUrlRef.current);
+        if (decision.type === 'fallback') {
+          // Entry without a recorded position (created before this code
+          // shipped): put the form's URL back on top and still ask. Forward
+          // history beyond it can't be kept in this case.
+          pushHistory({}, lastUrlRef.current);
           setLeaveConfirm({ message, run: () => { clearNavigationGuard(); bypassPopRef.current = true; window.history.back(); } });
+          return;
         }
+        const { delta } = decision;
+        window.history.go(-delta);
+        setLeaveConfirm({ message, run: () => { clearNavigationGuard(); bypassPopRef.current = true; window.history.go(delta); } });
         return;
       }
       syncHistoryIndex(event.state);
@@ -392,8 +397,8 @@ function App() {
 
     initHistoryIndex();
     applyPath();
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
+    window.addEventListener('popstate', onPopState, true);
+    return () => window.removeEventListener('popstate', onPopState, true);
   }, []);
 
   // Keeps the browser tab title in sync with the current page -- index.html
@@ -519,8 +524,10 @@ function App() {
   };
 
   const handleLogout = () => {
-    // Once logged out a draft can't be saved; never block the logout itself.
+    // Once logged out a draft can't be saved; never block the logout itself,
+    // and drop any pending "leave this page?" action from the old session.
     clearNavigationGuard();
+    setLeaveConfirm(null);
     const currentToken = token;
     const isSsoUser = localStorage.getItem('auth_provider') === 'sso';
 
