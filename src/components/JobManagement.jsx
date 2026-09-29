@@ -17,14 +17,20 @@ const STATUS_OPTIONS = ['เปิดงาน', 'ระหว่างดำเ
 const JOB_TYPE_OPTIONS = ['แจ้งซ่อม', 'ขออุปกรณ์ใหม่', 'ขอเปลี่ยนอุปกรณ์', 'แจ้งระบบใช้งานไม่ได้'];
 const PRIORITY_OPTIONS = ['ปกติ', 'เร่งด่วน'];
 const PAGE_SIZES = [10, 20, 50, 100];
+// server: sorted by GET /api/pea-jobs across every filtered job (sort/order
+// whitelist). transactions is not in that whitelist, so it only reorders the
+// jobs of the current page -- and says so. value() is the fallback for a
+// backend that doesn't report sort_scope yet.
 const SORTS = {
-  id: { label: 'ID', value: (j) => Number(j.id) || 0 },
-  job_name: { label: 'ชื่องาน', value: (j) => j.job_name || '' },
-  status: { label: 'สถานะ', value: (j) => STATUS_OPTIONS.indexOf(j.status) },
-  pea_name: { label: 'สำนักงาน', value: (j) => j.pea_site?.pea_name || '' },
-  transactions: { label: 'ธุรกรรม', value: (j) => j.transactions?.length || 0 },
-  createdAt: { label: 'วันที่แจ้ง', value: (j) => new Date(j.createdAt).getTime() || 0 }
+  id: { label: 'ID', server: true, value: (j) => Number(j.id) || 0 },
+  job_name: { label: 'ชื่องาน', server: true, value: (j) => j.job_name || '' },
+  status: { label: 'สถานะ', server: true, value: (j) => STATUS_OPTIONS.indexOf(j.status) },
+  priority: { label: 'ความสำคัญ', server: true, value: (j) => PRIORITY_OPTIONS.indexOf(j.priority) },
+  pea_name: { label: 'สำนักงาน', server: true, value: (j) => j.pea_site?.pea_name || '' },
+  transactions: { label: 'ธุรกรรม', server: false, value: (j) => j.transactions?.length || 0 },
+  createdAt: { label: 'วันที่แจ้ง', server: true, value: (j) => new Date(j.createdAt).getTime() || 0 }
 };
+const DEFAULT_SORT = { key: 'createdAt', order: 'desc' };
 const EMPTY_FILTERS = { search: '', site: '', status: '', jobType: '', priority: '' };
 const VIEW_KEY = 'job_mgmt_view.v1';
 const FOCUS_KEY = 'job_mgmt_return_focus_id';
@@ -33,7 +39,7 @@ const FOCUS_KEY = 'job_mgmt_return_focus_id';
 // job's detail route and coming back. Validated so a bad value can't break
 // the page.
 const readView = () => {
-  const fallback = { filters: EMPTY_FILTERS, page: 1, pageSize: 20, sort: null };
+  const fallback = { filters: EMPTY_FILTERS, page: 1, pageSize: 20, sort: DEFAULT_SORT };
   try {
     const v = JSON.parse(sessionStorage.getItem(VIEW_KEY)) || {};
     const filters = Object.fromEntries(Object.keys(EMPTY_FILTERS).map((k) => [k, typeof v.filters?.[k] === 'string' ? v.filters[k].slice(0, 200) : '']));
@@ -41,7 +47,7 @@ const readView = () => {
       filters,
       page: Number.isSafeInteger(v.page) && v.page > 0 ? v.page : 1,
       pageSize: PAGE_SIZES.includes(v.pageSize) ? v.pageSize : 20,
-      sort: SORTS[v.sort?.key] && ['asc', 'desc'].includes(v.sort?.order) ? v.sort : null
+      sort: SORTS[v.sort?.key] && ['asc', 'desc'].includes(v.sort?.order) ? v.sort : DEFAULT_SORT
     };
   } catch {
     return fallback;
@@ -62,6 +68,7 @@ function JobList({ token, user, onBack, onOpenJob }) {
   const [page, setPage] = useState(initial.page);
   const [pageSize, setPageSize] = useState(initial.pageSize);
   const [sort, setSort] = useState(initial.sort);
+  const [sortNotice, setSortNotice] = useState('');
   const [sites, setSites] = useState({ status: 'loading', list: [] });
   const [siteRetry, setSiteRetry] = useState(0);
   const [result, setResult] = useState(null);
@@ -114,6 +121,10 @@ function JobList({ token, user, onBack, onOpenJob }) {
   if (filters.jobType) params.set('job_type', filters.jobType);
   if (filters.priority) params.set('priority', filters.priority);
   if (site) params.set('pea_site_id', String(site.id));
+  // Page-only sorts ask the server for its default order.
+  const serverSort = SORTS[sort.key].server ? sort : DEFAULT_SORT;
+  params.set('sort', serverSort.key);
+  params.set('order', serverSort.order);
   const requestKey = params.toString();
 
   useEffect(() => {
@@ -128,14 +139,26 @@ function JobList({ token, user, onBack, onOpenJob }) {
         const response = await fetch(`${API}/api/pea-jobs?${requestKey}`, { headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal });
         const data = await response.json().catch(() => null);
         if (response.status === 401 || response.status === 403) throw Object.assign(new Error(), { kind: response.status === 403 ? 'forbidden' : 'session' });
+        if (response.status === 400 && (data?.error?.code || data?.code) === 'INVALID_SORT') throw Object.assign(new Error(), { kind: 'sort' });
         if (!response.ok || !data?.success || !Array.isArray(data.data)) throw new Error();
         if (!active) return;
         const total = Number(data.pagination?.total ?? data.data.length);
         const totalPages = Math.max(1, Number(data.pagination?.totalPages) || Math.ceil(total / pageSize));
         if (page > totalPages) { setPage(totalPages); return; }
-        setResult({ jobs: data.data, total, totalPages, page, key: requestKey, updated: new Date() });
+        setResult({ jobs: data.data, total, totalPages, page, key: requestKey, updated: new Date(), serverSorted: data.meta?.sort_scope === 'all_filtered_records' });
       } catch (err) {
         if (!active) return;
+        const isDefaultSort = sort.key === DEFAULT_SORT.key && sort.order === DEFAULT_SORT.order;
+        if (err.kind === 'sort' && !isDefaultSort) {
+          // A remembered or unsupported sort: go back to the default order
+          // (this also corrects what's stored) and say so. Never loops: the
+          // default itself being rejected is reported as an error below.
+          setSortNotice(`เรียงตาม "${SORTS[sort.key]?.label || sort.key}" ไม่ได้ จึงกลับไปเรียงตามวันที่แจ้ง ใหม่ก่อน`);
+          setSort(DEFAULT_SORT);
+          setPage(1);
+          return;
+        }
+        if (err.kind === 'sort') { setError('เซิร์ฟเวอร์ไม่รับการเรียงลำดับที่ส่งไป กรุณาแจ้งผู้ดูแลระบบ'); return; }
         setError(err.kind === 'forbidden' ? 'บัญชีนี้ไม่มีสิทธิ์ดูรายการงาน' : err.kind === 'session' ? 'เซสชันใช้งานไม่ได้ กรุณาเข้าสู่ระบบใหม่' : err.name === 'AbortError' ? 'หมดเวลารอการตอบกลับจากเซิร์ฟเวอร์' : 'โหลดรายการงานไม่สำเร็จ');
       } finally {
         clearTimeout(timer);
@@ -143,7 +166,7 @@ function JobList({ token, user, onBack, onOpenJob }) {
       }
     })();
     return () => { active = false; clearTimeout(timer); controller.abort(); };
-  }, [requestKey, token, retry, waitingForSite, page, pageSize]);
+  }, [requestKey, token, retry, waitingForSite, page, pageSize, sort]);
 
   const shown = result?.key === requestKey ? result : null;
   const stale = !shown && result ? result : null;
@@ -151,11 +174,14 @@ function JobList({ token, user, onBack, onOpenJob }) {
   const pending = inputs !== filters || waitingForSite || loading || !shown;
   const anyFilter = Object.values(inputs).some(Boolean);
   const change = (key, value) => setInputs((prev) => ({ ...prev, [key]: value }));
-  const clearAll = () => { setInputs(EMPTY_FILTERS); setFilters(EMPTY_FILTERS); setPage(1); setSort(null); };
+  // Clearing filters keeps the chosen order (sorting is a view preference).
+  const clearAll = () => { setInputs(EMPTY_FILTERS); setFilters(EMPTY_FILTERS); setPage(1); };
 
-  // The API has no sort parameter, so sorting reorders the current page only.
+  // Server-sorted when the API confirms it sorted all filtered jobs;
+  // otherwise (page-only column, or an older API) reorder this page only.
+  const pageOnlySort = Boolean(rows) && (!SORTS[sort.key].server || !rows.serverSorted);
   const jobs = rows ? [...rows.jobs] : [];
-  if (sort) {
+  if (pageOnlySort) {
     const get = SORTS[sort.key].value;
     jobs.sort((a, b) => {
       const [x, y] = [get(a), get(b)];
@@ -163,13 +189,19 @@ function JobList({ token, user, onBack, onOpenJob }) {
       return sort.order === 'asc' ? cmp : -cmp;
     });
   }
-  const toggleSort = (key) => setSort((s) => ({ key, order: s?.key === key && s.order === 'asc' ? 'desc' : 'asc' }));
-  const ariaSort = (key) => (sort?.key === key ? (sort.order === 'asc' ? 'ascending' : 'descending') : 'none');
+  // New order starts from page 1; dates and priority read naturally newest/
+  // most urgent first.
+  const toggleSort = (key) => {
+    setSortNotice('');
+    setSort((s) => ({ key, order: s.key === key ? (s.order === 'asc' ? 'desc' : 'asc') : (key === 'createdAt' || key === 'priority' ? 'desc' : 'asc') }));
+    setPage(1);
+  };
+  const ariaSort = (key) => (sort.key === key ? (sort.order === 'asc' ? 'ascending' : 'descending') : 'none');
   const sortHeader = (k, className) => (
     <th scope="col" aria-sort={ariaSort(k)} className={className}>
       <button type="button" className="list-sort" onClick={() => toggleSort(k)}>
         {SORTS[k].label}
-        {sort?.key !== k ? <ArrowUpDown size={14} aria-hidden="true" className="jm-sort-idle" /> : sort.order === 'asc' ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />}
+        {sort.key !== k ? <ArrowUpDown size={14} aria-hidden="true" className="jm-sort-idle" /> : sort.order === 'asc' ? <ArrowUp size={14} aria-hidden="true" /> : <ArrowDown size={14} aria-hidden="true" />}
       </button>
     </th>
   );
@@ -278,14 +310,15 @@ function JobList({ token, user, onBack, onOpenJob }) {
           ) : 'สำนักงานต้องเลือกชื่อให้ตรงกับรายการแนะนำ'}
         </div>
         <div className="job-report-filter-actions">
-          <button type="button" className="list-button" disabled={!anyFilter && !sort} onClick={clearAll}>ล้างตัวกรองและการเรียง</button>
+          <button type="button" className="list-button" disabled={!anyFilter} onClick={clearAll}>ล้างตัวกรอง</button>
           <span className="list-muted">ค้นหาอัตโนมัติ · ใช้ทุกเงื่อนไขร่วมกัน</span>
         </div>
 
+        {sortNotice && <p className="list-filter-warning jm-sort-notice" role="status">{sortNotice}</p>}
         <div className="list-result-info">
           <span role="status" ref={resultInfoRef} tabIndex={-1}>
             {error && !rows ? 'โหลดไม่สำเร็จ' : pending && !rows ? 'กำลังโหลด…' : `พบ ${rows.total.toLocaleString('th-TH')} งาน`}
-            {sort && rows?.jobs.length > 1 ? ` · เรียงตาม${SORTS[sort.key].label}เฉพาะในหน้านี้` : ''}
+            {pageOnlySort && rows?.jobs.length > 1 ? ` · เรียงตาม${SORTS[sort.key].label}เฉพาะงานในหน้านี้` : ''}
           </span>
           <span>{rows && `อัปเดตล่าสุด ${rows.updated.toLocaleTimeString('th-TH')}`}</span>
         </div>
@@ -309,7 +342,7 @@ function JobList({ token, user, onBack, onOpenJob }) {
                   {sortHeader('id', 'list-number')}
                   {sortHeader('job_name')}
                   {sortHeader('status')}
-                  <th scope="col">ความสำคัญ</th>
+                  {sortHeader('priority')}
                   {sortHeader('pea_name')}
                   {sortHeader('transactions', 'jm-num')}
                   {sortHeader('createdAt')}

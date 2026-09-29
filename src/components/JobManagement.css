@@ -10,6 +10,7 @@
 .jm-page .jm-table th:nth-child(7) { width: 150px; }
 .jm-page .jm-table th:nth-child(8) { width: 184px; }
 .jm-page .list-table .list-name { max-width: 100%; }
+.jm-sort-notice { margin: 0; padding: 0 20px 12px; font-size: .875rem; }
 .jm-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: .8125rem; }
 .jm-cell-main { display: block; white-space: nowrap; }
 .jm-num { text-align: right; font-variant-numeric: tabular-nums; }
