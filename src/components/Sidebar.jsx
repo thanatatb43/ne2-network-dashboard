@@ -113,6 +113,20 @@ const fmtCount = (v) => (v === null || v === undefined ? '—' : v.toLocaleStrin
 
 const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose, sessionInfo = null }) => {
   const [theme, setTheme] = useState(readTheme);
+  // Display preferences sit behind the logo: opened on demand, closed by
+  // Escape or a click elsewhere.
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  const prefsRef = useRef(null);
+  const prefsButtonRef = useRef(null);
+  useEffect(() => {
+    if (!prefsOpen) return undefined;
+    prefsRef.current?.querySelector('[aria-pressed="true"]')?.focus();
+    const onDown = (e) => {
+      if (!prefsRef.current?.contains(e.target) && !prefsButtonRef.current?.contains(e.target)) setPrefsOpen(false);
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [prefsOpen]);
   const isMobile = useIsMobile(MOBILE_BREAKPOINT);
   const containerRef = useRef(null);
   const drawerActive = isOpen && isMobile;
@@ -328,9 +342,18 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose, sessi
             >
               <div className="sidebar-brand">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', minWidth: 0 }}>
-                  <div className="sidebar-brand-logo">
+                  <button
+                    ref={prefsButtonRef}
+                    type="button"
+                    className="sidebar-brand-logo"
+                    aria-label="ตั้งค่าการแสดงผล (ธีมสว่าง/มืด)"
+                    title="ตั้งค่าการแสดงผล"
+                    aria-expanded={prefsOpen}
+                    aria-controls="sidebar-prefs"
+                    onClick={() => setPrefsOpen((v) => !v)}
+                  >
                     <img src={peaLogo} alt="" style={{ width: '32px', height: '32px', objectFit: 'contain' }} />
-                  </div>
+                  </button>
                   <div className="sidebar-brand-copy" title={APP_NAME_TH}>
                     <h2 className="sidebar-brand-name" aria-label={`${APP_NAME}: ${APP_NAME_TH}`}>
                       {APP_NAME}
@@ -339,6 +362,34 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose, sessi
                     <span className="sr-only">{APP_NAME_TH}</span>
                   </div>
                 </div>
+
+                {prefsOpen && (
+                  <div
+                    ref={prefsRef}
+                    id="sidebar-prefs"
+                    className="sidebar-prefs"
+                    role="group"
+                    aria-label="ตั้งค่าการแสดงผล"
+                    onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setPrefsOpen(false); prefsButtonRef.current?.focus(); } }}
+                  >
+                    <p className="sidebar-prefs-title">ธีม</p>
+                    <div className="sidebar-theme">
+                      {[['light', 'สว่าง', <Sun key="i" size={16} aria-hidden="true" />], ['dark', 'มืด', <Moon key="i" size={16} aria-hidden="true" />]].map(([value, label, icon]) => (
+                        <button key={value} type="button" className="sidebar-theme-button" aria-pressed={theme === value} onClick={() => { setTheme(value); saveTheme(value); }}>
+                          {icon} {label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="sidebar-forget"
+                      title="ล้างค่าที่ระบบจำไว้จากการกรอกฟอร์ม (ข้อความแนะนำเมื่อคลิกช่องกรอก) ในเบราว์เซอร์นี้"
+                      onClick={() => { clearFormHistory(); toast.success('ล้างข้อมูลที่เคยกรอกในเบราว์เซอร์นี้แล้ว'); setPrefsOpen(false); }}
+                    >
+                      ล้างข้อมูลที่เคยกรอก
+                    </button>
+                  </div>
+                )}
 
                 {/* Collapse Button -- visible at any screen size, not just mobile */}
                 <button
@@ -525,22 +576,6 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose, sessi
                   </button>
                 </div>
               )}
-
-              <div className="sidebar-theme" role="group" aria-label="ธีมการแสดงผล">
-                {[['light', 'สว่าง', <Sun key="i" size={16} aria-hidden="true" />], ['dark', 'มืด', <Moon key="i" size={16} aria-hidden="true" />]].map(([value, label, icon]) => (
-                  <button key={value} type="button" className="sidebar-theme-button" aria-pressed={theme === value} onClick={() => { setTheme(value); saveTheme(value); }}>
-                    {icon} {label}
-                  </button>
-                ))}
-              </div>
-              <button
-                type="button"
-                className="sidebar-forget"
-                title="ล้างค่าที่ระบบจำไว้จากการกรอกฟอร์ม (ข้อความแนะนำเมื่อคลิกช่องกรอก) ในเบราว์เซอร์นี้"
-                onClick={() => { clearFormHistory(); toast.success('ล้างข้อมูลที่เคยกรอกในเบราว์เซอร์นี้แล้ว'); }}
-              >
-                ล้างข้อมูลที่เคยกรอก
-              </button>
 
               <div style={{ padding: '1rem', borderRadius: '0.75rem', background: 'var(--glass-bg-subtle)', border: '1px solid var(--border-subtle)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
