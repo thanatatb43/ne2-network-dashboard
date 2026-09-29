@@ -128,8 +128,12 @@ const JobFormModal = ({ mode, job, sites, token, user, onClose, onSuccess }) => 
   const [priority, setPriority] = useState(job?.priority || 'ปกติ');
   const [department, setDepartment] = useState(job?.department || '');
   const [jobDescription, setJobDescription] = useState(job?.job_description || '');
-  const [requesterName, setRequesterName] = useState(job?.requester_name || '');
-  const [requesterEmpId, setRequesterEmpId] = useState(job?.requester_emp_id || '');
+  // A new report starts with the signed-in user as the requester (username
+  // is the employee ID in this system); both stay editable for reports made
+  // on someone else's behalf.
+  const selfName = [user?.first_name, user?.last_name].filter(Boolean).join(' ');
+  const [requesterName, setRequesterName] = useState(job?.requester_name || (mode === 'create' ? selfName : ''));
+  const [requesterEmpId, setRequesterEmpId] = useState(job?.requester_emp_id || (mode === 'create' ? (user?.username || '') : ''));
   const [requesterContact, setRequesterContact] = useState(job?.requester_contact || '');
   const [notificationDocNo, setNotificationDocNo] = useState(job?.notification_doc_no || '');
   const [notificationDocFile, setNotificationDocFile] = useState(null);

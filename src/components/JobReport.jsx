@@ -334,6 +334,7 @@ const JobReport = ({ token, user, onRequireLogin, onJobClick }) => {
             mode="create"
             sites={sites}
             token={token}
+            user={user}
             onClose={() => setShowFormModal(false)}
             onSuccess={() => { setCurrentPage(1); setRetry((n) => n + 1); }}
           />
