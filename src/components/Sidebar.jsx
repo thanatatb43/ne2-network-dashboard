@@ -546,7 +546,7 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose, sessi
                       )}
                       {sessionInfo && !sessionInfo.expired && (
                         <div className="sidebar-session" title="การเข้าสู่ระบบแต่ละครั้งใช้ได้ 24 ชั่วโมง และจะออกจากระบบอัตโนมัติเมื่อไม่มีการใช้งาน 30 นาที">
-                          ใช้ได้ถึง {new Date(sessionInfo.expiresAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} น.
+                          Valid until {new Date(sessionInfo.expiresAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} น.
                         </div>
                       )}
                     </div>
