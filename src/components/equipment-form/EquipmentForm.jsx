@@ -151,7 +151,7 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
       <div key={field.name} className={`list-field ef-field ef-field-${field.type}${value.trim() ? ' is-active' : ''}${error ? ' is-invalid' : ''}${field.type === 'textarea' ? ' ef-wide' : ''}`}>
         <label htmlFor={fieldId(field.name)}>{field.label}{field.required && <span className="ef-required" aria-hidden="true"> *</span>}{field.required && <span className="list-sr-only"> (จำเป็น)</span>}</label>
         {field.type === 'combo' ? (
-          <SearchableDropdown inputId={fieldId(field.name)} label={field.label} value={value} disabled={disabled} describedBy={describedBy}
+          <SearchableDropdown inputId={fieldId(field.name)} label={field.label} value={value} disabled={disabled} describedBy={describedBy} required={field.required}
             options={field.name === 'status' ? statusOptionsFor(baseline.status) : field.options}
             placeholder="เลือกจากรายการ หรือพิมพ์เอง" onChange={v => change(field.name, v)} />
         ) : field.type === 'textarea' ? (

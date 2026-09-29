@@ -499,6 +499,7 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
           </Section>
 
           <Section title="ครุภัณฑ์">
+            <InfoRow icon={Tag} label="รหัสอุปกรณ์" value={equipment.equipment_code} />
             <InfoRow icon={Fingerprint} label="Serial Number" value={equipment.serial_number} mono />
             <InfoRow icon={Tag} label="รหัสทรัพย์สิน" value={equipment.asset_number} />
             <InfoRow icon={User} label="ผู้ถือครอง" value={equipment.asset_owner} />

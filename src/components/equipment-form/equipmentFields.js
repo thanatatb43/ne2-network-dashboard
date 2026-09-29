@@ -26,7 +26,7 @@ export const SECTIONS = [
       { name: 'name', label: 'ชื่ออุปกรณ์', type: 'text', required: true },
       { name: 'equipment_type', label: 'ประเภทอุปกรณ์', type: 'combo', options: EQUIPMENT_TYPE_OPTIONS },
       { name: 'department', label: 'แผนก', type: 'combo', options: DEPARTMENT_OPTIONS },
-      { name: 'status', label: 'สถานะ', type: 'combo', options: STATUS_OPTIONS }
+      { name: 'status', label: 'สถานะ', type: 'combo', options: STATUS_OPTIONS, required: true }
     ]
   },
   {
@@ -37,6 +37,7 @@ export const SECTIONS = [
   },
   {
     id: 'asset', title: 'ทรัพย์สินและผู้ถือครอง', fields: [
+      { name: 'equipment_code', label: 'รหัสอุปกรณ์', type: 'text' },
       { name: 'serial_number', label: 'Serial Number', type: 'text' },
       { name: 'asset_number', label: 'รหัสทรัพย์สิน', type: 'text' },
       { name: 'asset_owner', label: 'ผู้ถือครอง', type: 'text' },

@@ -137,7 +137,7 @@ export default function useEquipmentEditor({ equipmentId, context, token }) {
       const res = await fetch(creating ? `${API}/api/office-equipment` : `${API}/api/office-equipment/${currentId}`, {
         method: creating ? 'POST' : 'PUT',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...authHeaders(token) },
-        body: serializeDraft(draft, { siteId: lockedSiteId }).toString()
+        body: serializeDraft(draft, { siteId: lockedSiteId, baseline: creating ? undefined : latestBaselineRef.current }).toString()
       });
       const body = await readJson(res);
       if (!res.ok || body?.success === false) {
