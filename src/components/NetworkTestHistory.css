@@ -22,3 +22,9 @@
   .nth-cards { display: block; }
   .nth-page .list-toolbar .list-field, .nth-page .list-toolbar > .list-button { flex: 1 1 100%; }
 }
+.nth-range { padding-bottom: 8px; }
+.nth-date { min-height: 44px; padding: 8px 12px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font: inherit; }
+.nth-range .list-field.is-active .nth-date { border-color: var(--list-action); background: var(--bg-accent-subtle); }
+.nth-date[aria-invalid="true"] { border-color: var(--accent-danger); }
+.nth-range-error { flex: 1 1 100%; margin: 0; color: var(--accent-danger); font-weight: 600; font-size: .875rem; }
+.nth-search { padding-top: 8px; }
