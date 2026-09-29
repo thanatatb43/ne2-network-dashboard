@@ -1,4 +1,4 @@
-export const API = import.meta.env.VITE_API_BASE_URL;
+export const API = import.meta.env?.VITE_API_BASE_URL;
 
 // Thai labels for the backend's role values. The descriptions only state
 // what this app's screens actually gate on each role.
@@ -30,6 +30,30 @@ export const settingsPermissions = (user) => {
 export const PASSWORD_RULE = /^(?=.*[a-z])(?=.*[A-Z])(?=.*[!@#$%^&*(),.?":{}|<>]).{10,}$/;
 // "lat, long" pasted straight from Google Maps.
 export const COORDINATES_PATTERN = /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/;
+
+// Error message for a coordinates string, or '' when it is fine. 0 is a
+// valid value (never treated as empty).
+export function coordinatesProblem(value) {
+  const v = String(value ?? '').trim();
+  if (!v) return '';
+  if (!COORDINATES_PATTERN.test(v)) return 'รูปแบบต้องเป็น "ละติจูด, ลองจิจูด" เช่น 16.246825, 102.821954';
+  const [lat, lng] = v.split(',').map((x) => Number(x.trim()));
+  if (lat < -90 || lat > 90) return 'ละติจูดต้องอยู่ระหว่าง -90 ถึง 90';
+  if (lng < -180 || lng > 180) return 'ลองจิจูดต้องอยู่ระหว่าง -180 ถึง 180';
+  return '';
+}
+
+// What PUT/POST /api/pea-sites should get for coordinates, compared with
+// the value the form started from:
+//   unchanged -> omit (undefined); cleared -> null (JSON null removes them);
+//   new text -> the text. Never "" or the string "null".
+export function coordinatesPayload(initial, current) {
+  const before = String(initial ?? '').trim();
+  const now = String(current ?? '').trim();
+  if (now === before) return undefined;
+  if (!now) return before ? null : undefined;
+  return now;
+}
 
 export const fullName = (u) => [u?.first_name, u?.last_name].filter(Boolean).join(' ') || u?.username || '—';
 

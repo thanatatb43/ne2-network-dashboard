@@ -5,7 +5,7 @@ import ModalFrame from '../common/ModalFrame.jsx';
 import ConfirmDialog from '../equipment-form/ConfirmDialog.jsx';
 import { useLeaveGuard, BUSY_LEAVE_MESSAGE } from '../../navigationGuard';
 import { normalizeLiveStatus, LIVE_STATUS_META } from '../deviceStatus';
-import { API, COORDINATES_PATTERN, settingsPermissions, failureMessage, readJson, writeJson } from './settingsShared';
+import { API, coordinatesProblem, coordinatesPayload, settingsPermissions, failureMessage, readJson, writeJson } from './settingsShared';
 import '../ListPage.css';
 import '../AdminSettings.css';
 
@@ -331,7 +331,8 @@ function LocationFormModal({ site, provinces, token, onClose, onSaved }) {
     const found = {};
     if (!trimmed.pea_name) found.pea_name = 'กรุณาระบุชื่อสำนักงาน';
     if (!trimmed.pea_province) found.pea_province = 'กรุณาระบุจังหวัด';
-    if (trimmed.coordinates && !COORDINATES_PATTERN.test(trimmed.coordinates)) found.coordinates = 'รูปแบบต้องเป็น "ละติจูด, ลองจิจูด" เช่น 16.246825, 102.821954';
+    const coordsError = coordinatesProblem(trimmed.coordinates);
+    if (coordsError) found.coordinates = coordsError;
     setErrors(found);
     if (Object.keys(found).length) {
       formRef.current?.querySelector(`#${CSS.escape(`${id}-${Object.keys(found)[0]}`)}`)?.focus();
@@ -339,7 +340,8 @@ function LocationFormModal({ site, provinces, token, onClose, onSaved }) {
     }
     setBusy(true);
     setSubmitError('');
-    const payload = { pea_name: trimmed.pea_name, pea_province: trimmed.pea_province, ...(trimmed.coordinates ? { coordinates: trimmed.coordinates } : {}) };
+    const coordinates = coordinatesPayload(initial.coordinates, trimmed.coordinates);
+    const payload = { pea_name: trimmed.pea_name, pea_province: trimmed.pea_province, ...(coordinates !== undefined ? { coordinates } : {}) };
     try {
       const response = await fetch(site ? `${API}/api/pea-sites/${site.id}` : `${API}/api/pea-sites`, {
         method: site ? 'PUT' : 'POST',
@@ -380,7 +382,7 @@ function LocationFormModal({ site, provinces, token, onClose, onSaved }) {
           {field('pea_province', 'จังหวัด', { required: true, placeholder: 'เช่น กาฬสินธุ์', list: provinces.length ? `${id}-provinces` : undefined })}
           <datalist id={`${id}-provinces`}>{provinces.map((p) => <option key={p} value={p} />)}</datalist>
           {field('coordinates', 'พิกัด (ละติจูด, ลองจิจูด)', { className: 'as-mono', inputMode: 'decimal', placeholder: '16.246825, 102.821954', 'aria-describedby': `${id}-coords-help` })}
-          <p id={`${id}-coords-help`} className="mf-meta as-coords-help">คัดลอกจาก Google Maps: คลิกขวาที่ตำแหน่ง แล้วกดพิกัดที่อยู่บนสุดของเมนู · {site && hasCoords(site) ? 'ถ้าล้างช่องนี้ ระบบจะคงพิกัดเดิมไว้' : 'เว้นว่างได้'}</p>
+          <p id={`${id}-coords-help`} className="mf-meta as-coords-help">คัดลอกจาก Google Maps: คลิกขวาที่ตำแหน่ง แล้วกดพิกัดที่อยู่บนสุดของเมนู · {site && hasCoords(site) ? 'ล้างช่องนี้เพื่อนำพิกัดออก (สำนักงานจะไม่แสดงบนแผนที่)' : 'เว้นว่างได้'}</p>
           <div className="mf-actions">
             <button type="button" className="mf-button" onClick={requestClose} disabled={busy}>ยกเลิก</button>
             <button type="submit" className="mf-button mf-primary" disabled={busy}>{busy && <Loader2 size={16} className="animate-spin" aria-hidden="true" />} บันทึก</button>
