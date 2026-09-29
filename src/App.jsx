@@ -25,6 +25,7 @@ import toast, { Toaster } from 'react-hot-toast';
 import { useEffect } from 'react';
 import { APP_NAME } from './config/branding';
 import ConfirmDialog from './components/equipment-form/ConfirmDialog.jsx';
+import { installFormHistory, setFormHistoryOwner } from './formHistory';
 import { readAuthCode, requestToken, requestUrl, isApiRequest, classify401, endSessionMessage, normalizeSession, idleRemaining, AUTH_MESSAGES } from './authSession';
 import { shouldConfirmLeave, clearNavigationGuard, navigationGuardMessage, initHistoryIndex, pushHistory, replaceHistory, entryIndex, currentHistoryIndex, syncHistoryIndex, popstateDecision } from './navigationGuard';
 
@@ -430,6 +431,10 @@ function App() {
     window.addEventListener('popstate', onPopState, true);
     return () => window.removeEventListener('popstate', onPopState, true);
   }, []);
+
+  // Text fields remember what this user typed before (see formHistory.js).
+  useEffect(() => installFormHistory(), []);
+  useEffect(() => { setFormHistoryOwner(user?.id ?? user?.username); }, [user]);
 
   // Keeps the browser tab title in sync with the current page -- index.html
   // has a static "NE2 LDAP" fallback for before this runs.

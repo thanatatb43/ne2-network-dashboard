@@ -5,6 +5,16 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/png" href="/src/assets/logo/pea_logo.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light" />
+  <!-- Apply the remembered light/dark theme before first paint (see src/theme.js). -->
+  <script>
+    try {
+      if (localStorage.getItem('ne2.theme') === 'dark') {
+        document.documentElement.classList.add('dark-theme');
+        document.querySelector('meta[name="color-scheme"]').setAttribute('content', 'dark');
+      }
+    } catch (e) { /* storage unavailable: light */ }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link

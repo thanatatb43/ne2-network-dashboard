@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X,
-  History, Map, ChevronDown, ChevronRight, Cpu, ShoppingCart, Search, ClipboardList, RefreshCw, AlertCircle
+  History, Map, ChevronDown, ChevronRight, Cpu, ShoppingCart, Search, ClipboardList, RefreshCw, AlertCircle, Sun, Moon
 } from 'lucide-react';
 import { motion as Motion, AnimatePresence } from 'framer-motion';
 
 import peaLogo from '../assets/logo/pea_logo.png';
 import { APP_NAME, APP_NAME_TH } from '../config/branding';
+import { readTheme, saveTheme } from '../theme.js';
+import { clearFormHistory } from '../formHistory.js';
+import { toast } from 'react-hot-toast';
 import './Sidebar.css';
 
 const MOBILE_BREAKPOINT = 1024;
@@ -109,6 +112,7 @@ const useDrawerA11y = (active, containerRef, onEscape) => {
 const fmtCount = (v) => (v === null || v === undefined ? '—' : v.toLocaleString('th-TH'));
 
 const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose, sessionInfo = null }) => {
+  const [theme, setTheme] = useState(readTheme);
   const isMobile = useIsMobile(MOBILE_BREAKPOINT);
   const containerRef = useRef(null);
   const drawerActive = isOpen && isMobile;
@@ -521,6 +525,22 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose, sessi
                   </button>
                 </div>
               )}
+
+              <div className="sidebar-theme" role="group" aria-label="ธีมการแสดงผล">
+                {[['light', 'สว่าง', <Sun key="i" size={16} aria-hidden="true" />], ['dark', 'มืด', <Moon key="i" size={16} aria-hidden="true" />]].map(([value, label, icon]) => (
+                  <button key={value} type="button" className="sidebar-theme-button" aria-pressed={theme === value} onClick={() => { setTheme(value); saveTheme(value); }}>
+                    {icon} {label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="sidebar-forget"
+                title="ล้างค่าที่ระบบจำไว้จากการกรอกฟอร์ม (ข้อความแนะนำเมื่อคลิกช่องกรอก) ในเบราว์เซอร์นี้"
+                onClick={() => { clearFormHistory(); toast.success('ล้างข้อมูลที่เคยกรอกในเบราว์เซอร์นี้แล้ว'); }}
+              >
+                ล้างข้อมูลที่เคยกรอก
+              </button>
 
               <div style={{ padding: '1rem', borderRadius: '0.75rem', background: 'var(--glass-bg-subtle)', border: '1px solid var(--border-subtle)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>

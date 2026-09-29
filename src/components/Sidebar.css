@@ -93,3 +93,12 @@
 }
 
 .sidebar-session { margin-top: 2px; font-size: .7rem; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sidebar-theme { display: flex; gap: 4px; padding: 4px; margin-bottom: 12px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--glass-bg-subtle); }
+.sidebar-theme-button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font: inherit; font-size: .8125rem; font-weight: 600; cursor: pointer; }
+.sidebar-theme-button[aria-pressed="true"] { background: #7e22ce; color: #fff; }
+.sidebar-theme-button:hover:not([aria-pressed="true"]) { background: var(--bg-accent-subtle); color: var(--text-primary); }
+.sidebar-theme-button:focus-visible { outline: 3px solid #7e22ce; outline-offset: 2px; }
+.dark-theme .sidebar-theme-button:focus-visible { outline-color: #d8b4fe; }
+.sidebar-forget { display: block; width: 100%; min-height: 36px; margin: -4px 0 12px; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: .75rem; text-decoration: underline; cursor: pointer; }
+.sidebar-forget:hover { color: var(--text-primary); }
+.sidebar-forget:focus-visible { outline: 3px solid #7e22ce; outline-offset: 2px; }

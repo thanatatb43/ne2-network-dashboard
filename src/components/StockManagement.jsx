@@ -7,6 +7,7 @@ import QrCodeModal from './QrCodeModal';
 import ModalFrame from './common/ModalFrame.jsx';
 import ConfirmDialog from './equipment-form/ConfirmDialog.jsx';
 import { STATUS_OPTIONS } from './equipment-form/equipmentFields.js';
+import SearchableDropdown from './SearchableDropdown';
 import './ListPage.css';
 import './StockManagement.css';
 
@@ -338,12 +339,19 @@ const StockManagement = ({ token, user, onBack, onEquipmentClick, onAddStock, on
             </div>
           </label>
           {activeTab === 'other' && (
-            <label className={`list-field${siteInput ? ' is-active' : ''}`}>
-              <span>สำนักงาน</span>
-              <input type="text" list="stock-other-sites" value={siteInput} placeholder="ทั้งหมด (พิมพ์แล้วเลือกจากรายการ)" onChange={e => { setSiteInput(e.target.value); setPage(1); }} className="sm-input" aria-describedby={siteInput && !matchedSite ? 'sm-site-hint' : undefined} />
-              <datalist id="stock-other-sites">{otherSites.map(s => <option key={s.id} value={s.name} />)}</datalist>
+            <div className={`list-field sm-site-field${siteInput ? ' is-active' : ''}`}>
+              <label htmlFor="sm-site-filter">สำนักงาน</label>
+              <SearchableDropdown
+                inputId="sm-site-filter"
+                label="สำนักงาน"
+                placeholder="ทุกสำนักงาน"
+                value={siteInput}
+                onChange={v => { setSiteInput(v); setPage(1); }}
+                options={[...new Set(otherSites.map(s => s.name))]}
+                describedBy={siteInput && !matchedSite ? 'sm-site-hint' : undefined}
+              />
               {siteInput && !matchedSite && <span id="sm-site-hint" className="sm-hint">ยังไม่ตรงกับสำนักงานในรายการ จึงแสดงทุกสำนักงาน</span>}
-            </label>
+            </div>
           )}
           <label className={`list-field${statusFilter !== 'All' ? ' is-active' : ''}`}>
             <span>สถานะ</span>
