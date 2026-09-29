@@ -44,6 +44,9 @@
   .sm-page .list-toolbar .list-field, .sm-page .list-toolbar > .list-button { flex: 1 1 100%; }
 }
 /* Office filter: the shared searchable dropdown, sized like the other fields. */
-.sm-page .sm-site-field { flex: 1 1 280px; }
+.sm-page .list-toolbar .list-search { flex: 1 1 220px; }
+.sm-page .sm-site-field { flex: 1 1 200px; }
+.sm-page .list-toolbar .list-field:not(.list-search):not(.sm-site-field) { flex: 0 1 190px; }
+@media (max-width: 900px) { .sm-page .list-toolbar .list-field:not(.list-search):not(.sm-site-field) { flex: 1 1 190px; } }
 .sm-page .sm-site-field .searchable-dropdown input { width: 100%; min-height: 44px; box-sizing: border-box; padding: 8px 36px 8px 12px; border: 1px solid var(--input-border); border-radius: 8px; background: var(--input-bg); color: var(--text-primary); font: inherit; font-weight: 400; text-overflow: ellipsis; }
 .sm-page .list-toolbar .list-field select { font-weight: 400; }
