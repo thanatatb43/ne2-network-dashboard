@@ -1,11 +1,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
-import { Search, Loader2, RefreshCw, ChevronDown, SlidersHorizontal, FileSpreadsheet, AlertCircle, Printer, X } from 'lucide-react';
+import { Search, Loader2, RefreshCw, ChevronDown, SlidersHorizontal, FileSpreadsheet, AlertCircle, Printer, QrCode, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import './ListPage.css';
 import './EquipmentSearch.css';
 import SearchableDropdown from './SearchableDropdown';
 import { openPrintShell, fillPrintWindow } from './qrPrint';
+import QrCodeModal from './QrCodeModal';
+import ModalFrame from './common/ModalFrame.jsx';
 
 // Same fixed option lists EquipmentBorrow.jsx uses, duplicated here since
 // they aren't exported from that file.
@@ -111,7 +113,11 @@ const EquipmentSearch = ({ token, onEquipmentClick }) => {
     items.forEach(i => { if (all) next.delete(i.id); else next.set(i.id, { id: i.id, name: i.name || '' }); });
     return next;
   });
-  // The print window must open inside the click (pop-up blockers).
+  // Printing always starts from a popup: one QR (row button) or the list of
+  // picked QRs (selection bar). The print window itself must open inside the
+  // click on the popup's print button (pop-up blockers).
+  const [qrItem, setQrItem] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const printQr = items => {
     const w = openPrintShell();
     if (!w) { toast.error('เปิดหน้าต่างพิมพ์ไม่ได้ กรุณาอนุญาต pop-up ของเว็บไซต์นี้'); return; }
@@ -295,7 +301,7 @@ const EquipmentSearch = ({ token, onEquipmentClick }) => {
           <div className="eq-selection" role="region" aria-label="อุปกรณ์ที่เลือกไว้สำหรับพิมพ์ QR">
             <span>เลือกไว้ <strong>{selected.size}</strong> รายการสำหรับพิมพ์ QR (เลือกต่อได้ข้ามหน้าและการค้นหา)</span>
             <div>
-              <button type="button" className="list-button list-button-primary" onClick={() => printQr([...selected.values()])}><Printer size={18} aria-hidden="true" /> พิมพ์ QR ที่เลือก ({selected.size})</button>
+              <button type="button" className="list-button list-button-primary" onClick={() => setPreviewOpen(true)}><Printer size={18} aria-hidden="true" /> พิมพ์ QR ที่เลือก ({selected.size})</button>
               <button type="button" className="list-button" onClick={() => setSelected(new Map())}><X size={18} aria-hidden="true" /> ล้างที่เลือก</button>
             </div>
           </div>
@@ -319,7 +325,7 @@ const EquipmentSearch = ({ token, onEquipmentClick }) => {
               <td title={`${item.asset_number || '—'} / Serial: ${item.serial_number || '—'}`}>{item.asset_number || '—'} / <span className="list-muted">Serial: {item.serial_number || '—'}</span></td>
               <td title={[item.asset_owner || '—', item.asset_owner_emp_id].filter(Boolean).join(' · ')}>{item.asset_owner || '—'}{item.asset_owner_emp_id && <span className="list-muted"> · {item.asset_owner_emp_id}</span>}</td>
               <td title={[item.status || 'ไม่ทราบสถานะ', item.current_loan?.borrower_name && `โดย ${item.current_loan.borrower_name}`].filter(Boolean).join(' · ')}><span className={`list-status list-status-${statusTone(item.status)}`}>{item.status || 'ไม่ทราบสถานะ'}</span>{item.current_loan?.borrower_name && <span className="list-muted"> · โดย {item.current_loan.borrower_name}</span>}</td>
-              <td className="eq-qr-col"><button type="button" className="eq-qr-button" onClick={() => printQr([{ id: item.id, name: item.name || '' }])} aria-label={`พิมพ์ QR ของ ${item.name || `อุปกรณ์ ${item.id}`}`} title="พิมพ์ QR Code"><Printer size={18} aria-hidden="true" /></button></td>
+              <td className="eq-qr-col"><button type="button" className="eq-qr-button" onClick={() => setQrItem(item)} aria-label={`ดู QR Code ของ ${item.name || `อุปกรณ์ ${item.id}`}`} title="ดู/พิมพ์ QR Code"><QrCode size={18} aria-hidden="true" /></button></td>
             </tr>)}</tbody>
           </table>
         </div>}
@@ -327,6 +333,35 @@ const EquipmentSearch = ({ token, onEquipmentClick }) => {
           <nav className="list-pagination" aria-label="แบ่งหน้าผลการค้นหา"><button className="list-button" disabled={pending || Boolean(error) || currentPage <= 1} onClick={() => setCurrentPage(p => p - 1)}>ก่อนหน้า</button><label>หน้า <select value={shown?.page || currentPage} disabled={pending || Boolean(error)} onChange={e => setCurrentPage(Number(e.target.value))}>{Array.from({ length: Math.max(currentPage, shown?.totalPages || 1) }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select> / {shown?.totalPages || '—'}</label><button className="list-button" disabled={pending || Boolean(error) || !shown || currentPage >= shown.totalPages} onClick={() => setCurrentPage(p => p + 1)}>ถัดไป</button></nav>
         </footer>
       </section>
+
+      {qrItem && (
+        <QrCodeModal
+          equipmentId={qrItem.id}
+          equipmentName={qrItem.name}
+          updatedAt={qrItem.updatedAt}
+          onClose={() => setQrItem(null)}
+          onPrint={() => printQr([{ id: qrItem.id, name: qrItem.name || '' }])}
+        />
+      )}
+      {previewOpen && (
+        <ModalFrame title="พิมพ์ QR ที่เลือก" icon={<Printer size={20} aria-hidden="true" />} subtitle={`${selected.size} รายการ · แผ่น A4 หน้าละ 6 ดวง`} size="lg" onClose={() => setPreviewOpen(false)}>
+          {selected.size === 0 ? <p className="mf-state">ไม่มีรายการที่เลือก</p> : (
+            <ul className="eq-qr-preview">
+              {[...selected.values()].map(item => (
+                <li key={item.id}>
+                  <img src={`${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${item.id}/qrcode`} alt="" loading="lazy" />
+                  <div><strong>ID: {item.id}</strong><span title={item.name}>{item.name || '—'}</span></div>
+                  <button type="button" className="eq-qr-remove" onClick={() => toggle(item)} aria-label={`นำ ${item.name || `อุปกรณ์ ${item.id}`} ออกจากรายการพิมพ์`}><X size={16} aria-hidden="true" /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="mf-actions">
+            <button type="button" className="mf-button" onClick={() => setPreviewOpen(false)}>ปิด</button>
+            <button type="button" className="mf-button mf-primary" disabled={!selected.size} onClick={() => printQr([...selected.values()])}><Printer size={18} aria-hidden="true" /> พิมพ์ {selected.size} รายการ</button>
+          </div>
+        </ModalFrame>
+      )}
     </div>
   );
 };

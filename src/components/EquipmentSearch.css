@@ -40,3 +40,10 @@
   .eq-selection { margin: 0 16px 16px; }
   .eq-selection .list-button { flex: 1 1 auto; }
 }
+.eq-qr-preview { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 8px; max-height: 50dvh; overflow-y: auto; margin: 0 0 16px; padding: 2px; list-style: none; }
+.eq-qr-preview li { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--border-subtle); border-radius: 10px; }
+.eq-qr-preview img { width: 56px; height: 56px; flex-shrink: 0; padding: 4px; border-radius: 6px; background: #fff; object-fit: contain; }
+.eq-qr-preview li > div { display: flex; flex-direction: column; min-width: 0; flex: 1; font-size: .875rem; }
+.eq-qr-preview li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.eq-qr-remove { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex-shrink: 0; border: 0; border-radius: 8px; background: none; color: var(--text-secondary); cursor: pointer; }
+.eq-qr-remove:hover { background: var(--bg-danger-subtle); color: var(--accent-danger); }

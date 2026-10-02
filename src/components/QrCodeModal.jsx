@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Download, QrCode } from 'lucide-react';
+import { Download, Printer, QrCode } from 'lucide-react';
 import ModalFrame from './common/ModalFrame.jsx';
 
 // Shared QR modal for one office-equipment item. updatedAt busts the cache:
 // the backend regenerates the image at the same URL when the record changes.
-const QrCodeModal = ({ equipmentId, equipmentName, updatedAt, onClose }) => {
+// onPrint (optional) adds a print button; the caller opens the print window.
+const QrCodeModal = ({ equipmentId, equipmentName, updatedAt, onClose, onPrint }) => {
   const src = `${import.meta.env.VITE_API_BASE_URL}/api/office-equipment/${equipmentId}/qrcode?v=${encodeURIComponent(updatedAt || '')}`;
   const [image, setImage] = useState({ src: '', status: 'loading' });
   const status = image.src === src ? image.status : 'loading';
@@ -18,7 +19,12 @@ const QrCodeModal = ({ equipmentId, equipmentName, updatedAt, onClose }) => {
         <figcaption className="mf-meta">ID: {equipmentId}</figcaption>
       </figure>
       <div className="mf-actions">
-        <a className="mf-button mf-primary" href={src} download={`equipment-${equipmentId}-qrcode.png`} aria-disabled={status !== 'ready'} onClick={(e) => { if (status !== 'ready') e.preventDefault(); }}>
+        {onPrint && (
+          <button type="button" className="mf-button mf-primary" disabled={status !== 'ready'} onClick={onPrint}>
+            <Printer size={18} aria-hidden="true" /> พิมพ์
+          </button>
+        )}
+        <a className={`mf-button${onPrint ? '' : ' mf-primary'}`} href={src} download={`equipment-${equipmentId}-qrcode.png`} aria-disabled={status !== 'ready'} onClick={(e) => { if (status !== 'ready') e.preventDefault(); }}>
           <Download size={18} aria-hidden="true" /> ดาวน์โหลด
         </a>
       </div>
