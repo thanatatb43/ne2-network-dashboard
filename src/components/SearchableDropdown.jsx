@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import './SearchableDropdown.css';
 
@@ -7,6 +7,20 @@ export default function SearchableDropdown({ value, onChange, options, label, pl
   const id = useId();
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
+  const rootRef = useRef(null);
+  // iOS Safari blurs the input as soon as an option is touched (preventDefault
+  // on pointerdown doesn't stop it), which used to close the list before the
+  // tap's click arrived -- the choice vanished. While a pointer is down in the
+  // list, a blur doesn't close it, and touch/pen taps choose on pointerup (a
+  // drag that scrolls the list ends in pointercancel instead, so it doesn't).
+  const pressing = useRef(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    // With the input blurred by a touch, a tap anywhere else still closes.
+    const onDown = (e) => { if (!rootRef.current?.contains(e.target)) { setOpen(false); setActive(-1); } };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [open]);
   const matches = options.filter(option => option.toLocaleLowerCase().includes(value.trim().toLocaleLowerCase()));
   const choose = option => {
     onChange(option);
@@ -18,7 +32,8 @@ export default function SearchableDropdown({ value, onChange, options, label, pl
     requestAnimationFrame(() => document.getElementById(`${id}-${next}`)?.scrollIntoView({ block: 'nearest' }));
   };
   return (
-    <div className="searchable-dropdown" onBlur={event => {
+    <div ref={rootRef} className="searchable-dropdown" onBlur={event => {
+      if (pressing.current) return;
       if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setActive(-1); }
     }}>
       <input id={inputId} required={required} disabled={disabled} title={title} role="combobox" aria-label={label} aria-expanded={open && !disabled} aria-controls={`${id}-options`}
@@ -39,11 +54,19 @@ export default function SearchableDropdown({ value, onChange, options, label, pl
           } else if (event.key === 'Tab') { setOpen(false); setActive(-1); }
         }} />
       <ChevronDown size={16} className="searchable-dropdown-chevron" aria-hidden="true" />
-      <div id={`${id}-options`} role="listbox" aria-label={label} className="searchable-dropdown-options" hidden={!open || disabled}>
+      <div id={`${id}-options`} role="listbox" aria-label={label} className="searchable-dropdown-options" hidden={!open || disabled}
+        onPointerDown={() => { pressing.current = true; }}
+        onPointerUp={() => { setTimeout(() => { pressing.current = false; }, 0); }}
+        onPointerCancel={() => { pressing.current = false; }}>
         {matches.map((option, index) => (
           <div key={option} id={`${id}-${index}`} role="option" aria-selected={value === option}
             className={`searchable-dropdown-option${active === index ? ' is-active' : ''}`}
-            onPointerDown={event => event.preventDefault()} onClick={() => choose(option)}>
+            onPointerDown={event => event.preventDefault()}
+            onMouseDown={event => event.preventDefault()}
+            onPointerUp={event => { if (event.pointerType !== 'mouse') { event.preventDefault(); choose(option); } }}
+            // preventDefault: inside a <label>, the click would otherwise be
+            // forwarded to the input and reopen the list (and the keyboard).
+            onClick={event => { event.preventDefault(); choose(option); }}>
             {option}
           </div>
         ))}
