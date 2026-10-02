@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { toast } from 'react-hot-toast';
-import { Search, Loader2, RefreshCw, ChevronDown, SlidersHorizontal, FileSpreadsheet, AlertCircle } from 'lucide-react';
+import { Search, Loader2, RefreshCw, ChevronDown, SlidersHorizontal, FileSpreadsheet, AlertCircle, Printer, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import './ListPage.css';
 import './EquipmentSearch.css';
 import SearchableDropdown from './SearchableDropdown';
+import { openPrintShell, fillPrintWindow } from './qrPrint';
 
 // Same fixed option lists EquipmentBorrow.jsx uses, duplicated here since
 // they aren't exported from that file.
@@ -56,6 +57,14 @@ const readPage = () => {
   const page = Number(read('eq_search_page', '1'));
   return Number.isSafeInteger(page) && page > 0 ? page : 1;
 };
+// Picked items for QR printing survive page changes and new searches
+// (sessionStorage), keyed by id with the name for the sticker caption.
+const readSelected = () => {
+  try {
+    const list = JSON.parse(read('eq_search_selected', '[]'));
+    return new Map((Array.isArray(list) ? list : []).filter(x => Number.isFinite(Number(x?.id))).map(x => [Number(x.id), { id: Number(x.id), name: String(x.name || '') }]));
+  } catch { return new Map(); }
+};
 const siteLabel = s => `${s.pea_name}${s.pea_province ? ` (${s.pea_province})` : ''}`;
 const statusTone = status => {
   if (status === 'ใช้งาน') return 'up';
@@ -89,6 +98,25 @@ const EquipmentSearch = ({ token, onEquipmentClick }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [selected, setSelected] = useState(readSelected);
+  useEffect(() => { save('eq_search_selected', JSON.stringify([...selected.values()])); }, [selected]);
+  const toggle = item => setSelected(prev => {
+    const next = new Map(prev);
+    if (next.has(item.id)) next.delete(item.id); else next.set(item.id, { id: item.id, name: item.name || '' });
+    return next;
+  });
+  const togglePage = items => setSelected(prev => {
+    const next = new Map(prev);
+    const all = items.every(i => next.has(i.id));
+    items.forEach(i => { if (all) next.delete(i.id); else next.set(i.id, { id: i.id, name: i.name || '' }); });
+    return next;
+  });
+  // The print window must open inside the click (pop-up blockers).
+  const printQr = items => {
+    const w = openPrintShell();
+    if (!w) { toast.error('เปิดหน้าต่างพิมพ์ไม่ได้ กรุณาอนุญาต pop-up ของเว็บไซต์นี้'); return; }
+    fillPrintWindow(w, items);
+  };
 
   useEffect(() => {
     save('eq_search_name', inputs.name);
@@ -172,6 +200,7 @@ const EquipmentSearch = ({ token, onEquipmentClick }) => {
 
   // Only show rows for this page's filters and current authorization context.
   const shown = result?.key === requestKey && result?.token === token ? result : null;
+  const pageSelected = shown ? shown.equipment.filter(i => selected.has(i.id)).length : 0;
   const advancedActiveCount = Object.values(inputs.advanced).filter(value => value.trim()).length;
   const anyFilterActive = Boolean(inputs.name || inputs.site || Object.values(inputs.primary).some(Boolean) || advancedActiveCount);
   const change = (key, value) => setInputs(prev => ({ ...prev, [key]: value }));
@@ -262,13 +291,27 @@ const EquipmentSearch = ({ token, onEquipmentClick }) => {
         <div id="equipment-advanced" className="equipment-advanced" hidden={!showAdvanced}>
           {ADVANCED_FIELDS.map(({ key, label }) => <label className={`list-field${inputs.advanced[key] ? ' is-active' : ''}`} key={key}><span>{label}</span><input value={inputs.advanced[key]} onChange={e => changeField('advanced', key, e.target.value)} /></label>)}
         </div>
+        {selected.size > 0 && (
+          <div className="eq-selection" role="region" aria-label="อุปกรณ์ที่เลือกไว้สำหรับพิมพ์ QR">
+            <span>เลือกไว้ <strong>{selected.size}</strong> รายการสำหรับพิมพ์ QR (เลือกต่อได้ข้ามหน้าและการค้นหา)</span>
+            <div>
+              <button type="button" className="list-button list-button-primary" onClick={() => printQr([...selected.values()])}><Printer size={18} aria-hidden="true" /> พิมพ์ QR ที่เลือก ({selected.size})</button>
+              <button type="button" className="list-button" onClick={() => setSelected(new Map())}><X size={18} aria-hidden="true" /> ล้างที่เลือก</button>
+            </div>
+          </div>
+        )}
         <div className="list-result-info"><span role="status">{error ? 'ค้นหาไม่สำเร็จ' : pending ? 'กำลังค้นหา…' : `พบ ${shown?.total.toLocaleString('th-TH') ?? 0} รายการ`}</span><span>{shown && `อัปเดตล่าสุด ${shown.updated.toLocaleTimeString('th-TH')}`}</span></div>
         {!shown || !shown.equipment.length ? <div className="equipment-empty">
           <strong>{error ? 'ไม่สามารถแสดงผลการค้นหาล่าสุด' : pending ? 'กำลังค้นหาอุปกรณ์…' : anyFilterActive ? 'ไม่พบอุปกรณ์ที่ตรงกับตัวกรอง' : 'ยังไม่มีอุปกรณ์ในระบบ'}</strong>
           {!pending && !error && anyFilterActive && <><p>ลองเปลี่ยนคำค้น หรือล้างตัวกรองเพื่อดูรายการทั้งหมด</p><button className="list-button" onClick={clearAllFilters}>ล้างตัวกรอง</button></>}
         </div> : <div className="list-table-scroll" tabIndex={0} role="region" aria-label="ตารางผลการค้นหา เลื่อนแนวนอนเพื่อดูทุกคอลัมน์" aria-busy={pending}>
-          <table className="list-table"><caption className="list-sr-only">ผลการค้นหาอุปกรณ์ กดชื่ออุปกรณ์เพื่อเปิดรายละเอียด</caption><thead><tr>{['ชื่ออุปกรณ์', 'ประเภท', 'แผนก', 'สำนักงาน', 'รหัสทรัพย์สิน / Serial', 'ผู้ถือครอง', 'สถานะ'].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead>
-            <tbody>{shown.equipment.map(item => <tr key={item.id}>
+          <table className="list-table"><caption className="list-sr-only">ผลการค้นหาอุปกรณ์ กดชื่ออุปกรณ์เพื่อเปิดรายละเอียด</caption><thead><tr>
+            <th scope="col" className="eq-check"><input type="checkbox" aria-label="เลือกทุกรายการในหน้านี้สำหรับพิมพ์ QR" checked={pageSelected > 0 && pageSelected === shown.equipment.length} ref={el => { if (el) el.indeterminate = pageSelected > 0 && pageSelected < shown.equipment.length; }} onChange={() => togglePage(shown.equipment)} /></th>
+            {['ชื่ออุปกรณ์', 'ประเภท', 'แผนก', 'สำนักงาน', 'รหัสทรัพย์สิน / Serial', 'ผู้ถือครอง', 'สถานะ'].map(label => <th scope="col" key={label}>{label}</th>)}
+            <th scope="col" className="eq-qr-col">QR</th>
+          </tr></thead>
+            <tbody>{shown.equipment.map(item => <tr key={item.id} className={selected.has(item.id) ? 'eq-selected' : undefined}>
+              <td className="eq-check"><input type="checkbox" checked={selected.has(item.id)} onChange={() => toggle(item)} aria-label={`เลือก ${item.name || `อุปกรณ์ ${item.id}`} สำหรับพิมพ์ QR`} /></td>
               <td><div className="list-name-cell">{item.photos?.[0] && <img src={buildImageUrl(item.photos[0])} alt="" loading="lazy" />}<a className="list-name" title={item.name || 'ดูรายละเอียดอุปกรณ์'} href={`/equipment/${item.id}`} onClick={e => { if (onEquipmentClick && e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) { e.preventDefault(); onEquipmentClick(item.id); } }}>{item.name || 'ดูรายละเอียดอุปกรณ์'}</a></div></td>
               <td title={item.equipment_type || '—'}>{item.equipment_type || '—'}</td>
               <td title={item.department || '—'}>{item.department || '—'}</td>
@@ -276,6 +319,7 @@ const EquipmentSearch = ({ token, onEquipmentClick }) => {
               <td title={`${item.asset_number || '—'} / Serial: ${item.serial_number || '—'}`}>{item.asset_number || '—'} / <span className="list-muted">Serial: {item.serial_number || '—'}</span></td>
               <td title={[item.asset_owner || '—', item.asset_owner_emp_id].filter(Boolean).join(' · ')}>{item.asset_owner || '—'}{item.asset_owner_emp_id && <span className="list-muted"> · {item.asset_owner_emp_id}</span>}</td>
               <td title={[item.status || 'ไม่ทราบสถานะ', item.current_loan?.borrower_name && `โดย ${item.current_loan.borrower_name}`].filter(Boolean).join(' · ')}><span className={`list-status list-status-${statusTone(item.status)}`}>{item.status || 'ไม่ทราบสถานะ'}</span>{item.current_loan?.borrower_name && <span className="list-muted"> · โดย {item.current_loan.borrower_name}</span>}</td>
+              <td className="eq-qr-col"><button type="button" className="eq-qr-button" onClick={() => printQr([{ id: item.id, name: item.name || '' }])} aria-label={`พิมพ์ QR ของ ${item.name || `อุปกรณ์ ${item.id}`}`} title="พิมพ์ QR Code"><Printer size={18} aria-hidden="true" /></button></td>
             </tr>)}</tbody>
           </table>
         </div>}
