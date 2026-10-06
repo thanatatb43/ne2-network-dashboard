@@ -125,7 +125,9 @@ const StatusPill = ({ status }) => (
   </span>
 );
 
-const SitesMap = ({ onDeviceClick }) => {
+// `intro` renders under the page header (the home page puts its computer
+// summary there); it loads and fails on its own, separately from the map.
+const SitesMap = ({ onDeviceClick, intro = null }) => {
   const { sites, loading, refreshing, error, refreshError, loadedAt, incomplete, reload } = useSitesData();
 
   const [initial] = useState(() => ({ ...readUrlState(), ...readContext() }));
@@ -317,6 +319,8 @@ const SitesMap = ({ onDeviceClick }) => {
           </button>
         </div>
       </header>
+
+      {intro}
 
       {loading ? (
         <div className="list-panel sites-state">

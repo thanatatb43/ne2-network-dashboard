@@ -217,6 +217,8 @@ export function formatDateTime(iso) {
 
 export const formatCount = (n) => (typeof n === 'number' && Number.isFinite(n) ? n.toLocaleString('th-TH') : '—');
 
+export const typeBreakdown = (byType) => (byType || []).map(t => `${t.value ?? 'ไม่ระบุ'} ${formatCount(t.count)}`).join(' · ');
+
 // Contract expiry counts from /summary are cumulative (90 ⊂ 180 ⊂ 365).
 // Disjoint ranges for a stacked view; never negative if the data is odd.
 export function expiryRanges(e) {

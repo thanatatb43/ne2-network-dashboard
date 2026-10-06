@@ -6,7 +6,8 @@ import Analytics from './components/Analytics';
 import DeviceDetails from './components/DeviceDetails';
 import EquipmentDetails from './components/EquipmentDetails';
 import EquipmentEdit from './components/EquipmentEdit';
-import SitesMap from './components/SitesMap';
+import HomeOverview from './components/HomeOverview';
+import OfficeEquipmentDashboard from './components/office-dashboard/OfficeEquipmentDashboard';
 import AdminSettings from './components/AdminSettings';
 import Management from './components/Management';
 import About from './components/About';
@@ -37,6 +38,7 @@ const PAGE_TITLES = {
   deviceDetails: 'รายละเอียดอุปกรณ์เครือข่าย', analytics: 'ตรวจสอบการเชื่อมต่อ', settings: 'การตั้งค่าระบบ',
   'downtime-history': 'ประวัติการขัดข้อง', 'down-devices': 'อุปกรณ์ที่ขัดข้อง',
   'equipment-borrow': 'ยืมอุปกรณ์', 'equipment-loans': 'ประวัติการยืม', 'equipment-search': 'ค้นหาอุปกรณ์',
+  'office-dashboard': 'แดชบอร์ดอุปกรณ์สำนักงาน',
   equipmentDetails: 'รายละเอียดอุปกรณ์', equipmentEdit: 'แก้ไขอุปกรณ์',
   'report-issue': 'แจ้งปัญหา', jobDetails: 'รายละเอียดงานแจ้งปัญหา',
   budget: 'งบประมาณ', management: 'การจัดการ', about: 'เกี่ยวกับระบบและคู่มือ', login: 'เข้าสู่ระบบ',
@@ -69,6 +71,7 @@ const TAB_PATHS = {
   'equipment-borrow': '/equipment-borrow',
   'equipment-loans': '/equipment-loans',
   'equipment-search': '/equipment-search',
+  'office-dashboard': '/office-equipment-dashboard',
   'report-issue': '/report-issue',
   about: '/about',
   login: '/login',
@@ -224,9 +227,12 @@ function App() {
     // Any other in-app navigation invalidates that shortcut.
     cameFromJobListRef.current = tab === 'jobDetails';
 
+    // opts.search: a query string for pages that keep their state there
+    // (the office equipment dashboard).
+    const target = path + (opts.search || '');
     applyRoute({ tab, ...opts });
-    if (window.location.pathname !== path) {
-      pushHistory({}, path);
+    if (window.location.pathname + window.location.search !== target) {
+      pushHistory({}, target);
     }
     lastUrlRef.current = window.location.pathname + window.location.search;
   };
@@ -237,8 +243,9 @@ function App() {
   // string, not a tab name.
   const navigateToPath = (path) => {
     if (shouldConfirmLeave('navigate')) { setLeaveConfirm({ message: navigationGuardMessage(), run: () => { clearNavigationGuard(); navigateToPath(path); } }); return; }
-    applyRoute(pathToRoute(path));
-    if (window.location.pathname !== path) {
+    // The path may carry a query string (a dashboard view saved before login).
+    applyRoute(pathToRoute(path.split('?')[0]));
+    if (window.location.pathname + window.location.search !== path) {
       pushHistory({}, path);
     }
     lastUrlRef.current = window.location.pathname + window.location.search;
@@ -814,7 +821,10 @@ function App() {
       <main className="main-content" ref={mainContentRef}>
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' ? (
-            <SitesMap onDeviceClick={handleDeviceClick} />
+            <HomeOverview
+              onDeviceClick={handleDeviceClick}
+              onOpenDashboard={(search) => navigate('office-dashboard', { search })}
+            />
           ) : activeTab === 'network-devices' ? (
             <motion.div
               key="network-devices"
@@ -947,6 +957,12 @@ function App() {
               token={token}
               user={user}
               onRequireLogin={() => requireLoginFor('/equipment-loans')}
+            />
+          ) : activeTab === 'office-dashboard' ? (
+            <OfficeEquipmentDashboard
+              token={token}
+              onRequireLogin={(returnPath) => requireLoginFor(returnPath)}
+              onEquipmentClick={(id) => navigate('equipmentDetails', { equipmentId: id })}
             />
           ) : activeTab === 'equipment-search' ? (
             <EquipmentSearch

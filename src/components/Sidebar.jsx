@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X,
-  History, Map, ChevronDown, ChevronRight, Cpu, ShoppingCart, Search, ClipboardList, RefreshCw, AlertCircle, Sun, Moon
+  History, Map, ChevronDown, ChevronRight, Cpu, ShoppingCart, Search, ClipboardList, RefreshCw, AlertCircle, Sun, Moon, LayoutDashboard
 } from 'lucide-react';
 import { motion as Motion, AnimatePresence } from 'framer-motion';
 
@@ -25,6 +25,7 @@ const ITEM_PATHS = {
   dashboard: '/', budget: '/budget-dashboard', 'network-devices': '/network-devices', devices: '/devices',
   analytics: '/analytics', 'downtime-history': '/downtime-history', 'equipment-borrow': '/equipment-borrow',
   'equipment-loans': '/equipment-loans', 'equipment-search': '/equipment-search', 'report-issue': '/report-issue',
+  'office-dashboard': '/office-equipment-dashboard',
   management: '/management', settings: '/settings', login: '/login', about: '/about',
 };
 
@@ -225,6 +226,7 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose, sessi
   // the borrow/return ACTIONS within them are what actually gate on login.
   items.push({
     type: 'group', name: 'ระบบคอมพิวเตอร์', icon: Cpu, id: 'group-computer', children: [
+      { name: 'แดชบอร์ดอุปกรณ์', icon: LayoutDashboard, id: 'office-dashboard' },
       { name: 'ยืมอุปกรณ์', icon: ShoppingCart, id: 'equipment-borrow' },
       { name: 'ประวัติการยืม', icon: History, id: 'equipment-loans' },
       { name: 'ค้นหาอุปกรณ์', icon: Search, id: 'equipment-search' }
