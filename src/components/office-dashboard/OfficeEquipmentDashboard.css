@@ -140,3 +140,14 @@ button.oed-bar:hover:not(:disabled) { background: var(--bg-accent-subtle); }
 .oed-detail-label { display: block; margin-bottom: 6px; color: var(--text-secondary); font-size: .75rem; }
 .oed-row-details .list-name { max-width: none; white-space: normal; }
 .oed-row-details .oed-rowhead { white-space: normal; }
+
+/* Allocate the equipment table from available width, not long asset names. */
+.oed-equipment-table { table-layout: fixed; width: 100%; min-width: 0; }
+.oed-equipment-table > thead > tr > th,
+.oed-equipment-table .oed-compact-row > td { padding-left: 6px; padding-right: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oed-equipment-table .oed-cell-preview { width: 100%; max-width: 100%; }
+.oed-equipment-table .oed-cell-preview .list-name { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.oed-equipment-table .oed-cell-preview .list-status { max-width: 100%; overflow: hidden; }
+.oed-equipment-table .oed-expand-cell { min-width: 0; width: auto; padding-left: 2px; padding-right: 2px; }
+.oed-equipment-table .oed-expand-button { width: 100%; max-width: 32px; }
+.oed-equipment-table .oed-row-details { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); }

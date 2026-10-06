@@ -96,9 +96,12 @@ export default function EquipmentTab({ state, nonce, token, dashboardPath, onCha
       </div>
       {rows && (
         <>
-          <div className="list-table-scroll" tabIndex={0} aria-label="ตารางรายการอุปกรณ์ เลื่อนซ้ายขวาได้">
-            <table className="list-table oed-table">
+          <div className="list-table-scroll" tabIndex={0} aria-label="ตารางรายการอุปกรณ์ ขยายแถวเพื่อดูข้อมูลเต็ม">
+            <table className="list-table oed-table oed-equipment-table">
               <caption className="list-sr-only">รายการอุปกรณ์ตามตัวกรอง หน้า {state.page}</caption>
+              <colgroup>
+                {[4, 13, 6, 12, 9, 11, 10, 7, 8, 8, 12].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
+              </colgroup>
               <thead><tr><th scope="col" className="oed-expand-cell"><span className="list-sr-only">ขยายแถว</span></th>
                 <th scope="col">ชื่ออุปกรณ์</th><th scope="col">ประเภท</th><th scope="col">รหัสอุปกรณ์</th><th scope="col">Serial</th>
                 <th scope="col">สำนักงาน</th><th scope="col">ผู้ครอบครอง</th><th scope="col">สถานะ</th><th scope="col">เริ่มสัญญา</th><th scope="col">สิ้นสุดสัญญา</th><th scope="col">ควรตรวจสอบ</th>
