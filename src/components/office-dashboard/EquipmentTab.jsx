@@ -1,3 +1,4 @@
+import ExpandableRow from './ExpandableRow.jsx';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { Download, Loader2, LogIn, X } from 'lucide-react';
@@ -98,15 +99,15 @@ export default function EquipmentTab({ state, nonce, token, dashboardPath, onCha
           <div className="list-table-scroll" tabIndex={0} aria-label="ตารางรายการอุปกรณ์ เลื่อนซ้ายขวาได้">
             <table className="list-table oed-table">
               <caption className="list-sr-only">รายการอุปกรณ์ตามตัวกรอง หน้า {state.page}</caption>
-              <thead><tr>
+              <thead><tr><th scope="col" className="oed-expand-cell"><span className="list-sr-only">ขยายแถว</span></th>
                 <th scope="col">ชื่ออุปกรณ์</th><th scope="col">ประเภท</th><th scope="col">รหัสอุปกรณ์</th><th scope="col">Serial</th>
                 <th scope="col">สำนักงาน</th><th scope="col">ผู้ครอบครอง</th><th scope="col">สถานะ</th><th scope="col">เริ่มสัญญา</th><th scope="col">สิ้นสุดสัญญา</th><th scope="col">ควรตรวจสอบ</th>
               </tr></thead>
               <tbody>
                 {rows.length === 0 ? (
-                  <tr><td colSpan={10} className="list-empty">ไม่พบอุปกรณ์ตามตัวกรองนี้</td></tr>
+                  <tr><td colSpan={11} className="list-empty">ไม่พบอุปกรณ์ตามตัวกรองนี้</td></tr>
                 ) : rows.map(row => (
-                  <tr key={row.id}>
+                  <ExpandableRow key={row.id} label={row.name || `อุปกรณ์ ${row.id}`} labels={['ชื่ออุปกรณ์', 'ประเภท', 'รหัสอุปกรณ์', 'Serial', 'สำนักงาน', 'ผู้ครอบครอง', 'สถานะ', 'วันเริ่มสัญญา', 'วันสิ้นสุดสัญญา', 'ควรตรวจสอบ']}>
                     <td>
                       <a className="list-name" href={`/equipment/${row.id}`} title={row.name}
                         onClick={e => { if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey) { e.preventDefault(); onEquipmentClick(row.id); } }}>
@@ -127,7 +128,7 @@ export default function EquipmentTab({ state, nonce, token, dashboardPath, onCha
                         <ul className="oed-badges">{row.quality_issues.map(code => <li key={code} className="list-status list-status-warning">{ISSUE_LABELS[code] || code}</li>)}</ul>
                       ) : <span className="list-muted">—</span>}
                     </td>
-                  </tr>
+                  </ExpandableRow>
                 ))}
               </tbody>
             </table>

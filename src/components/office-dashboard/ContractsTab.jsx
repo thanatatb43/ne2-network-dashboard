@@ -1,3 +1,4 @@
+import ExpandableRow from './ExpandableRow.jsx';
 import { AlertTriangle, ListFilter } from 'lucide-react';
 import useOfficeDashboardResource, { usePageClamp } from './useOfficeDashboardResource.js';
 import { formatCount, formatDay, typeBreakdown } from './officeDashboardData.js';
@@ -56,15 +57,15 @@ export default function ContractsTab({ state, nonce, onChange, onDrill, onDateDr
           <div className="list-table-scroll" tabIndex={0} aria-label="ตารางสัญญา เลื่อนซ้ายขวาได้">
             <table className="list-table oed-table">
               <caption className="list-sr-only">สัญญาตามตัวกรอง หน้า {state.c_page}</caption>
-              <thead><tr>
+              <thead><tr><th scope="col" className="oed-expand-cell"><span className="list-sr-only">ขยายแถว</span></th>
                 <th scope="col">เลขที่สัญญา</th><th scope="col">อุปกรณ์</th><th scope="col">วันเริ่มสัญญา</th><th scope="col">วันสิ้นสุดสัญญา</th>
                 <th scope="col">หมายเหตุ</th><th scope="col"><span className="list-sr-only">คำสั่ง</span></th>
               </tr></thead>
               <tbody>
                 {rows.length === 0 ? (
-                  <tr><td colSpan={6} className="list-empty">ไม่พบสัญญาตามตัวกรองนี้</td></tr>
+                  <tr><td colSpan={7} className="list-empty">ไม่พบสัญญาตามตัวกรองนี้</td></tr>
                 ) : rows.map(row => (
-                  <tr key={row.contract_no ?? '∅'}>
+                  <ExpandableRow key={row.contract_no ?? '∅'} label={row.contract_no ?? 'ไม่ระบุสัญญา'} labels={['เลขที่สัญญา', 'อุปกรณ์', 'วันเริ่มสัญญา', 'วันสิ้นสุดสัญญา', 'หมายเหตุ', 'คำสั่ง']}>
                     <th scope="row" className="oed-rowhead">{row.contract_no ?? <span className="list-muted">ไม่ระบุสัญญา</span>}</th>
                     <td><strong className="list-number">{formatCount(row.equipment_count)}</strong> {unit}<div className="list-muted">{typeBreakdown(row.by_type)}</div></td>
                     <td><DateList values={row.start_dates} disabled={contracts.stale} onPick={value => onDateDrill(row.contract_no, 'contract_start_date', value)} /></td>
@@ -79,7 +80,7 @@ export default function ContractsTab({ state, nonce, onChange, onDrill, onDateDr
                         <ListFilter size={16} aria-hidden="true" /> ดูรายการ
                       </button>
                     </td>
-                  </tr>
+                  </ExpandableRow>
                 ))}
               </tbody>
             </table>

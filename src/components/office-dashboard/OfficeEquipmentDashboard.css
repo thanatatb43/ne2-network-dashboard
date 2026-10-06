@@ -118,3 +118,25 @@ button.oed-bar:hover:not(:disabled) { background: var(--bg-accent-subtle); }
 .oed-date-link { background: none; border: 0; padding: 4px 0; color: var(--accent-primary); font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
 .oed-date-link:disabled { opacity: .5; cursor: wait; }
 .oed-date-link:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; border-radius: 3px; }
+
+/* Compact previews stay one line; expanded details retain every field. */
+.oed-table .oed-compact-row > td, .oed-table .oed-compact-row > th { vertical-align: middle; padding-top: 6px; padding-bottom: 6px; }
+.oed-table .oed-expand-cell { width: 48px; min-width: 48px; padding: 4px 6px; }
+.oed-expand-button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--card-bg); color: var(--text-secondary); cursor: pointer; }
+.oed-expand-button:hover, .is-expanded .oed-expand-button { color: var(--list-action); background: var(--bg-accent-subtle); }
+.oed-expand-button:focus-visible { outline: 2px solid var(--list-action); outline-offset: 2px; }
+.oed-cell-preview { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.5; }
+.oed-cell-preview > .list-status { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; }
+.oed-cell-preview > .list-muted, .oed-cell-preview > div { display: none; }
+.oed-cell-preview .list-name { display: inline; white-space: nowrap; }
+.oed-cell-preview .oed-datelist > li:not(:first-child), .oed-cell-preview .oed-badges > li:not(:first-child) { display: none; }
+.oed-cell-preview .oed-datelist, .oed-cell-preview .oed-badges { display: block; white-space: nowrap; }
+.oed-cell-preview .list-status { white-space: nowrap; }
+.oed-cell-preview .oed-date-link { white-space: nowrap; padding: 0; }
+.oed-expanded-row[hidden] { display: none; }
+.oed-table .oed-expanded-row > td { padding: 18px 24px; background: var(--bg-accent-subtle); }
+.oed-row-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 20px 28px; white-space: normal; }
+.oed-detail-field { min-width: 0; overflow-wrap: anywhere; }
+.oed-detail-label { display: block; margin-bottom: 6px; color: var(--text-secondary); font-size: .75rem; }
+.oed-row-details .list-name { max-width: none; white-space: normal; }
+.oed-row-details .oed-rowhead { white-space: normal; }

@@ -1,3 +1,4 @@
+import ExpandableRow from './ExpandableRow.jsx';
 import { useState } from 'react';
 import { LogIn } from 'lucide-react';
 import useOfficeDashboardResource, { usePageClamp } from './useOfficeDashboardResource.js';
@@ -78,10 +79,10 @@ export function LoansTab({ state, nonce, token, onChange, onEquipmentClick }) {
           <div className="list-table-scroll" tabIndex={0} aria-label="ตารางรายการยืม เลื่อนซ้ายขวาได้">
             <table className="list-table oed-table">
               <caption className="list-sr-only">รายการยืมตามตัวกรอง หน้า {state.l_page}</caption>
-              <thead><tr><th scope="col">อุปกรณ์</th><th scope="col">ผู้ยืม</th><th scope="col">วันที่ยืม</th><th scope="col">กำหนดคืน</th><th scope="col">สถานะ</th></tr></thead>
+              <thead><tr><th scope="col" className="oed-expand-cell"><span className="list-sr-only">ขยายแถว</span></th><th scope="col">อุปกรณ์</th><th scope="col">ผู้ยืม</th><th scope="col">วันที่ยืม</th><th scope="col">กำหนดคืน</th><th scope="col">สถานะ</th></tr></thead>
               <tbody>
-                {items.length === 0 ? <tr><td colSpan={5} className="list-empty">ไม่พบรายการยืมตามตัวกรองนี้</td></tr> : items.map(item => (
-                  <tr key={item.id}>
+                {items.length === 0 ? <tr><td colSpan={6} className="list-empty">ไม่พบรายการยืมตามตัวกรองนี้</td></tr> : items.map(item => (
+                  <ExpandableRow key={item.id} label={item.equipment_name || `รายการยืม ${item.id}`} labels={['อุปกรณ์', 'ผู้ยืม', 'วันที่ยืม', 'กำหนดคืน', 'สถานะ']}>
                     <td>
                       <a className="list-name" href={`/equipment/${item.equipment_id}`} onClick={e => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); onEquipmentClick(item.equipment_id); } }}>{item.equipment_name || `อุปกรณ์ ${item.equipment_id}`}</a>
                       <div className="list-muted">{[item.equipment_type, item.equipment_code, item.pea_site_name].filter(Boolean).join(' · ')}</div>
@@ -95,7 +96,7 @@ export function LoansTab({ state, nonce, token, onChange, onEquipmentClick }) {
                         ? <span className="list-status list-status-up">คืนแล้ว {formatDateTime(item.returned_at)}</span>
                         : item.is_overdue ? <span className="list-status list-status-down">เกินกำหนดคืน</span> : <span className="list-status list-status-borrowed">ยังไม่คืน</span>}
                     </td>
-                  </tr>
+                  </ExpandableRow>
                 ))}
               </tbody>
             </table>
@@ -138,10 +139,10 @@ export function RepairsTab({ state, nonce, token, onChange, onEquipmentClick }) 
           <div className="list-table-scroll" tabIndex={0} aria-label="ตารางงานแจ้งซ่อม เลื่อนซ้ายขวาได้">
             <table className="list-table oed-table">
               <caption className="list-sr-only">อุปกรณ์ที่มีงานแจ้งซ่อม หน้า {state.r_page}</caption>
-              <thead><tr><th scope="col">อุปกรณ์</th><th scope="col">สำนักงาน</th><th scope="col">จำนวนงาน</th><th scope="col">วันแจ้งล่าสุด</th></tr></thead>
+              <thead><tr><th scope="col" className="oed-expand-cell"><span className="list-sr-only">ขยายแถว</span></th><th scope="col">อุปกรณ์</th><th scope="col">สำนักงาน</th><th scope="col">จำนวนงาน</th><th scope="col">วันแจ้งล่าสุด</th></tr></thead>
               <tbody>
-                {items.length === 0 ? <tr><td colSpan={4} className="list-empty">ไม่พบงานแจ้งซ่อมตามตัวกรองนี้</td></tr> : items.map(item => (
-                  <tr key={item.equipment_id}>
+                {items.length === 0 ? <tr><td colSpan={5} className="list-empty">ไม่พบงานแจ้งซ่อมตามตัวกรองนี้</td></tr> : items.map(item => (
+                  <ExpandableRow key={item.equipment_id} label={item.name || `อุปกรณ์ ${item.equipment_id}`} labels={['อุปกรณ์', 'สำนักงาน', 'จำนวนงาน', 'วันแจ้งล่าสุด']}>
                     <td>
                       <a className="list-name" href={`/equipment/${item.equipment_id}`} onClick={e => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); onEquipmentClick(item.equipment_id); } }}>{item.name || `อุปกรณ์ ${item.equipment_id}`}</a>
                       <div className="list-muted">{[item.equipment_type, item.equipment_code].filter(Boolean).join(' · ')}</div>
@@ -149,7 +150,7 @@ export function RepairsTab({ state, nonce, token, onChange, onEquipmentClick }) 
                     <td>{item.pea_site_name || '—'}</td>
                     <td className="list-number">{formatCount(item.repair_count)}</td>
                     <td>{formatDateTime(item.last_reported_at)}</td>
-                  </tr>
+                  </ExpandableRow>
                 ))}
               </tbody>
             </table>
