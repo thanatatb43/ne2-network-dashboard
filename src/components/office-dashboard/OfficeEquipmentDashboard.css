@@ -114,3 +114,7 @@ button.oed-bar:hover:not(:disabled) { background: var(--bg-accent-subtle); }
 @media (prefers-reduced-motion: reduce) {
   .oed-skeleton { animation: none; }
 }
+
+.oed-date-link { background: none; border: 0; padding: 4px 0; color: var(--accent-primary); font: inherit; text-align: left; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.oed-date-link:disabled { opacity: .5; cursor: wait; }
+.oed-date-link:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 3px; border-radius: 3px; }

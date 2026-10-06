@@ -5,23 +5,20 @@ import { EXPIRY_BUCKETS, EXPIRY_LABELS } from './officeDashboardState.js';
 import { Pager, Panel } from './dashboardParts.jsx';
 
 const SORTS = { earliest_expiry_date: 'วันสิ้นสุดที่เร็วที่สุด', contract_no: 'เลขที่สัญญา', equipment_count: 'จำนวนอุปกรณ์' };
-const SHOWN_DATES = 3;
 
 // Every distinct date of a contract with how many devices carry it; a
 // contract with several dates is never shown as having just one.
-function DateList({ values }) {
+function DateList({ values, onPick, disabled }) {
   if (!values?.length) return <span className="oed-none">—</span>;
-  if (values.length === 1) return <span>{values[0].value === null ? 'ไม่มีวันที่' : formatDay(values[0].value)}</span>;
-  const shown = values.slice(0, SHOWN_DATES);
   return (
     <ul className="oed-datelist">
-      {shown.map(d => <li key={d.value ?? '∅'}>{d.value === null ? 'ไม่มีวันที่' : formatDay(d.value)} <span className="list-muted">({formatCount(d.count)})</span></li>)}
-      {values.length > SHOWN_DATES && <li className="list-muted">และอีก {values.length - SHOWN_DATES} ค่า</li>}
+      {values.map(d => <li key={d.value ?? '∅'}><button type="button" className="oed-date-link" disabled={disabled}
+        onClick={() => onPick(d.value)} title="ดูอุปกรณ์ที่มีวันที่นี้">{d.value === null ? 'ไม่มีวันที่' : formatDay(d.value)} <span>({formatCount(d.count)})</span></button></li>)}
     </ul>
   );
 }
 
-export default function ContractsTab({ state, nonce, onChange, onDrill }) {
+export default function ContractsTab({ state, nonce, onChange, onDrill, onDateDrill }) {
   const contracts = useOfficeDashboardResource('contracts', state, { nonce });
   usePageClamp(contracts, state.c_page, p => onChange({ c_page: p }));
   const rows = contracts.data;
@@ -52,6 +49,7 @@ export default function ContractsTab({ state, nonce, onChange, onDrill }) {
           </select>
         </label>
       </div>
+      <p className="list-muted oed-note">กดวันที่เพื่อดูอุปกรณ์ที่มีวันนั้น จำนวนในตารางสัญญาใช้ตัวกรองร่วมและเงื่อนไขวันสิ้นสุด ไม่รวมตัวกรองวันที่ตรงตัวหรือปัญหาที่เลือกไว้ในแท็บรายการอุปกรณ์</p>
       {filtered && <p className="list-muted oed-note">จำนวนอุปกรณ์ในแต่ละสัญญานับเฉพาะเครื่องที่ตรงเงื่อนไข “{EXPIRY_LABELS[state.expiry_bucket]}” ไม่ใช่ทุกเครื่องของสัญญา</p>}
       {rows && (
         <>
@@ -69,8 +67,8 @@ export default function ContractsTab({ state, nonce, onChange, onDrill }) {
                   <tr key={row.contract_no ?? '∅'}>
                     <th scope="row" className="oed-rowhead">{row.contract_no ?? <span className="list-muted">ไม่ระบุสัญญา</span>}</th>
                     <td><strong className="list-number">{formatCount(row.equipment_count)}</strong> {unit}<div className="list-muted">{typeBreakdown(row.by_type)}</div></td>
-                    <td><DateList values={row.start_dates} /></td>
-                    <td><DateList values={row.expiry_dates} /></td>
+                    <td><DateList values={row.start_dates} disabled={contracts.stale} onPick={value => onDateDrill(row.contract_no, 'contract_start_date', value)} /></td>
+                    <td><DateList values={row.expiry_dates} disabled={contracts.stale} onPick={value => onDateDrill(row.contract_no, 'contract_expiry_date', value)} /></td>
                     <td>
                       {row.date_inconsistent && <span className="list-status list-status-warning"><AlertTriangle size={14} aria-hidden="true" /> วันที่สัญญาไม่ตรงกัน</span>}
                       {row.missing_expiry_count > 0 && <div className="list-muted">ไม่มีวันสิ้นสุด {formatCount(row.missing_expiry_count)} {unit}</div>}

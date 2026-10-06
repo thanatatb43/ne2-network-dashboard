@@ -3,7 +3,7 @@ import toast from 'react-hot-toast';
 import { Download, Loader2, LogIn, X } from 'lucide-react';
 import useOfficeDashboardResource, { usePageClamp } from './useOfficeDashboardResource.js';
 import { downloadExport, formatCount, formatDay } from './officeDashboardData.js';
-import { EXPIRY_LABELS, LIMITS } from './officeDashboardState.js';
+import { CONTRACT_DATES, DIMENSION_LABELS, EXPIRY_LABELS, LIMITS } from './officeDashboardState.js';
 import { Pager, Panel } from './dashboardParts.jsx';
 
 const ISSUE_LABELS = {
@@ -14,7 +14,7 @@ const ISSUE_LABELS = {
 };
 const SORT_LABELS = {
   updatedAt: 'แก้ไขล่าสุด', id: 'ID', name: 'ชื่ออุปกรณ์', equipment_type: 'ประเภท', equipment_code: 'รหัสอุปกรณ์',
-  serial_number: 'Serial', department: 'แผนก', status: 'สถานะ', contract_expiry_date: 'วันสิ้นสุดสัญญา'
+  serial_number: 'Serial', department: 'แผนก', status: 'สถานะ', contract_start_date: 'วันเริ่มสัญญา', contract_expiry_date: 'วันสิ้นสุดสัญญา'
 };
 const dash = (v) => (v === null || v === undefined || String(v).trim() === '' ? <span className="oed-none" aria-label="ไม่มีข้อมูล">—</span> : v);
 
@@ -48,6 +48,8 @@ export default function EquipmentTab({ state, nonce, token, dashboardPath, onCha
   };
 
   const chips = [
+    ...CONTRACT_DATES.map(key => state[key] && { key, label: `${DIMENSION_LABELS[key]}: ${state[key]}` }),
+    CONTRACT_DATES.includes(state.missing_field) && { key: 'missing_field', label: `ไม่ระบุ${DIMENSION_LABELS[state.missing_field]}` },
     state.issue && { key: 'issue', label: `ปัญหา: ${ISSUE_LABELS[state.issue] || state.issue}` },
     state.expiry_bucket && { key: 'expiry_bucket', label: `สัญญา: ${EXPIRY_LABELS[state.expiry_bucket]}` }
   ].filter(Boolean);
@@ -98,11 +100,11 @@ export default function EquipmentTab({ state, nonce, token, dashboardPath, onCha
               <caption className="list-sr-only">รายการอุปกรณ์ตามตัวกรอง หน้า {state.page}</caption>
               <thead><tr>
                 <th scope="col">ชื่ออุปกรณ์</th><th scope="col">ประเภท</th><th scope="col">รหัสอุปกรณ์</th><th scope="col">Serial</th>
-                <th scope="col">สำนักงาน</th><th scope="col">ผู้ครอบครอง</th><th scope="col">สถานะ</th><th scope="col">สิ้นสุดสัญญา</th><th scope="col">ควรตรวจสอบ</th>
+                <th scope="col">สำนักงาน</th><th scope="col">ผู้ครอบครอง</th><th scope="col">สถานะ</th><th scope="col">เริ่มสัญญา</th><th scope="col">สิ้นสุดสัญญา</th><th scope="col">ควรตรวจสอบ</th>
               </tr></thead>
               <tbody>
                 {rows.length === 0 ? (
-                  <tr><td colSpan={9} className="list-empty">ไม่พบอุปกรณ์ตามตัวกรองนี้</td></tr>
+                  <tr><td colSpan={10} className="list-empty">ไม่พบอุปกรณ์ตามตัวกรองนี้</td></tr>
                 ) : rows.map(row => (
                   <tr key={row.id}>
                     <td>
@@ -118,6 +120,7 @@ export default function EquipmentTab({ state, nonce, token, dashboardPath, onCha
                     <td>{dash(row.pea_site_name)}{row.department && <div className="list-muted">{row.department}</div>}</td>
                     <td>{dash(row.asset_owner)}{row.asset_owner_emp_id && <div className="list-muted">{row.asset_owner_emp_id}</div>}</td>
                     <td>{dash(row.status)}</td>
+                    <td>{row.contract_start_date ? formatDay(row.contract_start_date) : dash(null)}</td>
                     <td>{row.contract_expiry_date ? formatDay(row.contract_expiry_date) : dash(null)}{row.contract_no && <div className="list-muted">{row.contract_no}</div>}</td>
                     <td>
                       {row.quality_issues?.length ? (

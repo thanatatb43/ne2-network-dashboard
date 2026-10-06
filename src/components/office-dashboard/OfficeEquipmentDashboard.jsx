@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { motion as Motion } from 'framer-motion';
 import { AlertTriangle, FilterX, RefreshCw, Search } from 'lucide-react';
 import ConfirmDialog from '../equipment-form/ConfirmDialog.jsx';
+import toast from 'react-hot-toast';
 import { pushHistory, replaceHistory } from '../../navigationGuard';
 import useOfficeDashboardResource from './useOfficeDashboardResource.js';
 import { formatCount } from './officeDashboardData.js';
 import {
   DIMENSIONS, DIMENSION_LABELS, PHASE2_TABS, activeFilterCount, applyDrilldown, changeGroup, clearFilters,
-  normalizeState, parseState, pickDimension, stateToSearch, withFilters
+  normalizeState, parseState, pickDimension, stateToSearch, withFilters, contractDateDrilldown
 } from './officeDashboardState.js';
 import OverviewTab from './OverviewTab.jsx';
 import EquipmentTab from './EquipmentTab.jsx';
@@ -111,6 +112,11 @@ export default function OfficeEquipmentDashboard({ token, onRequireLogin, onEqui
     if (conflict) askReplaceMissing(conflict.from, conflict.to, () => commit(applyDrilldown(stateRef.current, drilldown, { ...opts, force: true }).state, { push: true }));
     else commit(next, { push: true });
   };
+  const dateDrill = (contract, field, value) => {
+    const result = contractDateDrilldown(stateRef.current, contract, field, value);
+    if (result.error) { toast.error(result.error, { duration: 8000 }); return; }
+    commit(result.state, { push: true });
+  };
 
   // Arrow keys move between tabs (WAI-ARIA tabs pattern, automatic activation).
   const onTabKey = (e) => {
@@ -193,7 +199,7 @@ export default function OfficeEquipmentDashboard({ token, onRequireLogin, onEqui
       <div id="oed-tabpanel" role="tabpanel" aria-labelledby={`oed-tab-${state.tab}`}>
         {state.tab === 'overview' && <OverviewTab {...tabProps} />}
         {state.tab === 'equipment' && <EquipmentTab {...tabProps} token={token} dashboardPath={path} onRequireLogin={onRequireLogin} />}
-        {state.tab === 'contracts' && <ContractsTab {...tabProps} />}
+        {state.tab === 'contracts' && <ContractsTab {...tabProps} onDateDrill={dateDrill} />}
         {state.tab === 'loans' && (token ? <LoansTab {...tabProps} token={token} /> : <LoginGate title="ยืม-คืน" onLogin={() => onRequireLogin(path)} />)}
         {state.tab === 'repairs' && (token ? <RepairsTab {...tabProps} token={token} /> : <LoginGate title="งานแจ้งซ่อม" onLogin={() => onRequireLogin(path)} />)}
       </div>

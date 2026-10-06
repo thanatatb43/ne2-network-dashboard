@@ -7,7 +7,8 @@ export const PHASE2_TABS = ['loans', 'repairs'];
 
 // Dimensions that have a "ไม่ระบุ" (missing) group in the selectors.
 export const DIMENSIONS = ['contract_no', 'pea_site_id', 'department', 'equipment_type', 'status'];
-export const DIMENSION_LABELS = { contract_no: 'สัญญา', pea_site_id: 'สำนักงาน', department: 'แผนก', equipment_type: 'ประเภท', status: 'สถานะ' };
+export const CONTRACT_DATES = ['contract_start_date', 'contract_expiry_date'];
+export const DIMENSION_LABELS = { contract_no: 'สัญญา', pea_site_id: 'สำนักงาน', department: 'แผนก', equipment_type: 'ประเภท', status: 'สถานะ', contract_start_date: 'วันเริ่มสัญญา', contract_expiry_date: 'วันสิ้นสุดสัญญา' };
 
 export const COMPUTER_TYPES = ['PC', 'Notebook'];
 export const ISSUES = ['missing_owner', 'missing_owner_emp_id', 'missing_department', 'missing_site', 'missing_serial', 'missing_equipment_code', 'missing_contract', 'missing_contract_expiry', 'duplicate_serial', 'duplicate_equipment_code'];
@@ -17,7 +18,7 @@ export const EXPIRY_LABELS = {
   within_365_days: 'หมดภายใน 365 วัน', missing_date: 'ไม่มีวันสิ้นสุดสัญญา'
 };
 export const GROUP_BY = ['site', 'department', 'equipment_type', 'status'];
-export const EQUIPMENT_SORTS = ['updatedAt', 'id', 'name', 'equipment_type', 'equipment_code', 'serial_number', 'department', 'status', 'contract_expiry_date'];
+export const EQUIPMENT_SORTS = ['updatedAt', 'id', 'name', 'equipment_type', 'equipment_code', 'serial_number', 'department', 'status', 'contract_start_date', 'contract_expiry_date'];
 export const CONTRACT_SORTS = ['earliest_expiry_date', 'contract_no', 'equipment_count'];
 export const LOAN_STATUSES = ['all', 'open', 'returned', 'overdue'];
 export const LOAN_SORTS = ['borrowed_at', 'due_date'];
@@ -30,6 +31,7 @@ export const DEFAULT_STATE = Object.freeze({
   contract_no: '', pea_site_id: '', department: '', equipment_type: '', status: '', search: '', missing_field: '',
   // equipment table (issue only applies here; expiry is shared with contracts)
   issue: '', expiry_bucket: '', page: 1, limit: 20, sort: 'updatedAt', order: 'desc',
+  contract_start_date: '', contract_expiry_date: '',
   // distribution chart
   dist_by: 'site', dist_page: 1, dist_sort: 'total',
   // contracts table
@@ -42,7 +44,7 @@ export const DEFAULT_STATE = Object.freeze({
 
 const PAGE_KEYS = ['page', 'dist_page', 'c_page', 'l_page', 'r_page'];
 const ENUMS = {
-  tab: TABS, group: ['computer', 'all'], missing_field: ['', ...DIMENSIONS], issue: ['', ...ISSUES], expiry_bucket: ['', ...EXPIRY_BUCKETS],
+  tab: TABS, group: ['computer', 'all'], missing_field: ['', ...DIMENSIONS, ...CONTRACT_DATES], issue: ['', ...ISSUES], expiry_bucket: ['', ...EXPIRY_BUCKETS],
   sort: EQUIPMENT_SORTS, order: ['asc', 'desc'], dist_by: GROUP_BY, dist_sort: ['total', 'label'],
   c_sort: CONTRACT_SORTS, c_order: ['asc', 'desc'], loan_status: LOAN_STATUSES, l_sort: LOAN_SORTS, l_order: ['asc', 'desc'],
   r_sort: REPAIR_SORTS, r_order: ['asc', 'desc']
@@ -64,7 +66,7 @@ export function normalizeState(input) {
   s.pea_site_id = positiveInt(s.pea_site_id) ? String(positiveInt(s.pea_site_id)) : '';
   for (const key of PAGE_KEYS) s[key] = positiveInt(s[key]) || 1;
   s.limit = LIMITS.includes(Number(s.limit)) ? Number(s.limit) : DEFAULT_STATE.limit;
-  for (const key of ['from', 'to']) s[key] = DAY.test(String(s[key] ?? '')) ? s[key] : '';
+  for (const key of ['from', 'to', ...CONTRACT_DATES]) s[key] = DAY.test(String(s[key] ?? '')) ? s[key] : '';
   // The API rejects missing_field together with the same dimension's filter.
   if (s.missing_field) s[s.missing_field] = '';
   // Computers never have an empty type, and other types are outside the group.
@@ -120,8 +122,8 @@ export function pickDimension(state, dimension, value) {
 // issue/expiry_bucket default to none: the overview numbers were computed
 // without them, so keeping an old one would silently show a subset.
 export function applyDrilldown(state, drilldown = {}, { tab = 'equipment', issue = '', expiry_bucket = '', force = false } = {}) {
-  const changes = { tab };
-  let missing = state.missing_field;
+  const changes = { tab, contract_start_date: '', contract_expiry_date: '' };
+  let missing = CONTRACT_DATES.includes(state.missing_field) ? '' : state.missing_field;
   for (const [key, value] of Object.entries(drilldown)) {
     if (key === 'missing_field') {
       if (missing && missing !== value && !force) return { state, conflict: { from: missing, to: value } };
@@ -138,17 +140,36 @@ export function applyDrilldown(state, drilldown = {}, { tab = 'equipment', issue
   return { state: withFilters(state, changes), conflict: null };
 }
 
+// Contract breakdown counts exclude table-only filters. Preserve the
+// contract's shared scope and expiry bucket; never replace a second NULL
+// dimension, even with confirmation, as that would change the clicked count.
+export function contractDateDrilldown(state, contract, field, value) {
+  if (!CONTRACT_DATES.includes(field) || (value !== null && !DAY.test(String(value)))) {
+    return { state, error: 'วันที่นี้ไม่อยู่ในรูปแบบที่ค้นหาได้' };
+  }
+  const scope = { ...state, contract_start_date: '', contract_expiry_date: '',
+    missing_field: CONTRACT_DATES.includes(state.missing_field) ? '' : state.missing_field };
+  const contractFilter = contract === null ? { missing_field: 'contract_no' } : { contract_no: contract };
+  const result = applyDrilldown(scope, contractFilter, { expiry_bucket: state.expiry_bucket });
+  if (result.conflict || (value === null && result.state.missing_field && result.state.missing_field !== field)) {
+    return { state, error: 'ไม่สามารถกรอง “ไม่ระบุ” สองหัวข้อพร้อมกันได้ จึงยังเปิดรายการวันที่นี้ในขอบเขตเดิมไม่ได้' };
+  }
+  return { state: normalizeState({ ...result.state,
+    [field]: value === null ? '' : String(value),
+    missing_field: value === null ? field : result.state.missing_field, page: 1 }), error: '' };
+}
+
 export function changeGroup(state, group) {
   return withFilters(state, { group });
 }
 
 // Shared filters that are set, for chips and "ล้างตัวกรอง".
 export function activeFilterCount(state) {
-  return [...DIMENSIONS, 'search', 'missing_field'].filter(key => String(state[key] ?? '').trim()).length;
+  return [...DIMENSIONS, ...CONTRACT_DATES, 'search', 'missing_field'].filter(key => String(state[key] ?? '').trim()).length;
 }
 
 export function clearFilters(state) {
-  return withFilters(state, Object.fromEntries([...DIMENSIONS, 'search', 'missing_field', 'issue', 'expiry_bucket'].map(key => [key, ''])));
+  return withFilters(state, Object.fromEntries([...DIMENSIONS, ...CONTRACT_DATES, 'search', 'missing_field', 'issue', 'expiry_bucket'].map(key => [key, ''])));
 }
 
 // The page to show when the server reports fewer pages than requested

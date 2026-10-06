@@ -2,6 +2,7 @@
 // The API answers 400 to any parameter an endpoint doesn't know, so each
 // endpoint gets its query from its own allowlist, never the whole UI state.
 import { bangkokMidnight, isCalendarDate, nextDay } from '../historyDates.js';
+import { CONTRACT_DATES } from './officeDashboardState.js';
 
 const API = import.meta.env?.VITE_API_BASE_URL ?? '';
 export const DASHBOARD_PATH = '/api/office-equipment/dashboard';
@@ -16,9 +17,9 @@ export const ALLOWED = {
   summary: BASE,
   quality: BASE,
   distribution: [...BASE, 'group_by', 'page', 'limit', 'sort', 'order'],
-  equipment: [...BASE, 'issue', 'expiry_bucket', 'page', 'limit', 'sort', 'order'],
+  equipment: [...BASE, ...CONTRACT_DATES, 'issue', 'expiry_bucket', 'page', 'limit', 'sort', 'order'],
   contracts: [...BASE, 'expiry_bucket', 'page', 'limit', 'sort', 'order'],
-  export: [...BASE, 'issue', 'expiry_bucket', 'sort', 'order'],
+  export: [...BASE, ...CONTRACT_DATES, 'issue', 'expiry_bucket', 'sort', 'order'],
   loans: [...BASE, 'loan_status', 'from', 'to', 'page', 'limit', 'sort', 'order'],
   repairs: [...BASE, 'from', 'to', 'page', 'limit', 'sort', 'order']
 };
@@ -70,6 +71,11 @@ export function endpointQuery(endpoint, state) {
   const allowed = ALLOWED[endpoint];
   if (!allowed) throw new Error(`unknown dashboard endpoint: ${endpoint}`);
   const all = { ...baseFilters(state), ...candidates(endpoint, state) };
+  if (endpoint === 'equipment' || endpoint === 'export') {
+    for (const field of CONTRACT_DATES) all[field] = state.missing_field === field ? '' : state[field];
+  } else if (CONTRACT_DATES.includes(all.missing_field)) {
+    delete all.missing_field;
+  }
   const params = new URLSearchParams();
   for (const key of allowed) {
     const value = all[key];
@@ -204,7 +210,7 @@ export async function downloadExport(state, token) {
 export function formatDay(value) {
   if (!value) return '—';
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!m || m[1] === '0000' || Number(m[1]) > 2400) return value;
+  if (!m || !isCalendarDate(value) || m[1] === '0000' || Number(m[1]) > 2400) return value;
   return new Date(`${value}T00:00:00Z`).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 }
 
