@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { draftFromRecord, emptyDraft } from './equipmentFields.js';
-import { serializeDraft } from './equipmentValidation.js';
+import { FIELD_LABELS, draftFromRecord, emptyDraft } from './equipmentFields.js';
+import { clearedButKept, mergeReadback, serializeDraft } from './equipmentValidation.js';
 
 const API = import.meta.env.VITE_API_BASE_URL;
 const MEDIA_FIELDS = ['photos', 'storage_photo', 'updatedAt'];
@@ -10,6 +10,9 @@ const authHeaders = (token) => (token ? { Authorization: `Bearer ${token}` } : {
 const readJson = async (res) => {
   try { return await res.json(); } catch { return null; }
 };
+
+// The backend answers an unchanged PUT with an English "No changes detected".
+const successMessage = (body, fallback) => (/no changes/i.test(body?.message || '') ? 'ไม่มีข้อมูลที่เปลี่ยนแปลง ข้อมูลเป็นปัจจุบันแล้ว' : body?.message || fallback);
 
 const httpMessage = (res, body, fallback) => {
   if (res.status === 401) return 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่';
@@ -106,6 +109,32 @@ export default function useEquipmentEditor({ equipmentId, context, token }) {
     } catch { /* the upload itself already reported its own result */ }
   }, [currentId, token]);
 
+  // Reads the stored record after a save: it becomes the baseline, and fields
+  // not edited again since the request was sent take the server's value.
+  // pendingReadbackRef keeps what a retry needs when this read fails.
+  const pendingReadbackRef = useRef(null);
+  const readBack = useCallback(async (id, sent, before) => {
+    pendingReadbackRef.current = { id, sent, before };
+    try {
+      const { record } = await fetchEquipmentRecord(id, token);
+      if (!record) throw new Error('not found');
+      const server = draftFromRecord(record);
+      pendingReadbackRef.current = null;
+      setBaseline(server);
+      setDraft(prev => mergeReadback({ sent, current: prev, server }));
+      setRecordSiteId(record.pea_site_id != null ? String(record.pea_site_id) : '');
+      setMedia({ photos: Array.isArray(record.photos) ? record.photos : [], storage_photo: record.storage_photo || null, updatedAt: record.updatedAt || null });
+      const kept = before ? clearedButKept({ sent, baseline: before, server }) : [];
+      return { readback: 'ok', kept: kept.map(name => FIELD_LABELS[name] || name) };
+    } catch {
+      return { readback: 'failed', kept: [] };
+    }
+  }, [token]);
+  const retryReadback = useCallback(() => {
+    const pending = pendingReadbackRef.current;
+    return pending ? readBack(pending.id, pending.sent, pending.before) : Promise.resolve({ readback: 'ok', kept: [] });
+  }, [readBack]);
+
   const save = useCallback(async ({ lockedSiteId, draft: override } = {}) => {
     const draft = override || latestDraftRef.current;
     if (savingRef.current) return { kind: 'busy' };
@@ -144,12 +173,13 @@ export default function useEquipmentEditor({ equipmentId, context, token }) {
         return { kind: 'error', status: res.status, message: httpMessage(res, body, 'บันทึกข้อมูลไม่สำเร็จ กรุณาตรวจสอบข้อมูลอีกครั้ง') };
       }
       const saved = { ...draft, ...(lockedSiteId != null ? { pea_site_id: String(lockedSiteId) } : {}) };
+      const before = latestBaselineRef.current;
       setBaseline(saved);
       // Keep anything typed while the request was in flight (it stays dirty).
       setDraft(prev => ({ ...prev, pea_site_id: saved.pea_site_id }));
       if (!creating) {
         setRecordSiteId(saved.pea_site_id);
-        return { kind: 'saved', id: currentId, message: body?.message || 'บันทึกข้อมูลสำเร็จ' };
+        return { kind: 'saved', id: currentId, message: successMessage(body, 'บันทึกข้อมูลสำเร็จ'), ...await readBack(currentId, saved, before) };
       }
       const newId = body?.data?.id ?? body?.id;
       if (newId == null) return { kind: 'created-no-id', message: 'สร้างอุปกรณ์แล้ว แต่ระบบไม่ส่งรหัสอุปกรณ์กลับมา จึงยังเพิ่มรูปต่อไม่ได้' };
@@ -160,7 +190,7 @@ export default function useEquipmentEditor({ equipmentId, context, token }) {
       setMedia({ photos: [], storage_photo: null, updatedAt: body?.data?.updatedAt ?? null });
       setLoad({ state: 'ready', error: '' });
       setLoan({ state: 'clear', loan: null });
-      return { kind: 'created', id: String(newId), message: body?.message || 'สร้างอุปกรณ์สำเร็จ' };
+      return { kind: 'created', id: String(newId), message: successMessage(body, 'สร้างอุปกรณ์สำเร็จ'), ...await readBack(String(newId), saved, null) };
     } catch {
       // The request may have reached the server; never claim it failed outright.
       return {
@@ -173,10 +203,10 @@ export default function useEquipmentEditor({ equipmentId, context, token }) {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [currentId, token]);
+  }, [currentId, token, readBack]);
 
   return {
     currentId, mode: currentId ? 'edit' : 'create', draft, baseline, media, recordSiteId, load, loan, saving,
-    setField, setDraft, save, refreshMedia, reload: () => currentId && loadRecord(currentId), recheckLoan: () => currentId && checkLoan(currentId)
+    setField, setDraft, save, retryReadback, refreshMedia, reload: () => currentId && loadRecord(currentId), recheckLoan: () => currentId && checkLoan(currentId)
   };
 }

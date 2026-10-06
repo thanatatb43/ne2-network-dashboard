@@ -1,4 +1,4 @@
-import { WRITABLE_FIELDS } from './equipmentFields.js';
+import { DASH_CLEARABLE, MAC_FIELDS, WRITABLE_FIELDS } from './equipmentFields.js';
 
 export const isValidIpAddress = (ip) => /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(part => Number(part) <= 255);
 export const isValidMacAddress = (mac) => /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac);
@@ -10,6 +10,13 @@ export const normalizeMac = (value) => {
   const text = String(value ?? '').trim();
   const candidate = text.toUpperCase().replace(/-/g, ':');
   return isValidMacAddress(candidate) ? candidate : text;
+};
+
+// Both MAC fields normalized at once (submit can happen without a blur).
+// Returns the same object when nothing changed.
+export const normalizeMacFields = (draft) => {
+  const changed = MAC_FIELDS.filter(name => normalizeMac(draft[name]) !== String(draft[name] ?? ''));
+  return changed.length ? { ...draft, ...Object.fromEntries(changed.map(name => [name, normalizeMac(draft[name])])) } : draft;
 };
 
 const isRealDate = (value) => {
@@ -29,6 +36,8 @@ export const validateDraft = (draft, { requireSite = true } = {}) => {
   if (ip && !isValidIpAddress(ip)) errors.ip_address = 'IP Address ไม่ถูกต้อง ใช้รูปแบบ เช่น 172.21.5.10';
   const mac = optional('mac_address');
   if (mac && !isValidMacAddress(mac)) errors.mac_address = 'MAC Address ต้องเป็นรูปแบบ AA:BB:CC:DD:EE:FF (ตัวพิมพ์ใหญ่)';
+  const wifi = optional('wifi_mac_address');
+  if (wifi && !isValidMacAddress(wifi)) errors.wifi_mac_address = 'Wi-Fi MAC Address ต้องเป็นรูปแบบ AA:BB:CC:DD:EE:FF (ตัวพิมพ์ใหญ่)';
   const start = optional('contract_start_date');
   const end = optional('contract_expiry_date');
   if (start && !isRealDate(start)) errors.contract_start_date = 'วันที่ไม่ถูกต้อง';
@@ -39,15 +48,28 @@ export const validateDraft = (draft, { requireSite = true } = {}) => {
   return errors;
 };
 
-// During editing, clearing a populated field explicitly sends '-'.
+// During editing, clearing a populated field explicitly sends '-' (only for
+// the fields the backend clears that way, contract dates included).
 // Fields that were already empty (and new records) retain empty strings.
 export const serializeDraft = (draft, { siteId, baseline } = {}) => {
   const params = new URLSearchParams();
   WRITABLE_FIELDS.forEach(name => {
     const value = name === 'pea_site_id' && siteId != null ? siteId : draft[name];
     const text = String(value ?? '').trim();
-    const cleared = !text && String(baseline?.[name] ?? '').trim();
+    const cleared = !text && DASH_CLEARABLE.has(name) && String(baseline?.[name] ?? '').trim();
     params.append(name, cleared ? '-' : text);
   });
   return params;
 };
+
+// After a save, the record read back from the server becomes the baseline.
+// A field the user changed again while the request ran keeps the newer text;
+// every other field takes the stored (normalized) value.
+export const mergeReadback = ({ sent, current, server }) => Object.fromEntries(Object.keys(server).map(name => [
+  name, String(current[name] ?? '') === String(sent[name] ?? '') ? server[name] : current[name]
+]));
+
+// Fields the user cleared that still hold a value on the server: the save
+// "succeeded" but did not do what the user asked.
+export const clearedButKept = ({ sent, baseline, server }) => WRITABLE_FIELDS.filter(name =>
+  !String(sent[name] ?? '').trim() && String(baseline[name] ?? '').trim() && String(server[name] ?? '').trim());

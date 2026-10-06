@@ -8,7 +8,7 @@ import SiteNetworkSection from './SiteNetworkSection.jsx';
 import useEquipmentEditor from './useEquipmentEditor.js';
 import useSiteNetwork from './useSiteNetwork.js';
 import { SECTIONS, WRITABLE_FIELDS, canEditEquipment, isDirty, statusOptionsFor } from './equipmentFields.js';
-import { normalizeMac, validateDraft } from './equipmentValidation.js';
+import { normalizeMac, normalizeMacFields, validateDraft } from './equipmentValidation.js';
 import { setNavigationGuard, clearNavigationGuard } from '../../navigationGuard';
 import '../ListPage.css';
 import '../SearchableDropdown.css';
@@ -90,10 +90,9 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
     event?.preventDefault();
     setBanner(null);
     if (siteMismatch) return;
-    // Enter can submit without the MAC field losing focus; normalize here too (visibly).
-    const mac = normalizeMac(draft.mac_address);
-    const toSave = mac === draft.mac_address ? draft : { ...draft, mac_address: mac };
-    if (toSave !== draft) editor.setField('mac_address', mac);
+    // Enter can submit without a MAC field losing focus; normalize here too (visibly).
+    const toSave = normalizeMacFields(draft);
+    if (toSave !== draft) editor.setDraft(prev => normalizeMacFields(prev));
     const found = validateDraft({ ...toSave, pea_site_id: siteId }, { requireSite: true });
     if (!locked && siteText !== null && siteText !== selectedSiteLabel) found.pea_site_id = 'กรุณาเลือกสำนักงานจากรายการ';
     setErrors(found);
@@ -107,6 +106,14 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
     if (mediaBusy && !event?.force) { setConfirm('upload'); return; }
     const result = await editor.save({ lockedSiteId: locked ? String(context.siteId) : undefined, draft: toSave });
     if (result.kind === 'busy') return;
+    // Saved, but the record could not be read back (or a clear did not take):
+    // stay on the form and say so instead of leaving as if all went well.
+    if ((result.kind === 'created' || result.kind === 'saved') && (result.readback === 'failed' || result.kept?.length)) {
+      toast.success(result.message);
+      if (result.kind === 'created') { setSiteText(null); onCreated?.(result.id); }
+      setBanner(readbackBanner(result));
+      return;
+    }
     if (result.kind === 'created') {
       toast.success(result.message);
       setSiteText(null);
@@ -121,6 +128,15 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
     } else {
       setBanner({ tone: 'error', text: result.message });
     }
+  };
+
+  const readbackBanner = (result) => (result.readback === 'failed'
+    ? { tone: 'error', text: 'บันทึกแล้ว แต่โหลดข้อมูลล่าสุดไม่สำเร็จ ค่าที่เห็นอาจยังไม่ตรงกับที่ระบบจัดเก็บ', retry: true }
+    : { tone: 'error', text: `บันทึกแล้ว แต่ระบบยังเก็บค่าเดิมของช่อง ${result.kept.join(', ')} ที่ลบออก กรุณาแจ้งผู้ดูแลระบบ` });
+  const retryReadback = async () => {
+    setBanner({ tone: 'error', text: 'กำลังโหลดข้อมูลล่าสุด...' });
+    const result = await editor.retryReadback();
+    setBanner(result.readback === 'failed' || result.kept.length ? readbackBanner(result) : { tone: 'success', text: 'โหลดข้อมูลล่าสุดแล้ว' });
   };
 
   const cancel = () => (dirty ? setConfirm('discard') : onCancel());
@@ -160,7 +176,7 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
           <input {...common} type={field.type} value={value} placeholder={field.placeholder} inputMode={field.inputMode} required={field.required}
             className={field.mono ? 'ef-mono' : undefined} autoComplete="off"
             onChange={e => change(field.name, e.target.value)}
-            onBlur={field.name === 'mac_address' ? e => { const n = normalizeMac(e.target.value); if (n !== e.target.value) change('mac_address', n); } : undefined} />
+            onBlur={field.mac ? e => { const n = normalizeMac(e.target.value); if (n !== e.target.value) change(field.name, n); } : undefined} />
         )}
         {hint && <p id={hintId} className={disabled ? 'ef-hint ef-hint-warn' : 'ef-hint'}>{hint}{disabled && loan.state === 'error' && <> <button type="button" className="ef-link" onClick={editor.recheckLoan}>ตรวจอีกครั้ง</button></>}</p>}
         {error && <p id={`${fieldId(field.name)}-error`} className="ef-error">{error}</p>}
@@ -182,6 +198,7 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
       {banner && (
         <div className={banner.tone === 'success' ? 'ef-banner-success' : 'list-error'} role={banner.tone === 'success' ? 'status' : 'alert'}>
           {banner.tone === 'success' ? <CheckCircle2 size={22} aria-hidden="true" /> : <AlertTriangle size={22} aria-hidden="true" />}<div><p>{banner.text}</p></div>
+          {banner.retry && <button type="button" className="list-button" onClick={retryReadback}><RefreshCw size={16} aria-hidden="true" /> โหลดข้อมูลล่าสุด</button>}
         </div>
       )}
 

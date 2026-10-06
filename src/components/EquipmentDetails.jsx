@@ -496,6 +496,7 @@ const EquipmentDetails = ({ equipmentId, onBack, user, token, onEditClick, onReq
           <Section title="เครือข่าย">
             <InfoRow icon={Wifi} label="IP Address" value={equipment.ip_address} mono blurred={!user} />
             <InfoRow icon={Hash} label="MAC Address" value={equipment.mac_address} mono blurred={!user} />
+            <InfoRow icon={Hash} label="Wi-Fi MAC Address" value={equipment.wifi_mac_address} mono blurred={!user} />
           </Section>
 
           <Section title="ครุภัณฑ์">

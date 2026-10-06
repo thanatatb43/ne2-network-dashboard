@@ -46,7 +46,7 @@ const matches = (item, search, type) => {
 };
 
 const EXPORT_COLUMNS = [
-  ['ชื่ออุปกรณ์', 'name'], ['ประเภท', 'equipment_type'], ['แผนก', 'department'], ['IP Address', 'ip_address'], ['MAC Address', 'mac_address'],
+  ['ชื่ออุปกรณ์', 'name'], ['ประเภท', 'equipment_type'], ['แผนก', 'department'], ['IP Address', 'ip_address'], ['MAC Address', 'mac_address'], ['Wi-Fi MAC Address', 'wifi_mac_address'],
   ['สถานะ', 'status'], ['ผู้ขาย', 'vendor'], ['เลขที่สัญญา', 'contract_no'], ['วันเริ่มสัญญา', 'contract_start_date'], ['วันหมดอายุสัญญา', 'contract_expiry_date'],
   ['Serial Number', 'serial_number'], ['รหัสทรัพย์สิน', 'asset_number'], ['ผู้ถือครอง', 'asset_owner'], ['รหัสพนักงานผู้ถือครอง', 'asset_owner_emp_id'],
   ['สถานที่ติดตั้งหรือจัดเก็บ', 'storage_location'], ['หมายเหตุ', 'notes']
@@ -321,7 +321,7 @@ export default function OfficeSiteEquipment({ siteId, site, token, user, onBackT
             </div>
             <dl className="oe-details-grid">
               {EXPORT_COLUMNS.filter(([, key]) => key !== 'name' && key !== 'status').map(([label, key]) => (
-                <div key={key} className={key === 'notes' ? 'oe-wide' : undefined}><dt>{label}</dt><dd className={['ip_address', 'mac_address', 'serial_number'].includes(key) ? 'list-ip' : undefined}>{viewing[key] || '—'}</dd></div>
+                <div key={key} className={key === 'notes' ? 'oe-wide' : undefined}><dt>{label}</dt><dd className={['ip_address', 'mac_address', 'wifi_mac_address', 'serial_number'].includes(key) ? 'list-ip' : undefined}>{viewing[key] || '—'}</dd></div>
               ))}
             </dl>
             {viewing.created_by && (

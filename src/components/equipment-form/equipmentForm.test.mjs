@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WRITABLE_FIELDS, draftFromRecord, emptyDraft, isDirty, statusOptionsFor, STATUS_OPTIONS } from './equipmentFields.js';
-import { normalizeMac, serializeDraft, validateDraft } from './equipmentValidation.js';
+import { clearedButKept, mergeReadback, normalizeMac, normalizeMacFields, serializeDraft, validateDraft } from './equipmentValidation.js';
 import { findIpGroups, rangeText, siteSubnets } from './ipAllocationReference.js';
 
 const record = {
@@ -24,7 +24,7 @@ test('locked site id overrides whatever the draft holds', () => {
 });
 
 test('editing optional fields preserves explicit clears and fills previously empty values', () => {
-  const fields = ['equipment_code', 'serial_number', 'asset_number', 'asset_owner', 'asset_owner_emp_id', 'ip_address', 'mac_address', 'department', 'equipment_type', 'storage_location', 'vendor', 'contract_no', 'contract_start_date', 'contract_expiry_date', 'notes'];
+  const fields = ['equipment_code', 'serial_number', 'asset_number', 'asset_owner', 'asset_owner_emp_id', 'ip_address', 'mac_address', 'wifi_mac_address', 'department', 'equipment_type', 'storage_location', 'vendor', 'contract_no', 'contract_start_date', 'contract_expiry_date', 'notes'];
   for (const field of fields) {
     const baseline = draftFromRecord({ ...record, [field]: 'old value' });
     for (const value of ['', '   ']) {
@@ -111,4 +111,51 @@ test('range text uses the site base, else a relative form; subnets skip missing 
   assert.equal(rangeText('172.21.1.1', null), null);
   assert.deepEqual(siteSubnets({ main: '172.21.145.241', secondary_172: '-', secondary_10: null, dhcp_range: '' }).map(s => s.key), ['main']);
   assert.deepEqual(siteSubnets(null), []);
+});
+
+test('clearing contract dates sends "-" for one date or both', () => {
+  const baseline = draftFromRecord({ ...record, contract_start_date: '2024-01-01', contract_expiry_date: '2027-01-01' });
+  const startOnly = serializeDraft({ ...baseline, contract_start_date: '' }, { baseline });
+  assert.equal(startOnly.get('contract_start_date'), '-');
+  assert.equal(startOnly.get('contract_expiry_date'), '2027-01-01');
+  const endOnly = serializeDraft({ ...baseline, contract_expiry_date: '' }, { baseline });
+  assert.equal(endOnly.get('contract_start_date'), '2024-01-01');
+  assert.equal(endOnly.get('contract_expiry_date'), '-');
+  const both = serializeDraft({ ...baseline, contract_start_date: '', contract_expiry_date: '' }, { baseline });
+  assert.equal(both.get('contract_start_date'), '-');
+  assert.equal(both.get('contract_expiry_date'), '-');
+});
+
+test('"-" is only sent for fields the backend clears', () => {
+  const baseline = draftFromRecord(record);
+  const body = serializeDraft({ ...baseline, name: '', status: '', pea_site_id: '' }, { baseline });
+  for (const field of ['name', 'status', 'pea_site_id']) assert.equal(body.get(field), '', field);
+});
+
+test('Wi-Fi MAC is normalized and validated like the wired MAC', () => {
+  const draft = { ...draftFromRecord(record), wifi_mac_address: ' aa-bb-cc-dd-ee-ff ', mac_address: '44:87:FC:F3:F8:FE' };
+  const normalized = normalizeMacFields(draft);
+  assert.equal(normalized.wifi_mac_address, 'AA:BB:CC:DD:EE:FF');
+  assert.equal(normalized.mac_address, '44:87:FC:F3:F8:FE');
+  assert.equal(normalizeMacFields(normalized), normalized);
+  assert.deepEqual(validateDraft(normalized), {});
+  assert.ok(validateDraft({ ...draft, wifi_mac_address: 'AA:BB:CC:DD:EE' }).wifi_mac_address);
+  assert.ok(validateDraft({ ...draft, wifi_mac_address: 'GG:BB:CC:DD:EE:FF' }).wifi_mac_address);
+  assert.equal(normalizeMac('not a mac'), 'not a mac');
+});
+
+test('read-back after save keeps fields typed while the request ran', () => {
+  const sent = { ...draftFromRecord(record), notes: 'a', serial_number: 'sn' };
+  const current = { ...sent, notes: 'a + typed later' };
+  const server = { ...sent, serial_number: 'SN', mac_address: '44:87:FC:F3:F8:FE' };
+  const merged = mergeReadback({ sent, current, server });
+  assert.equal(merged.notes, 'a + typed later');
+  assert.equal(merged.serial_number, 'SN');
+});
+
+test('a clear the server ignored is reported', () => {
+  const baseline = draftFromRecord({ ...record, contract_start_date: '2024-01-01', contract_expiry_date: '2027-01-01' });
+  const sent = { ...baseline, contract_start_date: '', contract_expiry_date: '' };
+  assert.deepEqual(clearedButKept({ sent, baseline, server: { ...sent, contract_expiry_date: '2027-01-01' } }), ['contract_expiry_date']);
+  assert.deepEqual(clearedButKept({ sent, baseline, server: sent }), []);
 });

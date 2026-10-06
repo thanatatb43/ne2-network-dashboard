@@ -32,7 +32,8 @@ export const SECTIONS = [
   {
     id: 'network', title: 'เครือข่าย', fields: [
       { name: 'ip_address', label: 'IP Address', type: 'text', mono: true, placeholder: 'เช่น 172.21.5.10', inputMode: 'decimal' },
-      { name: 'mac_address', label: 'MAC Address', type: 'text', mono: true, placeholder: 'AA:BB:CC:DD:EE:FF', hint: 'ตัวพิมพ์ใหญ่ คั่นด้วย : (ระบบแปลงให้เมื่อออกจากช่อง)' }
+      { name: 'mac_address', label: 'MAC Address', type: 'text', mono: true, mac: true, placeholder: 'AA:BB:CC:DD:EE:FF', hint: 'ตัวพิมพ์ใหญ่ คั่นด้วย : (ระบบแปลงให้เมื่อออกจากช่อง)' },
+      { name: 'wifi_mac_address', label: 'Wi-Fi MAC Address', type: 'text', mono: true, mac: true, placeholder: 'AA:BB:CC:DD:EE:FF', hint: 'MAC ของการ์ด Wi-Fi (ถ้ามี) รูปแบบเดียวกับ MAC Address' }
     ]
   },
   {
@@ -68,6 +69,16 @@ export const SECTIONS = [
 // (id, photos, storage_photo, network_ip, loans, nested site/user objects)
 // must never be echoed back.
 export const WRITABLE_FIELDS = [...SECTIONS.flatMap(s => s.fields.map(f => f.name)), 'pea_site_id'];
+
+export const MAC_FIELDS = SECTIONS.flatMap(s => s.fields.filter(f => f.mac).map(f => f.name));
+
+// Fields the backend clears to null when sent the exact string "-". Required
+// fields and the site id are not on the list (the API ignores "-" there).
+export const DASH_CLEARABLE = new Set([
+  'equipment_code', 'ip_address', 'mac_address', 'wifi_mac_address', 'department', 'equipment_type', 'notes',
+  'contract_no', 'vendor', 'serial_number', 'asset_number', 'asset_owner', 'asset_owner_emp_id',
+  'storage_location', 'contract_start_date', 'contract_expiry_date'
+]);
 
 export const FIELD_LABELS = Object.fromEntries(SECTIONS.flatMap(s => s.fields.map(f => [f.name, f.label])).concat([['pea_site_id', 'สำนักงาน']]));
 
