@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Loader2, AlertTriangle, MapPin, Maximize, Minimize, RefreshCw, Search, List, Map as MapIcon, LocateFixed } from 'lucide-react';
@@ -298,7 +298,7 @@ const SitesMap = ({ onDeviceClick, intro = null }) => {
   ];
 
   return (
-    <motion.div
+    <Motion.div
       className="list-page sites-map-page"
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
@@ -355,6 +355,11 @@ const SitesMap = ({ onDeviceClick, intro = null }) => {
             </div>
           )}
 
+          <section className="sites-summary-panel" aria-labelledby="sites-summary-title">
+            <header className="sites-summary-heading">
+              <h2 id="sites-summary-title">สถานะเครือข่ายสำนักงาน</h2>
+              <p>เฉพาะสำนักงานที่มีอุปกรณ์เครือข่ายและ IP · กดการ์ดเพื่อกรองแผนที่และรายการ</p>
+            </header>
           <div className="sites-summary" role="group" aria-label="สรุปสถานะสำนักงาน (กดเพื่อกรองสถานะ)">
             {summaryCards.map(card => (
               <button
@@ -364,14 +369,17 @@ const SitesMap = ({ onDeviceClick, intro = null }) => {
                 aria-pressed={status === card.key}
                 onClick={() => setStatus(card.key)}
               >
-                <span className="sites-summary-count">{card.count}</span>
                 <span className="sites-summary-label">
+                  {card.key === 'all' && <MapPin size={16} aria-hidden="true" />}
                   {card.symbol && <span className={`sites-symbol sites-symbol-${card.key}`} aria-hidden="true">{card.symbol}</span>}
                   {card.label}
                 </span>
+                <span className="sites-summary-count">{card.count.toLocaleString('th-TH')}</span>
+                {status === card.key && <span className="sites-summary-selected" aria-hidden="true">✓</span>}
               </button>
             ))}
           </div>
+          </section>
 
           <section className="list-panel sites-filters" aria-label="ตัวกรองสำนักงาน">
             <div className="list-toolbar">
@@ -507,7 +515,7 @@ const SitesMap = ({ onDeviceClick, intro = null }) => {
           </div>
         </>
       )}
-    </motion.div>
+    </Motion.div>
   );
 };
 
