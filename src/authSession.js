@@ -96,3 +96,14 @@ export function idleRemaining(lastActivity, timeoutMs, now = Date.now()) {
   if (!Number.isFinite(last) || last <= 0) return 0;
   return Math.max(0, last + timeoutMs - now);
 }
+
+// A page holding unsaved work (the drawing editor) can take over what
+// happens when the session ends: App still clears the session, but calls the
+// handler first (it can keep a recovery copy while the user is still known)
+// and stays on the page instead of going to the login screen.
+let sessionEndHandler = null;
+export function claimSessionEnd(handler) {
+  sessionEndHandler = handler;
+  return () => { if (sessionEndHandler === handler) sessionEndHandler = null; };
+}
+export const sessionEndClaim = () => sessionEndHandler;

@@ -1,0 +1,419 @@
+import { useEffect, useImperativeHandle, useRef, useState } from 'react';
+import DrawingSheet from '../rendering/DrawingRenderer.jsx';
+import {
+  createBox, createPolyline, allIds, isBox, isPolyline, legendRect, round, DEFAULT_SIZES
+} from '../officeDrawingDocument.js';
+import {
+  anchorPoint, boxCorners, hitTest, insertVertex, removeVertex, lockAxis, moveObjects, moveVertex, nearestAnchor, objectsInRect,
+  rectFromDrag, resizeBox, rotationFromPointer, snapPoint, updateBox, boxCenter
+} from '../officeDrawingGeometry.js';
+
+import { LINE_TOOLS, PLACE_TOOLS, RECT_TOOLS } from './editorTools.js';
+const HANDLE_PX = 9;
+const RESIZE_DIRS = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+const CURSORS = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' };
+
+const handlePoint = (b, dir) => {
+  const x = { w: b.x, e: b.x + b.width }[dir.replace(/[ns]/g, '')] ?? b.x + b.width / 2;
+  const y = { n: b.y, s: b.y + b.height }[dir.replace(/[ew]/g, '')] ?? b.y + b.height / 2;
+  return { x, y };
+};
+
+// The sheet plus every pointer interaction. A gesture edits a preview copy
+// of the document; only its end commits one history entry (onCommit).
+// Pan, zoom, selection and the preview never touch history or dirty state.
+export default function DrawingCanvas({
+  ref, doc, readOnly, tool, toolOptions, activeLayerId, selection, onSelect, onCommit, onToolDone, onMessage,
+  scale, onScale, showGrid, snap, axisLock, cableStyles, linkStates, siteName
+}) {
+  const scrollRef = useRef(null);
+  const svgRef = useRef(null);
+  const gesture = useRef(null);
+  const [preview, setPreview] = useState(null);      // document while dragging
+  const [overlay, setOverlay] = useState(null);      // marquee / new rect / line draft
+  const [hover, setHover] = useState(null);          // cable tool: box + anchor under pointer
+  const [panning, setPanning] = useState(false);
+  // The preview shown last, committed at pointer up (state may lag a frame).
+  const lastPreview = useRef(null);
+  const showPreview = (d) => { lastPreview.current = d; setPreview(d); };
+  const shown = preview || doc;
+  const sn = (p) => (snap ? snapPoint(p, { snap: true, spacing: doc.grid?.spacing || 5 }) : { x: round(p.x), y: round(p.y) });
+
+  const toDoc = (e) => {
+    const svg = svgRef.current;
+    const m = svg.getScreenCTM();
+    if (!m) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    const r = pt.matrixTransform(m.inverse());
+    return { x: r.x, y: r.y };
+  };
+
+  const fit = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const s = Math.min((el.clientWidth - 48) / doc.page.width, (el.clientHeight - 48) / doc.page.height);
+    onScale(Math.max(0.5, Math.min(12, s)));
+  };
+  // Fit the page once on first show.
+  const fitted = useRef(false);
+  useEffect(() => { if (!fitted.current) { fitted.current = true; fit(); } });
+
+  // Ctrl/⌘ + wheel zooms around the pointer.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return undefined;
+    const onWheel = (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const ox = e.clientX - rect.left + el.scrollLeft;
+      const oy = e.clientY - rect.top + el.scrollTop;
+      const next = Math.max(0.5, Math.min(12, scale * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      const k = next / scale;
+      onScale(next);
+      requestAnimationFrame(() => { el.scrollLeft = ox * k - (e.clientX - rect.left); el.scrollTop = oy * k - (e.clientY - rect.top); });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [scale, onScale]);
+
+  function cancelGesture() {
+    const g = gesture.current;
+    gesture.current = null;
+    lastPreview.current = null;
+    setPreview(null);
+    setHover(null);
+    if (g?.kind === 'line' || overlay) setOverlay(null);
+    return Boolean(g);
+  }
+
+  // Finish a wall/cable being drawn (Enter / double-click).
+  function finishLine() {
+    const g = gesture.current;
+    if (!g || g.kind !== 'line') return false;
+    const points = g.points;
+    gesture.current = null;
+    setOverlay(null);
+    setHover(null);
+    if (points.length < 2) { onMessage?.('เส้นต้องมีอย่างน้อย 2 จุด'); return true; }
+    const taken = allIds(doc);
+    const o = createPolyline(g.type, {
+      points, layerId: activeLayerId, taken,
+      ...(g.type === 'cable' ? { cable_style_key: toolOptions.cableStyle, start: g.start, end: g.end } : { thickness: toolOptions.wallThickness })
+    });
+    onCommit({ ...doc, objects: [...doc.objects, o] });
+    onSelect([o.id]);
+    return true;
+  }
+
+  useImperativeHandle(ref, () => ({ fit, cancel: cancelGesture, finishLine }));
+
+  const layerUsable = () => {
+    const layer = doc.layers.find(l => l.id === activeLayerId);
+    if (!layer) { onMessage?.('กรุณาเลือกชั้นที่จะวาด'); return false; }
+    if (layer.locked || layer.visible === false) { onMessage?.(`ชั้น “${layer.name}” ถูก${layer.locked ? 'ล็อก' : 'ซ่อน'}อยู่ เปิดก่อนจึงวาดได้`); return false; }
+    return true;
+  };
+
+  const boxUnder = (p, exclude) => hitTest(doc, p, { boxesOnly: true, exclude, tolerance: 2 / scale * 3 });
+
+  const onPointerDown = (e) => {
+    if (e.button === 1 || tool === 'pan' || (e.button === 0 && e.altKey)) {
+      const el = scrollRef.current;
+      gesture.current = { kind: 'pan', x: e.clientX, y: e.clientY, left: el.scrollLeft, top: el.scrollTop };
+      setPanning(true);
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+    if (e.button !== 0) return;
+    const p = toDoc(e);
+    const tol = Math.max(1, 6 / scale);
+
+    if (readOnly) {
+      const hit = hitTest(doc, p, { includeLocked: true, tolerance: tol });
+      onSelect(hit ? [hit.id] : []);
+      return;
+    }
+
+    const handle = e.target.closest?.('[data-handle]')?.getAttribute('data-handle');
+    if (handle && selection.length === 1) {
+      const o = doc.objects.find(x => x.id === selection[0]);
+      if (o) {
+        const [kind, arg] = handle.split(':');
+        if (kind === 'mid') {
+          const i = Number(arg);
+          const inserted = insertVertex(o, i, sn(p));
+          const base = { ...doc, objects: doc.objects.map(x => (x.id === o.id ? inserted : x)) };
+          gesture.current = { kind: 'vertex', id: o.id, index: i, base, orig: inserted };
+        } else {
+          gesture.current = { kind, arg, index: kind === 'vertex' ? Number(arg) : null, id: o.id, base: doc, orig: o, start: p };
+        }
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    if (handle === 'legend') {
+      gesture.current = { kind: 'legend', base: doc, start: p, orig: { x: doc.legend.x, y: doc.legend.y } };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    if (LINE_TOOLS.includes(tool)) {
+      if (!layerUsable()) return;
+      const g = gesture.current?.kind === 'line' ? gesture.current : null;
+      if (e.detail >= 2 && g) { finishLine(); return; }
+      let q = sn(p);
+      let ref = null;
+      if (tool === 'cable') {
+        const box = boxUnder(p);
+        if (box) { const anchor = nearestAnchor(box, p); const a = anchorPoint(box, anchor); q = { x: round(a.x), y: round(a.y) }; ref = { object_id: box.id, anchor }; }
+      }
+      if (g && (axisLock || e.shiftKey) && !ref) q = lockAxis(g.points[g.points.length - 1], q);
+      if (!g) {
+        gesture.current = { kind: 'line', type: tool, points: [q], start: ref, end: null };
+      } else {
+        const last = g.points[g.points.length - 1];
+        if (last.x === q.x && last.y === q.y) return;
+        gesture.current = { ...g, points: [...g.points, q], end: ref };
+        // Clicking a box ends a cable there.
+        if (tool === 'cable' && ref) { finishLine(); return; }
+      }
+      setOverlay({ kind: 'line', points: gesture.current.points, cursor: q });
+      return;
+    }
+
+    if (PLACE_TOOLS.includes(tool)) {
+      if (!layerUsable()) return;
+      const [w, h] = DEFAULT_SIZES[tool];
+      const c = sn(p);
+      const o = createBox(tool, { x: c.x - w / 2, y: c.y - h / 2, layerId: activeLayerId, taken: allIds(doc), symbol_key: toolOptions.symbol[tool] });
+      onCommit({ ...doc, objects: [...doc.objects, o] });
+      onSelect([o.id]);
+      return;
+    }
+
+    if (RECT_TOOLS.includes(tool)) {
+      if (!layerUsable()) return;
+      const a = sn(p);
+      gesture.current = { kind: 'create', type: tool, a };
+      setOverlay({ kind: 'rect', ...rectFromDrag(a, a, 0) });
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    // select tool
+    if (doc.legend?.visible !== false && doc.legend?.items?.length) {
+      const r = legendRect(doc.legend);
+      if (p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height && !hitTest(doc, p, { tolerance: tol })) {
+        onSelect(['__legend']);
+        gesture.current = { kind: 'legend', base: doc, start: p, orig: { x: doc.legend.x, y: doc.legend.y } };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    const hit = hitTest(doc, p, { tolerance: tol });
+    if (hit) {
+      if (e.shiftKey) { onSelect(selection.includes(hit.id) ? selection.filter(id => id !== hit.id) : [...selection.filter(id => id !== '__legend'), hit.id]); return; }
+      const ids = selection.includes(hit.id) ? selection.filter(id => id !== '__legend') : [hit.id];
+      if (!selection.includes(hit.id)) onSelect(ids);
+      gesture.current = { kind: 'move', ids, base: doc, start: p, anchorObj: hit };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+    gesture.current = { kind: 'marquee', start: p, add: e.shiftKey };
+    setOverlay({ kind: 'marquee', x1: p.x, y1: p.y, x2: p.x, y2: p.y });
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e) => {
+    const g = gesture.current;
+    if (!g) {
+      if (!readOnly && tool === 'cable') {
+        const p = toDoc(e);
+        const box = boxUnder(p);
+        setHover(box ? { box, anchor: nearestAnchor(box, p) } : null);
+      }
+      return;
+    }
+    if (g.kind === 'pan') {
+      const el = scrollRef.current;
+      el.scrollLeft = g.left - (e.clientX - g.x);
+      el.scrollTop = g.top - (e.clientY - g.y);
+      return;
+    }
+    const p = toDoc(e);
+    if (g.kind === 'line') {
+      let q = sn(p);
+      let hv = null;
+      if (g.type === 'cable') {
+        const box = boxUnder(p);
+        if (box) { const anchor = nearestAnchor(box, p); const a = anchorPoint(box, anchor); q = a; hv = { box, anchor }; }
+      }
+      if ((axisLock || e.shiftKey) && !hv) q = lockAxis(g.points[g.points.length - 1], q);
+      setHover(hv);
+      setOverlay({ kind: 'line', points: g.points, cursor: q });
+      return;
+    }
+    if (g.kind === 'marquee') { setOverlay({ kind: 'marquee', x1: g.start.x, y1: g.start.y, x2: p.x, y2: p.y }); return; }
+    if (g.kind === 'create') { setOverlay({ kind: 'rect', ...rectFromDrag(g.a, sn(p), 0) }); return; }
+    if (g.kind === 'move') {
+      let dx = p.x - g.start.x;
+      let dy = p.y - g.start.y;
+      if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
+      const ref = g.anchorObj;
+      if (snap && isBox(ref)) {
+        const target = sn({ x: ref.x + dx, y: ref.y + dy });
+        dx = target.x - ref.x; dy = target.y - ref.y;
+      } else if (snap) { const s = doc.grid?.spacing || 5; dx = Math.round(dx / s) * s; dy = Math.round(dy / s) * s; }
+      showPreview(moveObjects(g.base, g.ids, round(dx), round(dy)));
+      return;
+    }
+    if (g.kind === 'legend') {
+      const t = sn({ x: g.orig.x + p.x - g.start.x, y: g.orig.y + p.y - g.start.y });
+      showPreview({ ...g.base, legend: { ...g.base.legend, x: t.x, y: t.y } });
+      return;
+    }
+    if (g.kind === 'resize') { showPreview(updateBox(g.base, g.id, resizeBox(g.orig, g.arg, sn(p)))); return; }
+    if (g.kind === 'rotate') { showPreview(updateBox(g.base, g.id, { rotation: rotationFromPointer(g.orig, p, e.shiftKey ? 1 : 15) })); return; }
+    if (g.kind === 'vertex') {
+      const o = g.orig;
+      let q = sn(p);
+      const isEnd = g.index === 0 || g.index === o.points.length - 1;
+      let changes = {};
+      if (o.type === 'cable' && isEnd) {
+        const box = boxUnder(p, new Set([o.id]));
+        const key = g.index === 0 ? 'start' : 'end';
+        if (box) { const anchor = nearestAnchor(box, p); const a = anchorPoint(box, anchor); q = a; changes = { [key]: { object_id: box.id, anchor } }; setHover({ box, anchor }); } else { changes = { [key]: null }; setHover(null); }
+      } else if (axisLock || e.shiftKey) {
+        const nb = o.points[g.index === 0 ? 1 : g.index - 1];
+        q = lockAxis(nb, q);
+      }
+      const moved = { ...moveVertex(o, g.index, q), ...changes };
+      showPreview({ ...g.base, objects: g.base.objects.map(x => (x.id === o.id ? moved : x)) });
+    }
+  };
+
+  const onPointerUp = (e) => {
+    const g = gesture.current;
+    if (!g || g.kind === 'line') return;
+    // The release point counts even if its last move event was coalesced.
+    if (['move', 'legend', 'resize', 'rotate', 'vertex'].includes(g.kind)) onPointerMove(e);
+    gesture.current = null;
+    if (g.kind === 'pan') { setPanning(false); return; }
+    if (g.kind === 'marquee') {
+      const p = toDoc(e);
+      setOverlay(null);
+      const tiny = Math.abs(p.x - g.start.x) * scale < 4 && Math.abs(p.y - g.start.y) * scale < 4;
+      if (tiny) { if (!g.add) onSelect([]); return; }
+      const ids = objectsInRect(doc, { x1: g.start.x, y1: g.start.y, x2: p.x, y2: p.y });
+      onSelect(g.add ? [...new Set([...selection, ...ids])] : ids);
+      return;
+    }
+    if (g.kind === 'create') {
+      const b = toDoc(e);
+      setOverlay(null);
+      const dragged = Math.abs(b.x - g.a.x) * scale > 6 || Math.abs(b.y - g.a.y) * scale > 6;
+      const r = dragged ? rectFromDrag(g.a, sn(b)) : { x: g.a.x, y: g.a.y };
+      const o = createBox(g.type, { ...r, layerId: activeLayerId, taken: allIds(doc) });
+      onCommit({ ...doc, objects: [...doc.objects, o] });
+      onSelect([o.id]);
+      onToolDone?.();
+      return;
+    }
+    setHover(null);
+    if (lastPreview.current) onCommit(lastPreview.current);
+    lastPreview.current = null;
+    setPreview(null);
+  };
+
+  const onPointerCancel = () => { setPanning(false); if (gesture.current?.kind !== 'line') cancelGesture(); };
+
+  // ---- overlay: selection, handles, previews ----
+  const hs = HANDLE_PX / scale;
+  const sel = selection.map(id => shown.objects.find(o => o.id === id)).filter(Boolean);
+  const single = sel.length === 1 ? sel[0] : null;
+  const layerOk = (o) => { const l = shown.layers.find(x => x.id === o.layer_id); return l && !l.locked && l.visible !== false; };
+  const handles = !readOnly && single && layerOk(single) && !preview;
+  const legendSelected = selection.includes('__legend') && shown.legend;
+
+  const outline = (o) => {
+    if (isBox(o)) {
+      const pts = boxCorners(o).map(p => `${p.x},${p.y}`).join(' ');
+      return <polygon key={o.id} points={pts} className="od-sel" />;
+    }
+    return <polyline key={o.id} points={o.points.map(p => `${p.x},${p.y}`).join(' ')} className="od-sel od-sel-line" />;
+  };
+
+  const lineDraft = overlay?.kind === 'line' ? [...overlay.points, overlay.cursor].filter(Boolean) : null;
+  const cursor = readOnly ? 'default' : tool === 'pan' ? (panning ? 'grabbing' : 'grab') : tool === 'select' ? 'default' : 'crosshair';
+
+  return (
+    <div ref={scrollRef} className={`od-canvas${readOnly ? ' is-readonly' : ''}`}>
+      <div className="od-canvas-inner">
+        <DrawingSheet doc={shown} cableStyles={cableStyles} siteName={siteName} mode="edit" scale={scale} showGrid={showGrid} linkStates={linkStates} svgRef={svgRef}
+          svgProps={{
+            onPointerDown, onPointerMove, onPointerUp, onPointerCancel,
+            onDoubleClick: (e) => {
+              if (finishLine() || readOnly) return;
+              // Double-click a bend to remove it (a line keeps at least 2 points).
+              const h = e.target.closest?.('[data-handle]')?.getAttribute('data-handle');
+              if (h?.startsWith('vertex:') && single && isPolyline(single) && single.points.length > 2) {
+                const i = Number(h.split(':')[1]);
+                onCommit({ ...doc, objects: doc.objects.map(o => (o.id === single.id ? removeVertex(o, i) : o)) });
+              }
+            },
+            style: { cursor, touchAction: readOnly ? 'auto' : 'none' }
+          }}>
+          <g className="od-overlay">
+            {sel.map(outline)}
+            {legendSelected && (() => { const r = legendRect(shown.legend); return <rect x={r.x} y={r.y} width={r.width} height={r.height} className="od-sel" data-handle={readOnly ? undefined : 'legend'} />; })()}
+            {handles && isBox(single) && (
+              <>
+                {(() => {
+                  const c = boxCenter(single);
+                  const top = anchorPoint(single, 'top');
+                  const k = { x: top.x + (top.x - c.x) / Math.max(1, Math.hypot(top.x - c.x, top.y - c.y)) * hs * 2.5, y: top.y + (top.y - c.y) / Math.max(1, Math.hypot(top.x - c.x, top.y - c.y)) * hs * 2.5 };
+                  return (
+                    <g>
+                      <line x1={top.x} y1={top.y} x2={k.x} y2={k.y} className="od-handle-stem" />
+                      <circle cx={k.x} cy={k.y} r={hs / 1.6} className="od-handle od-handle-rotate" data-handle="rotate" style={{ cursor: 'grab' }}><title>หมุน (Shift = ทีละ 1°)</title></circle>
+                    </g>
+                  );
+                })()}
+                {RESIZE_DIRS.map(dir => {
+                  const p = boxCenter(single);
+                  const local = handlePoint(single, dir);
+                  const r = (single.rotation || 0) * Math.PI / 180;
+                  const q = { x: p.x + (local.x - p.x) * Math.cos(r) - (local.y - p.y) * Math.sin(r), y: p.y + (local.x - p.x) * Math.sin(r) + (local.y - p.y) * Math.cos(r) };
+                  return <rect key={dir} x={q.x - hs / 2} y={q.y - hs / 2} width={hs} height={hs} className="od-handle" data-handle={`resize:${dir}`} style={{ cursor: CURSORS[dir] }} />;
+                })}
+              </>
+            )}
+            {handles && isPolyline(single) && (
+              <>
+                {single.points.slice(1).map((pt, i) => {
+                  const a = single.points[i];
+                  if (single.points.length >= 500) return null;
+                  return <circle key={`m${i}`} cx={(a.x + pt.x) / 2} cy={(a.y + pt.y) / 2} r={hs / 2.6} className="od-handle od-handle-mid" data-handle={`mid:${i + 1}`}><title>ลากเพื่อเพิ่มจุดหักมุม</title></circle>;
+                })}
+                {single.points.map((pt, i) => (
+                  <rect key={`v${i}`} x={pt.x - hs / 2} y={pt.y - hs / 2} width={hs} height={hs} className={`od-handle${(i === 0 || i === single.points.length - 1) && single.type === 'cable' ? ' od-handle-end' : ''}`} data-handle={`vertex:${i}`} />
+                ))}
+              </>
+            )}
+            {overlay?.kind === 'marquee' && <rect x={Math.min(overlay.x1, overlay.x2)} y={Math.min(overlay.y1, overlay.y2)} width={Math.abs(overlay.x2 - overlay.x1)} height={Math.abs(overlay.y2 - overlay.y1)} className="od-marquee" />}
+            {overlay?.kind === 'rect' && <rect x={overlay.x} y={overlay.y} width={Math.max(overlay.width, 0.1)} height={Math.max(overlay.height, 0.1)} className="od-marquee" />}
+            {lineDraft && lineDraft.length > 0 && (
+              <>
+                <polyline points={lineDraft.map(p => `${p.x},${p.y}`).join(' ')} className="od-draft-line" />
+                {overlay.points.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={hs / 3} className="od-draft-point" />)}
+              </>
+            )}
+            {hover && (() => { const a = anchorPoint(hover.box, hover.anchor); return <circle cx={a.x} cy={a.y} r={hs / 1.8} className="od-anchor-hint" />; })()}
+          </g>
+        </DrawingSheet>
+      </div>
+    </div>
+  );
+}

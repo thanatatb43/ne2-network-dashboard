@@ -12,6 +12,13 @@ export const OPTIONS_LIMIT = 20;
 export const EDIT_ROLES = ['super_admin', 'network_admin', 'computer_admin'];
 export const roleCanEdit = (user) => EDIT_ROLES.includes(user?.role);
 
+export const TYPE_LABELS = { floor_plan: 'ผังสำนักงาน/ห้อง', network_layout: 'ผังแนวเดินสายระหว่างอาคาร' };
+
+export const formatWhen = (iso) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+};
+
 export const LIST_SORTS = ['updated_at', 'name', 'created_at'];
 const ALLOWED = {
   selectors: ['search', 'page', 'limit'],

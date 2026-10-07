@@ -7,6 +7,9 @@ import DeviceDetails from './components/DeviceDetails';
 import EquipmentDetails from './components/EquipmentDetails';
 import EquipmentEdit from './components/EquipmentEdit';
 import HomeOverview from './components/HomeOverview';
+import Offices from './components/offices/Offices';
+import OfficeDrawingList from './components/offices/OfficeDrawingList';
+import OfficeDrawingPage from './components/offices/OfficeDrawingPage';
 import OfficeEquipmentDashboard from './components/office-dashboard/OfficeEquipmentDashboard';
 import AdminSettings from './components/AdminSettings';
 import Management from './components/Management';
@@ -27,7 +30,7 @@ import { useEffect } from 'react';
 import { APP_NAME } from './config/branding';
 import ConfirmDialog from './components/equipment-form/ConfirmDialog.jsx';
 import { installFormHistory, setFormHistoryOwner } from './formHistory';
-import { readAuthCode, requestToken, requestUrl, isApiRequest, classify401, endSessionMessage, normalizeSession, idleRemaining, AUTH_MESSAGES } from './authSession';
+import { readAuthCode, requestToken, requestUrl, isApiRequest, classify401, endSessionMessage, normalizeSession, idleRemaining, AUTH_MESSAGES, sessionEndClaim } from './authSession';
 import { shouldConfirmLeave, clearNavigationGuard, navigationGuardMessage, initHistoryIndex, pushHistory, replaceHistory, entryIndex, currentHistoryIndex, syncHistoryIndex, popstateDecision } from './navigationGuard';
 
 // "ชื่อหน้า | NE2 LDAP" per tab -- detail/edit pages use their page TYPE as
@@ -38,7 +41,7 @@ const PAGE_TITLES = {
   deviceDetails: 'รายละเอียดอุปกรณ์เครือข่าย', analytics: 'ตรวจสอบการเชื่อมต่อ', settings: 'การตั้งค่าระบบ',
   'downtime-history': 'ประวัติการขัดข้อง', 'down-devices': 'อุปกรณ์ที่ขัดข้อง',
   'equipment-borrow': 'ยืมอุปกรณ์', 'equipment-loans': 'ประวัติการยืม', 'equipment-search': 'ค้นหาอุปกรณ์',
-  'office-dashboard': 'แดชบอร์ดอุปกรณ์สำนักงาน',
+  'office-dashboard': 'แดชบอร์ดอุปกรณ์สำนักงาน', offices: 'สำนักงาน',
   equipmentDetails: 'รายละเอียดอุปกรณ์', equipmentEdit: 'แก้ไขอุปกรณ์',
   'report-issue': 'แจ้งปัญหา', jobDetails: 'รายละเอียดงานแจ้งปัญหา',
   budget: 'งบประมาณ', management: 'การจัดการ', about: 'เกี่ยวกับระบบและคู่มือ', login: 'เข้าสู่ระบบ',
@@ -72,6 +75,7 @@ const TAB_PATHS = {
   'equipment-loans': '/equipment-loans',
   'equipment-search': '/equipment-search',
   'office-dashboard': '/office-equipment-dashboard',
+  offices: '/offices',
   'report-issue': '/report-issue',
   about: '/about',
   login: '/login',
@@ -109,6 +113,13 @@ const pathToRoute = (pathname) => {
 
   const equipmentMatch = pathname.match(/^\/equipment\/([^/]+)$/);
   if (equipmentMatch) return { tab: 'equipmentDetails', equipmentId: equipmentMatch[1] };
+
+  // Offices: /offices/:siteId/drawings, .../new, .../:drawingId
+  const officeMatch = pathname.match(/^\/offices\/(\d+)\/drawings(?:\/([^/]+))?\/?$/);
+  if (officeMatch) {
+    const sub = officeMatch[2];
+    return { tab: 'offices', officeView: !sub ? 'drawings' : sub === 'new' ? 'new' : 'drawing', officeSiteId: officeMatch[1], drawingId: sub && sub !== 'new' ? sub : null };
+  }
 
   const budgetEntry = Object.entries(BUDGET_VIEW_PATHS).find(([, path]) => path === pathname);
   if (budgetEntry) return { tab: 'budget', budgetView: budgetEntry[0] };
@@ -153,6 +164,7 @@ function App() {
   const [mgmtSiteId, setMgmtSiteId] = useState(null);
   const [settingsView, setSettingsView] = useState('overview');
   const [settingsItemId, setSettingsItemId] = useState(null);
+  const [officeRoute, setOfficeRoute] = useState({ view: 'sites', siteId: null, drawingId: null });
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [sessionInfo, setSessionInfo] = useState(() => { try { return normalizeSession(JSON.parse(localStorage.getItem(SESSION_META_KEY))); } catch { return null; } });
@@ -194,6 +206,7 @@ function App() {
     setMgmtSiteId(route.tab === 'management' ? (route.mgmtSiteId || null) : null);
     setSettingsView(route.tab === 'settings' ? (route.settingsView || 'overview') : 'overview');
     setSettingsItemId(route.tab === 'settings' ? (route.settingsItemId || null) : null);
+    setOfficeRoute(route.tab === 'offices' ? { view: route.officeView || 'sites', siteId: route.officeSiteId || null, drawingId: route.drawingId || null } : { view: 'sites', siteId: null, drawingId: null });
   };
 
   // Central navigation helper: updates state AND pushes a URL so the browser's
@@ -272,6 +285,14 @@ function App() {
 
   // Called by BudgetDashboard/Management when the user switches sub-view
   // WITHOUT leaving the page (e.g. clicking "search" or a site card).
+  // Raw-path version of navigateReplace (the drawing editor: a new drawing's
+  // URL after its first save, or a drawing opened under the wrong office).
+  const navigateReplacePath = (path) => {
+    applyRoute(pathToRoute(path.split('?')[0]));
+    replaceHistory({}, path);
+    lastUrlRef.current = window.location.pathname + window.location.search;
+  };
+
   const navigateBudgetView = (view) => navigate('budget', { budgetView: view });
   const navigateMgmtView = (view, siteId = null) => navigate('management', { mgmtView: view, mgmtSiteId: siteId });
 
@@ -583,6 +604,19 @@ function App() {
   // why, and bring the user back to the same page after logging in again.
   const endSession = (code) => {
     if (!tokenRef.current) return;
+    // A page with unsaved work (drawing editor) keeps it: it stores a
+    // recovery copy now, and the user stays on the page read-only.
+    const claim = sessionEndClaim();
+    if (claim) {
+      claim({ reason: 'expired', code });
+      tokenRef.current = null;
+      setUser(null);
+      setToken(null);
+      setSessionInfo(null);
+      ['user', 'token', 'auth_provider', LAST_ACTIVITY_KEY, SESSION_META_KEY].forEach((k) => localStorage.removeItem(k));
+      toast.error(endSessionMessage(code), { id: 'session-ended', icon: '🔒', duration: 8000, position: 'top-center' });
+      return;
+    }
     clearNavigationGuard();
     setLeaveConfirm(null);
     tokenRef.current = null;
@@ -597,9 +631,13 @@ function App() {
   };
 
   const handleLogout = () => {
+    // A page holding unsaved work keeps a recovery copy first (see endSession)
+    // and, unless SSO has to redirect away, the user stays on it read-only.
+    const claim = sessionEndClaim();
+    if (claim) claim({ reason: 'logout' });
     // Once logged out a draft can't be saved; never block the logout itself,
     // and drop any pending "leave this page?" action from the old session.
-    clearNavigationGuard();
+    if (!claim) clearNavigationGuard();
     setLeaveConfirm(null);
     const currentToken = token;
     const isSsoUser = localStorage.getItem('auth_provider') === 'sso';
@@ -647,7 +685,7 @@ function App() {
       return;
     }
 
-    navigate('login');
+    if (!claim) navigate('login');
 
     // Best-effort notify the backend; failures/hangs no longer block logout.
     if (currentToken) {
@@ -964,6 +1002,17 @@ function App() {
               onRequireLogin={(returnPath) => requireLoginFor(returnPath)}
               onEquipmentClick={(id) => navigate('equipmentDetails', { equipmentId: id })}
             />
+          ) : activeTab === 'offices' ? (
+            officeRoute.view === 'sites' ? (
+              <Offices key="offices" token={token} onGo={navigateToPath} />
+            ) : officeRoute.view === 'drawings' ? (
+              <OfficeDrawingList key={`drawings-${officeRoute.siteId}`} siteId={officeRoute.siteId} token={token} user={user}
+                onGo={navigateToPath} onRequireLogin={requireLoginFor} />
+            ) : (
+              <OfficeDrawingPage key={`drawing-${officeRoute.siteId}`} siteId={officeRoute.siteId}
+                drawingId={officeRoute.view === 'new' ? 'new' : officeRoute.drawingId} token={token} user={user}
+                onGo={navigateToPath} onReplace={navigateReplacePath} onRequireLogin={requireLoginFor} />
+            )
           ) : activeTab === 'equipment-search' ? (
             <EquipmentSearch
               token={token}

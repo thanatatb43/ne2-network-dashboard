@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Network, Globe, Database, Boxes, Settings, LogIn, LogOut, User as UserIcon, Info, BadgeDollarSign, X,
-  History, Map, ChevronDown, ChevronRight, Cpu, ShoppingCart, Search, ClipboardList, RefreshCw, AlertCircle, Sun, Moon, LayoutDashboard
+  History, Map, ChevronDown, ChevronRight, Cpu, ShoppingCart, Search, ClipboardList, RefreshCw, AlertCircle, Sun, Moon, LayoutDashboard, Building2
 } from 'lucide-react';
 import { motion as Motion, AnimatePresence } from 'framer-motion';
 
@@ -25,7 +25,7 @@ const ITEM_PATHS = {
   dashboard: '/', budget: '/budget-dashboard', 'network-devices': '/network-devices', devices: '/devices',
   analytics: '/analytics', 'downtime-history': '/downtime-history', 'equipment-borrow': '/equipment-borrow',
   'equipment-loans': '/equipment-loans', 'equipment-search': '/equipment-search', 'report-issue': '/report-issue',
-  'office-dashboard': '/office-equipment-dashboard',
+  'office-dashboard': '/office-equipment-dashboard', offices: '/offices',
   management: '/management', settings: '/settings', login: '/login', about: '/about',
 };
 
@@ -206,6 +206,7 @@ const Sidebar = ({ activeTab, onNavigate, user, onLogout, isOpen, onClose, sessi
 
   const items = [
     { type: 'item', name: 'แผนที่', icon: Map, id: 'dashboard' },
+    { type: 'item', name: 'สำนักงาน', icon: Building2, id: 'offices' },
     { type: 'item', name: 'งบประมาณ', icon: BadgeDollarSign, id: 'budget' },
   ];
 
