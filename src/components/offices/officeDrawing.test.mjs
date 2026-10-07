@@ -242,3 +242,10 @@ test('recovery drafts belong to one user and drawing', () => {
   clearRecovery({ userId: 1, drawingKey: 42 }, storage);
   assert.equal(readRecovery({ userId: 1, drawingKey: 42 }, storage), null);
 });
+
+test('a symbol under a cable end is picked before the cable', () => {
+  const { doc, a } = sample();
+  // the cable starts on a's right edge; click there
+  const hit = hitTest(doc, anchorPoint(a, 'right'), { tolerance: 2 });
+  assert.equal(hit.id, a.id);
+});

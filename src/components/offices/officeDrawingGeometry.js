@@ -68,8 +68,20 @@ export function distanceToPolyline(p, points) {
 
 // Topmost object under the pointer among visible, unlocked layers (or all
 // visible ones when `includeLocked`, for inspecting in read mode).
+// Small symbols (equipment, outlet, junction) win over lines: cables end on
+// them, and their centre would otherwise always pick the cable.
+const PRIORITY = new Set(['equipment', 'outlet', 'junction']);
 export function hitTest(doc, p, { tolerance = 1.5, includeLocked = false, boxesOnly = false, exclude = null } = {}) {
   const order = renderOrder(doc);
+  const usable = (o) => {
+    if (exclude && exclude.has(o.id)) return false;
+    const layer = doc.layers.find(l => l.id === o.layer_id);
+    return Boolean(layer) && layer.visible !== false && (includeLocked || !layer.locked);
+  };
+  for (let i = order.length - 1; i >= 0; i -= 1) {
+    const o = order[i];
+    if (PRIORITY.has(o.type) && usable(o) && pointInBox(p, o, tolerance / 2)) return o;
+  }
   for (let i = order.length - 1; i >= 0; i -= 1) {
     const o = order[i];
     if (exclude && exclude.has(o.id)) continue;

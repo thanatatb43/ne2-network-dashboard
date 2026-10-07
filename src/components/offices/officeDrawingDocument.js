@@ -21,6 +21,15 @@ export const DEFAULT_CABLE_STYLES = [
   { key: 'power', label: 'สายไฟฟ้า', stroke: '#DC2626', dash: 'solid' },
   { key: 'other', label: 'อื่น ๆ', stroke: '#111827', dash: 'dotted' }
 ];
+export const SYMBOL_LABELS = {
+  pc: 'คอมพิวเตอร์', notebook: 'Notebook', printer: 'เครื่องพิมพ์', scanner: 'สแกนเนอร์', switch: 'Switch', router: 'Router',
+  firewall: 'Firewall', access_point: 'Access Point', rack: 'Rack', server: 'Server', ups: 'UPS', cctv: 'กล้อง CCTV',
+  ip_phone: 'IP Phone', generic: 'อุปกรณ์อื่น', outlet: 'Outlet', outlet_lan: 'Outlet LAN', outlet_fiber: 'Outlet Fiber',
+  outlet_phone: 'Outlet โทรศัพท์', outlet_power: 'ปลั๊กไฟ', junction: 'จุดต่อสาย'
+};
+export const TYPE_NAMES = { building: 'อาคาร', room: 'ห้อง', desk: 'โต๊ะ', wall: 'ผนัง', door: 'ประตู', window: 'หน้าต่าง', equipment: 'อุปกรณ์', outlet: 'Outlet', junction: 'จุดต่อสาย', cable: 'แนวสาย', text: 'ข้อความ' };
+export const objectName = (o) => o.label || (o.type === 'text' ? String(o.text || '').slice(0, 30) : '') || SYMBOL_LABELS[o.symbol_key] || TYPE_NAMES[o.type] || o.type;
+
 export const TITLE_BLOCK_FIELDS = ['project_name', 'drawing_title', 'location', 'drawing_number', 'revision_label', 'issued_date', 'prepared_by', 'checked_by', 'contact', 'sheet_number'];
 
 // Rendering defaults for a null/omitted style (UI-side assumption, to be
@@ -109,6 +118,14 @@ export const TITLE_BLOCK_SIZE = { width: 120, height: 38 };
 export function titleBlockRect(page) {
   const m = Number(page.margin) || 0;
   return { x: page.width - m - TITLE_BLOCK_SIZE.width, y: page.height - m - TITLE_BLOCK_SIZE.height, ...TITLE_BLOCK_SIZE };
+}
+
+// Legend box (mm): a title row then one row per item.
+export const LEGEND_LAYOUT = { width: 70, title: 8, row: 6, pad: 3 };
+export function legendRect(legend) {
+  if (!legend) return null;
+  const n = legend.items?.length || 0;
+  return { x: legend.x, y: legend.y, width: LEGEND_LAYOUT.width, height: LEGEND_LAYOUT.title + n * LEGEND_LAYOUT.row + LEGEND_LAYOUT.pad };
 }
 
 // ---- object factories ----
