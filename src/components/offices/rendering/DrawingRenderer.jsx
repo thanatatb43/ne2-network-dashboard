@@ -2,6 +2,7 @@ import { memo, useId, useMemo } from 'react';
 import { DEFAULT_CABLE_STYLES, effectiveStyle, isBox, isVisible, renderOrder, KNOWN_TYPES } from '../officeDrawingDocument.js';
 import { boxCenter, polylineMidpoint } from '../officeDrawingGeometry.js';
 import { dimensionGeometry, dimensionLabel } from '../officeDrawingMeasure.js';
+import { doorOpenings } from '../officeDrawingDoors.js';
 import { SymbolGlyph } from './DrawingSymbols.jsx';
 import DrawingLegend from './DrawingLegend.jsx';
 import DrawingTitleBlock from './DrawingTitleBlock.jsx';
@@ -156,8 +157,10 @@ export default function DrawingSheet({ doc, cableStyles = DEFAULT_CABLE_STYLES, 
   const uid = useId().replace(/:/g, '');
   const objects = renderOrder(doc).filter(o => KNOWN_TYPES.includes(o.type) && isVisible(doc, o));
   const doors = objects.filter(o => o.type === 'door');
-  const structures = objects.filter(o => ['wall', 'room', 'building'].includes(o.type));
-  const openingMasks = new Map(structures.map((o, i) => [o.id, `${uid}-door-openings-${i}`]));
+  // Each wall/room/building gets a mask only where a door actually sits on
+  // one of its lines; the cut follows that line (see officeDrawingDoors.js).
+  const openings = doorOpenings(objects, o => effectiveStyle(o, cableStyles).stroke_width);
+  const openingMasks = new Map([...openings.keys()].map((id, i) => [id, `${uid}-door-openings-${i}`]));
   // Doors stay above room fills even if the room was drawn afterwards.
   const orderedObjects = [...objects.filter(o => o.type !== 'door'), ...doors];
   // Only what dimension labels need, stable while just geometry changes.
@@ -170,17 +173,13 @@ export default function DrawingSheet({ doc, cableStyles = DEFAULT_CABLE_STYLES, 
       role="img" aria-label="ผังแบบ" {...svgProps}>
       <defs>
         <clipPath id={`${uid}-clip`}><rect x="0" y="0" width={W} height={H} /></clipPath>
-        {doors.length > 0 && structures.map(o => (
-          <mask key={o.id} id={openingMasks.get(o.id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse"
+        {[...openings].map(([id, cuts]) => (
+          <mask key={id} id={openingMasks.get(id)} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse"
             x="0" y="0" width={W} height={H} style={{ maskType: 'luminance' }}>
             <rect x="0" y="0" width={W} height={H} fill="white" />
-            {doors.map(door => {
-              const y = door.swing === 'out' ? door.y : door.y + door.height;
-              const thickness = o.type === 'wall' ? o.thickness : effectiveStyle(o, cableStyles).stroke_width;
-              return <line key={door.id} x1={door.x} y1={y} x2={door.x + door.width} y2={y}
-                stroke="black" strokeWidth={(thickness || 0.3) + 0.2} strokeLinecap="butt"
-                transform={`rotate(${door.rotation || 0} ${door.x + door.width / 2} ${door.y + door.height / 2})`} />;
-            })}
+            {cuts.map((c, i) => (
+              <line key={i} x1={c.a.x} y1={c.a.y} x2={c.b.x} y2={c.b.y} stroke="black" strokeWidth={c.width + 0.4} strokeLinecap="butt" />
+            ))}
           </mask>
         ))}
         {showGrid && (
@@ -194,7 +193,7 @@ export default function DrawingSheet({ doc, cableStyles = DEFAULT_CABLE_STYLES, 
       {mode === 'edit' && margin > 0 && <rect x={margin} y={margin} width={W - 2 * margin} height={H - 2 * margin} fill="none" stroke="#94A3B8" strokeWidth=".2" strokeDasharray="1.5 1.5" pointerEvents="none" />}
       <g clipPath={print ? `url(#${uid}-clip)` : undefined} className="od-objects">
         {orderedObjects.map(o => (
-          <g key={o.id} mask={doors.length && openingMasks.has(o.id) ? `url(#${openingMasks.get(o.id)})` : undefined}>
+          <g key={o.id} mask={openingMasks.has(o.id) ? `url(#${openingMasks.get(o.id)})` : undefined}>
           <DrawingObject object={o} cableStyles={cableStyles} linkState={linkStates?.get(o.id)}
             imageSrc={o.type === 'image' ? imageSources?.get(o.asset_id) : undefined} measure={o.type === 'dimension' ? measure : undefined} />
           </g>
