@@ -139,7 +139,7 @@ export default function OfficeEquipmentDashboard({ token, onRequireLogin, onEqui
       <header className="list-header">
         <div>
           <h1>แดชบอร์ดอุปกรณ์สำนักงาน</h1>
-          <p>สรุปทะเบียนอุปกรณ์ตามตัวกรอง ข้อมูลอ่านสดจากทะเบียน ตัวเลขแต่ละส่วนอาจต่างกันเล็กน้อยหากมีการแก้ทะเบียนระหว่างโหลด</p>
+          <p>สรุปข้อมูลอุปกรณ์ในระบบ</p>
         </div>
         <div className="list-actions">
           <button type="button" className="list-button" onClick={() => setNonce(n => n + 1)}><RefreshCw size={18} aria-hidden="true" /> รีเฟรช</button>

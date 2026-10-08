@@ -1,8 +1,8 @@
-import { useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { AlertTriangle, CheckCircle2, Loader2, Lock, RefreshCw, Save } from 'lucide-react';
 import SearchableDropdown from '../SearchableDropdown';
-import ConfirmDialog from './ConfirmDialog.jsx';
+import ConfirmDialog, { DialogShell } from './ConfirmDialog.jsx';
 import EquipmentMediaSection from './EquipmentMediaSection.jsx';
 import SiteNetworkSection from './SiteNetworkSection.jsx';
 import useEquipmentEditor from './useEquipmentEditor.js';
@@ -54,6 +54,12 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
   const network = useSiteNetwork(siteId, { known: locked ? context.network : null, token });
   const [errors, setErrors] = useState({});
   const [banner, setBanner] = useState(null);
+  const [errorPopup, setErrorPopup] = useState(null);
+  const errorTitleId = useId();
+  const reportError = (notice, details = []) => {
+    setBanner(notice);
+    setErrorPopup({ ...notice, details });
+  };
   const [mediaBusy, setMediaBusy] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [siteText, setSiteText] = useState(null);
@@ -89,7 +95,7 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
   const submit = async (event) => {
     event?.preventDefault();
     setBanner(null);
-    if (siteMismatch) return;
+    if (siteMismatch) { reportError({ tone: 'error', text: 'อุปกรณ์นี้อยู่ในสำนักงานอื่น จึงไม่สามารถบันทึกจากหน้านี้ได้' }); return; }
     // Enter can submit without a MAC field losing focus; normalize here too (visibly).
     const toSave = normalizeMacFields(draft);
     if (toSave !== draft) editor.setDraft(prev => normalizeMacFields(prev));
@@ -99,10 +105,10 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
     const first = [...WRITABLE_FIELDS].find(name => found[name]);
     if (first) {
       formRef.current?.querySelector(`#${fieldId(first)}`)?.focus();
-      setBanner({ tone: 'error', text: `กรุณาแก้ไขข้อมูล ${Object.keys(found).length} ช่องที่ระบุไว้` });
+      reportError({ tone: 'error', text: `กรุณาแก้ไขข้อมูล ${Object.keys(found).length} ช่องที่ระบุไว้` }, Object.values(found));
       return;
     }
-    if (mode === 'edit' && loan.state === 'checking') { setBanner({ tone: 'error', text: 'กำลังตรวจสอบรายการยืม กรุณารอสักครู่แล้วบันทึกอีกครั้ง' }); return; }
+    if (mode === 'edit' && loan.state === 'checking') { reportError({ tone: 'error', text: 'กำลังตรวจสอบรายการยืม กรุณารอสักครู่แล้วบันทึกอีกครั้ง' }); return; }
     if (mediaBusy && !event?.force) { setConfirm('upload'); return; }
     const result = await editor.save({ lockedSiteId: locked ? String(context.siteId) : undefined, draft: toSave });
     if (result.kind === 'busy') return;
@@ -111,7 +117,7 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
     if ((result.kind === 'created' || result.kind === 'saved') && (result.readback === 'failed' || result.kept?.length)) {
       toast.success(result.message);
       if (result.kind === 'created') { setSiteText(null); onCreated?.(result.id); }
-      setBanner(readbackBanner(result));
+      reportError(readbackBanner(result));
       return;
     }
     if (result.kind === 'created') {
@@ -126,7 +132,7 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
       toast.success(result.message, { duration: 8000 });
       onSaved?.(null);
     } else {
-      setBanner({ tone: 'error', text: result.message });
+      reportError({ tone: 'error', text: result.message || 'บันทึกข้อมูลไม่สำเร็จ กรุณาลองใหม่' });
     }
   };
 
@@ -136,7 +142,8 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
   const retryReadback = async () => {
     setBanner({ tone: 'error', text: 'กำลังโหลดข้อมูลล่าสุด...' });
     const result = await editor.retryReadback();
-    setBanner(result.readback === 'failed' || result.kept.length ? readbackBanner(result) : { tone: 'success', text: 'โหลดข้อมูลล่าสุดแล้ว' });
+    if (result.readback === 'failed' || result.kept.length) reportError(readbackBanner(result));
+    else setBanner({ tone: 'success', text: 'โหลดข้อมูลล่าสุดแล้ว' });
   };
 
   const cancel = () => (dirty ? setConfirm('discard') : onCancel());
@@ -187,6 +194,16 @@ export default function EquipmentForm({ ref, equipmentId, context, user, token, 
   const lockedSite = context.site;
   return (
     <form ref={formRef} className="list-page ef-form" onSubmit={submit} noValidate aria-labelledby="ef-heading">
+      <DialogShell open={Boolean(errorPopup)} onClose={() => setErrorPopup(null)} labelledBy={errorTitleId} role="alertdialog">
+        <h2 id={errorTitleId}><AlertTriangle size={22} aria-hidden="true" /> กรุณาตรวจสอบข้อมูล</h2>
+        <div className="ef-dialog-body">
+          <p>{errorPopup?.text}</p>
+          {errorPopup?.details.length > 0 && <ul>{errorPopup.details.map((text, index) => <li key={index}>{text}</li>)}</ul>}
+        </div>
+        <div className="ef-dialog-actions">
+          <button type="button" className="list-button ef-button-primary" data-autofocus onClick={() => setErrorPopup(null)}>รับทราบ</button>
+        </div>
+      </DialogShell>
       <div className="ef-head">
         <h2 id="ef-heading">{heading || (mode === 'create' ? 'เพิ่มอุปกรณ์' : 'แก้ไขข้อมูลอุปกรณ์')}</h2>
         <p className="list-muted">ช่องที่มี * จำเป็นต้องกรอก · ช่องที่มีข้อมูลจะถูกไฮไลท์ (ยังไม่ได้บันทึกจนกว่าจะกด “บันทึก”)</p>

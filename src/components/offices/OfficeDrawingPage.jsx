@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { AlertTriangle, ArrowLeft, History, Loader2, LogIn, PencilRuler, RefreshCw, Download } from 'lucide-react';
 import ConfirmDialog from '../equipment-form/ConfirmDialog.jsx';
@@ -6,11 +6,12 @@ import '../equipment-form/ConfirmDialog.css';
 import { BUSY_LEAVE_MESSAGE, clearNavigationGuard, useLeaveGuard } from '../../navigationGuard';
 import { claimSessionEnd } from '../../authSession';
 import {
-  TYPE_LABELS, createDrawing, deleteDrawing, downloadJson, entryFromDrawing, formatWhen, request, roleCanEdit, updateDrawing, urls, writablePayload
+  TYPE_LABELS, createDrawing, deleteDrawing, downloadJson, entryFromDrawing, formatWhen, request, roleCanEdit, updateDrawing, uploadAsset, urls, writablePayload
 } from './officeDrawingApi.js';
 import {
-  DEFAULT_CABLE_STYLES, DEFAULT_LIMITS, byteLength, objectIndexFromPath, sameJson, unknownObjects, validateDrawing
+  DEFAULT_CABLE_STYLES, DEFAULT_LIMITS, IMAGE_FORMATS, IMAGE_LIMITS, SUPPORTED_SCHEMAS, byteLength, needsV2, objectIndexFromPath, sameJson, unknownObjects, upgradeEntry, validateDrawing
 } from './officeDrawingDocument.js';
+import useImageSources from './useImageSources.js';
 import { acceptSaved, canRedo, canUndo, commit, createHistory, isDirty, redo, undo } from './officeDrawingHistory.js';
 import { TEMPLATES, templateDocument } from './officeDrawingTemplates.js';
 import { clearRecovery, readRecovery, saveRecovery } from './officeDrawingRecovery.js';
@@ -30,14 +31,18 @@ function capsFrom(data) {
   return {
     cableStyles: data?.cable_styles?.length ? data.cable_styles : DEFAULT_CABLE_STYLES,
     symbolKeys: { ...DEFAULT_SYMBOLS, legend: [...DEFAULT_SYMBOLS.equipment, ...DEFAULT_SYMBOLS.outlet, 'junction'], ...(data?.symbol_keys || {}) },
-    limits: { ...DEFAULT_LIMITS, ...(data?.limits || {}) },
-    schemaVersions: data?.schema_versions || [1]
+    limits: { ...DEFAULT_LIMITS, ...(data?.limits || {}), ...(data?.image_limits ? { max_image_objects: data.image_limits.max_image_objects } : {}) },
+    schemaVersions: data?.schema_versions || [1],
+    // New drawings use the server's default, but never a version this page
+    // can't write.
+    defaultSchema: SUPPORTED_SCHEMAS.includes(data?.default_schema_version) ? data.default_schema_version : 1,
+    imageLimits: { ...IMAGE_LIMITS, ...(data?.image_limits || {}), image_formats: data?.image_formats || IMAGE_FORMATS }
   };
 }
 
 // Template, paper and names for a drawing that does not exist yet. Nothing
 // is sent to the server until the first save.
-function NewDrawingForm({ siteName, onStart, onCancel }) {
+function NewDrawingForm({ siteName, onStart, onCancel, schemaVersion }) {
   const [template, setTemplate] = useState('blank');
   const [size, setSize] = useState('A4');
   const [orientation, setOrientation] = useState('landscape');
@@ -51,8 +56,8 @@ function NewDrawingForm({ siteName, onStart, onCancel }) {
     if (!name.trim()) return;
     const drawingType = t.drawingType || type;
     onStart({
-      meta: { name: name.trim(), drawing_type: drawingType, building_label: building.trim() || null, floor_label: floor.trim() || null },
-      doc: templateDocument(template, { size, orientation, drawingType })
+      meta: { name: name.trim(), drawing_type: drawingType, building_label: building.trim() || null, floor_label: floor.trim() || null, schema_version: schemaVersion },
+      doc: templateDocument(template, { size, orientation, drawingType, schemaVersion })
     });
   };
   return (
@@ -148,7 +153,8 @@ export default function OfficeDrawingPage({ siteId, drawingId, token, user, onGo
   const drawingKey = currentId ?? `new:${siteId}`;
   const roleOk = Boolean(token) && roleCanEdit(user);
   const perms = currentId ? (d?.permissions || null) : capsRes.data?.permissions;
-  const schemaOk = !session?.server || caps.schemaVersions.includes(session.server.schema_version);
+  // Editable only in a schema both this page and the server handle.
+  const schemaOk = !session?.server || (SUPPORTED_SCHEMAS.includes(session.server.schema_version) && caps.schemaVersions.includes(session.server.schema_version));
   const unknown = entry ? unknownObjects(entry.doc).length : 0;
   const canEdit = roleOk && Boolean(currentId ? perms?.can_edit : perms?.can_create) && schemaOk && !unknown;
   const siteName = site.site?.label || session?.server?.pea_site_name || d?.pea_site_name || '';
@@ -167,7 +173,34 @@ export default function OfficeDrawingPage({ siteId, drawingId, token, user, onGo
   }), []);
 
   const setHistory = (fn) => setSession(s => (s ? { ...s, history: fn(s.history) } : s));
-  const onCommit = (next) => { setIssue(i => (i?.kind === 'validation' ? null : i)); setHistory(h => commit(h, next)); };
+  // Adding an image/dimension or setting a scale turns a v1 drawing into v2
+  // (part of the same undo step); v2 is never written back as v1.
+  const onCommit = (next) => {
+    let e = next;
+    if (needsV2(e.doc) && (e.meta.schema_version ?? 1) < 2) {
+      if (!caps.schemaVersions.includes(2)) { toast.error('เซิร์ฟเวอร์ยังไม่รองรับรูปภาพ มาตราส่วน และเส้นบอกระยะ'); return; }
+      e = upgradeEntry(e);
+      toast('แบบนี้จะบันทึกเป็นข้อมูลรุ่น 2 (รองรับรูปภาพ/มาตราส่วน) — เปิดได้เฉพาะหน้าเว็บรุ่นนี้ขึ้นไป', { id: 'od-v2', icon: 'ℹ️', duration: 6000 });
+    }
+    setIssue(i => (i?.kind === 'validation' ? null : i));
+    setHistory(h => commit(h, e));
+  };
+
+  // Image metadata: from the drawing (data.assets) plus this page's uploads.
+  const [uploaded, setUploaded] = useState(() => new Map());
+  const serverAssets = session?.server?.assets;
+  const assetMeta = useMemo(() => {
+    const m = new Map((serverAssets || []).map(a => [a.id, a]));
+    for (const [id, a] of uploaded) if (!m.has(id)) m.set(id, a);
+    return m;
+  }, [serverAssets, uploaded]);
+  const imageIds = (session?.history.present.doc.objects || []).filter(o => o.type === 'image').map(o => o.asset_id);
+  const imageSources = useImageSources(imageIds, { token, meta: assetMeta });
+  const onUploadImage = async (file) => {
+    const r = await uploadAsset(file, token);
+    if (r.ok) setUploaded(m => new Map(m).set(r.data.id, r.data));
+    return r;
+  };
 
   const recovery = user && session && !recoveryDismissed ? readRecovery({ userId: user.id, drawingKey }) : null;
   const showRecovery = recovery && !sameJson(recovery.entry, entry) && canEdit;
@@ -310,7 +343,7 @@ export default function OfficeDrawingPage({ siteId, drawingId, token, user, onGo
             <button type="button" className="list-button" onClick={() => { clearRecovery({ userId: user.id, drawingKey: `new:${siteId}` }); setRecoveryDismissed(v => !v); }}>ทิ้ง</button>
           </div>
         )}
-        <NewDrawingForm siteName={siteName} onCancel={() => onGo(listPath)}
+        <NewDrawingForm siteName={siteName} schemaVersion={caps.defaultSchema} onCancel={() => onGo(listPath)}
           onStart={(e) => setSession({ id: null, history: createHistory(e), baseline: { entry: null, version: null }, server: null })} />
       </div>
     );
@@ -411,7 +444,9 @@ export default function OfficeDrawingPage({ siteId, drawingId, token, user, onGo
         caps={caps} siteId={siteId} siteName={siteName} token={token}
         linkFor={linkFor} linkStates={linkStates} linksError={linksRes.error?.message || ''} onRetryLinks={linksRes.retry}
         canLink={canEdit} onAssetPicked={(a) => setPicked(m => new Map(m).set(`${a.kind}:${a.id}`, a))}
-        onBackToList={() => onGo(listPath)} menu={menu} banners={banners} focusObjectId={focusId} />
+        onBackToList={() => onGo(listPath)} menu={menu} banners={banners} focusObjectId={focusId}
+        imageSources={imageSources} assetMeta={assetMeta} imageLimits={caps.imageLimits} onUploadImage={onUploadImage}
+        imagesAllowed={canEdit && caps.schemaVersions.includes(2)} />
 
       <ConfirmDialog open={confirm === 'reload'} tone="danger" title="โหลดฉบับล่าสุด?"
         message="การแก้ไขที่ยังไม่บันทึกในหน้านี้จะหายไป ดาวน์โหลดไฟล์งานเก็บไว้ก่อนได้จากปุ่ม “ดาวน์โหลด”"

@@ -1,14 +1,21 @@
-// Office drawing document (schema v1, see OFFICE_DRAWING_API.md section 5):
+// Office drawing document (schema v1 and v2; v2 adds image, dimension,
+// scaled drawings and measurement -- see OFFICE_DRAWING_API.md and the
+// images/scale backend response):
 // defaults, ids, object factories and whole-document edits that keep the
 // document valid (no dangling cable or layer references). Pure: no React.
 // Units are paper mm, origin top-left, y down.
 
-export const SCHEMA_VERSION = 1;
+export const SUPPORTED_SCHEMAS = [1, 2];
 export const PAGE_SIZES = { A4: { width: 210, height: 297 }, A3: { width: 297, height: 420 } };
-export const BOX_TYPES = ['building', 'room', 'desk', 'door', 'window', 'equipment', 'outlet', 'junction', 'text'];
+export const BOX_TYPES = ['building', 'room', 'desk', 'door', 'window', 'equipment', 'outlet', 'junction', 'text', 'image'];
 export const POLYLINE_TYPES = ['wall', 'cable'];
-export const KNOWN_TYPES = [...BOX_TYPES, ...POLYLINE_TYPES];
+export const V2_TYPES = ['image', 'dimension'];
+export const KNOWN_TYPES = [...BOX_TYPES, ...POLYLINE_TYPES, 'dimension'];
 export const ANCHORS = ['center', 'top', 'right', 'bottom', 'left'];
+export const DIMENSION_ANCHORS = [...ANCHORS, 'top_left', 'top_right', 'bottom_left', 'bottom_right'];
+export const MEASUREMENT_DEFAULTS = { display_unit: 'auto', precision: 2 };
+export const IMAGE_LIMITS = { max_upload_bytes: 10485760, max_image_pixels: 25000000, max_image_dimension: 10000, max_image_objects: 100 };
+export const IMAGE_FORMATS = ['image/png', 'image/jpeg', 'image/webp'];
 export const DEFAULT_LIMITS = {
   name_max: 200, building_floor_label_max: 200, label_max: 500, text_max: 5000, title_block_field_max: 200,
   objects_max: 2000, layers_max: 30, points_per_polyline_max: 500, legend_items_max: 100,
@@ -27,7 +34,7 @@ export const SYMBOL_LABELS = {
   ip_phone: 'IP Phone', generic: 'อุปกรณ์อื่น', outlet: 'Outlet', outlet_lan: 'Outlet LAN', outlet_fiber: 'Outlet Fiber',
   outlet_phone: 'Outlet โทรศัพท์', outlet_power: 'ปลั๊กไฟ', junction: 'จุดต่อสาย'
 };
-export const TYPE_NAMES = { building: 'อาคาร', room: 'ห้อง', desk: 'โต๊ะ', wall: 'ผนัง', door: 'ประตู', window: 'หน้าต่าง', equipment: 'อุปกรณ์', outlet: 'Outlet', junction: 'จุดต่อสาย', cable: 'แนวสาย', text: 'ข้อความ' };
+export const TYPE_NAMES = { image: 'รูปภาพ', dimension: 'เส้นบอกระยะ', building: 'อาคาร', room: 'ห้อง', desk: 'โต๊ะ', wall: 'ผนัง', door: 'ประตู', window: 'หน้าต่าง', equipment: 'อุปกรณ์', outlet: 'Outlet', junction: 'จุดต่อสาย', cable: 'แนวสาย', text: 'ข้อความ' };
 export const objectName = (o) => o.label || (o.type === 'text' ? String(o.text || '').slice(0, 30) : '') || SYMBOL_LABELS[o.symbol_key] || TYPE_NAMES[o.type] || o.type;
 
 export const TITLE_BLOCK_FIELDS = ['project_name', 'drawing_title', 'location', 'drawing_number', 'revision_label', 'issued_date', 'prepared_by', 'checked_by', 'contact', 'sheet_number'];
@@ -45,7 +52,8 @@ export const TYPE_DEFAULTS = {
   outlet: { stroke: '#111827', fill: '#FFFFFF', stroke_width: 0.3, dash: 'solid' },
   junction: { stroke: '#111827', fill: '#111827', stroke_width: 0.3, dash: 'solid' },
   cable: { stroke: '#111827', fill: null, stroke_width: 0.7, dash: 'solid' },
-  text: { stroke: null, fill: '#111827', stroke_width: null, dash: 'solid' }
+  text: { stroke: null, fill: '#111827', stroke_width: null, dash: 'solid' },
+  dimension: { stroke: '#222222', fill: null, stroke_width: 0.25, dash: 'solid' }
 };
 // New-object sizes (mm) when placed with a click.
 export const DEFAULT_SIZES = {
@@ -55,6 +63,24 @@ export const DEFAULT_SIZES = {
 
 export const isBox = (o) => BOX_TYPES.includes(o?.type);
 export const isPolyline = (o) => POLYLINE_TYPES.includes(o?.type);
+export const isDimension = (o) => o?.type === 'dimension';
+export const isScaled = (doc) => doc?.scale?.mode === 'scaled';
+
+// v2 is needed once a drawing uses anything v1 can't hold. A v2 drawing is
+// never written back as v1 (the server refuses downgrades anyway).
+export const needsV2 = (doc) => isScaled(doc) || (doc?.objects || []).some(o => V2_TYPES.includes(o.type));
+export function upgradeEntry(entry) {
+  if ((entry.meta.schema_version ?? 1) >= 2) return entry;
+  return { meta: { ...entry.meta, schema_version: 2 }, doc: withMeasurement(entry.doc) };
+}
+// v2 must carry measurement explicitly; placed right after scale.
+export function withMeasurement(doc) {
+  if (doc.measurement) return doc;
+  const out = {};
+  for (const [k, v] of Object.entries(doc)) { out[k] = v; if (k === 'scale') out.measurement = { ...MEASUREMENT_DEFAULTS }; }
+  if (!out.measurement) out.measurement = { ...MEASUREMENT_DEFAULTS };
+  return out;
+}
 
 export function pageDimensions(size, orientation) {
   const base = PAGE_SIZES[size] || PAGE_SIZES.A4;
@@ -97,12 +123,12 @@ export function emptyTitleBlock(overrides = {}) {
   return { ...Object.fromEntries(TITLE_BLOCK_FIELDS.map(k => [k, null])), logo_key: 'pea', ...overrides };
 }
 
-export function newDocument({ size = 'A4', orientation = 'landscape', drawingType = 'floor_plan' } = {}) {
+export function newDocument({ size = 'A4', orientation = 'landscape', drawingType = 'floor_plan', schemaVersion = 1 } = {}) {
   const { width, height } = pageDimensions(size, orientation);
   const layers = drawingType === 'network_layout'
     ? [['layer-buildings', 'อาคาร'], ['layer-cables', 'แนวสาย'], ['layer-equipment', 'อุปกรณ์'], ['layer-notes', 'ข้อความ']]
     : [['layer-structure', 'โครงสร้าง'], ['layer-furniture', 'เฟอร์นิเจอร์'], ['layer-equipment', 'อุปกรณ์'], ['layer-cables', 'แนวสาย'], ['layer-notes', 'ข้อความ']];
-  return {
+  const doc = {
     page: { size, orientation, width, height, unit: 'mm', margin: 10 },
     grid: { enabled: true, spacing: 5, snap: true },
     scale: { mode: 'schematic', denominator: null },
@@ -111,6 +137,7 @@ export function newDocument({ size = 'A4', orientation = 'landscape', drawingTyp
     objects: [],
     legend: { visible: true, x: 10, y: 10, items: [] }
   };
+  return schemaVersion >= 2 ? withMeasurement(doc) : doc;
 }
 
 // Title block sits bottom-right inside the margin (fixed size, mm).
@@ -151,6 +178,23 @@ export function createPolyline(type, { points, layerId, taken, ...extra }) {
   return object;
 }
 
+// Image: box geometry in paper mm; the bytes live on the server (asset_id).
+export function createImage({ x, y, width, height, layerId, taken, assetId, label }) {
+  const object = { id: createId('image', taken), type: 'image', layer_id: layerId, x: round(x), y: round(y), width: round(width), height: round(height), rotation: 0, asset_id: assetId, fit: 'contain', opacity: 1 };
+  if (label) object.label = String(label).slice(0, 500);
+  return object;
+}
+
+// Dimension: measured from start to end along `axis`, drawn `offset` mm to
+// one side. The number shown is always computed, never stored.
+export function createDimension({ start, end, axis = 'aligned', offset = 6, fontSize = 3, layerId, taken, startRef = null, endRef = null }) {
+  return {
+    id: createId('dimension', taken), type: 'dimension', layer_id: layerId,
+    start: { x: round(start.x), y: round(start.y) }, end: { x: round(end.x), y: round(end.y) },
+    axis, offset: round(offset), font_size: fontSize, start_ref: startRef, end_ref: endRef
+  };
+}
+
 // Paper coordinates are stored to 0.1 mm.
 export const round = (n) => Math.round(Number(n) * 10) / 10;
 
@@ -160,23 +204,29 @@ export const replaceObjects = (doc, changed) => {
   return { ...doc, objects: doc.objects.map(o => changed.get(o.id) || o) };
 };
 
-// Boxes that cables reference, among `ids`.
+// The references an attached object holds to boxes.
+export const REF_KEYS = { cable: ['start', 'end'], dimension: ['start_ref', 'end_ref'] };
+const refsOf = (o) => (REF_KEYS[o.type] || []).map(k => o[k]).filter(Boolean);
+
+// Cables and dimensions attached to any box in `ids` (outside `ids`).
 export function cablesReferencing(doc, ids) {
   const set = ids instanceof Set ? ids : new Set(ids);
-  return doc.objects.filter(o => o.type === 'cable' && !set.has(o.id) && ((o.start && set.has(o.start.object_id)) || (o.end && set.has(o.end.object_id))));
+  return doc.objects.filter(o => !set.has(o.id) && refsOf(o).some(r => set.has(r.object_id)));
 }
 
-// Delete objects. Cables pointing at a deleted box are detached (that end
-// set to null, the line stays where it is) or deleted with it.
+// Delete objects. Cables and dimensions attached to a deleted box are
+// detached (that reference set to null, the line stays where it is) or
+// deleted with it.
 export function deleteObjects(doc, ids, { cables = 'detach' } = {}) {
   const set = new Set(ids);
   const affected = cablesReferencing(doc, set);
   if (cables === 'delete') affected.forEach(c => set.add(c.id));
   const objects = doc.objects.filter(o => !set.has(o.id)).map(o => {
-    if (o.type !== 'cable') return o;
-    const start = o.start && set.has(o.start.object_id) ? null : o.start;
-    const end = o.end && set.has(o.end.object_id) ? null : o.end;
-    return start === o.start && end === o.end ? o : { ...o, start, end };
+    const keys = REF_KEYS[o.type];
+    if (!keys) return o;
+    const changes = {};
+    for (const k of keys) if (o[k] && set.has(o[k].object_id)) changes[k] = null;
+    return Object.keys(changes).length ? { ...o, ...changes } : o;
   });
   return { ...doc, objects };
 }
@@ -197,6 +247,12 @@ export function duplicateObjects(doc, ids, { dx = 5, dy = 5 } = {}) {
     if (isBox(o)) { c.x = round(o.x + dx); c.y = round(o.y + dy); }
     if (isPolyline(o)) c.points = o.points.map(p => ({ x: round(p.x + dx), y: round(p.y + dy) }));
     if (o.type === 'cable') { c.start = remap(o.start); c.end = remap(o.end); }
+    if (o.type === 'dimension') {
+      c.start = { x: round(o.start.x + dx), y: round(o.start.y + dy) };
+      c.end = { x: round(o.end.x + dx), y: round(o.end.y + dy) };
+      c.start_ref = remap(o.start_ref);
+      c.end_ref = remap(o.end_ref);
+    }
     if ('asset_ref' in o) c.asset_ref = null;
     if (o.label_position) c.label_position = { ...o.label_position, x: round(o.label_position.x + dx), y: round(o.label_position.y + dy) };
     return c;
@@ -310,6 +366,16 @@ export function validateDrawing({ meta, doc }, limits = DEFAULT_LIMITS) {
     }
     if (tb.issued_date && !/^\d{4}-\d{2}-\d{2}$/.test(tb.issued_date)) return { path: 'document.title_block.issued_date', message: 'วันที่ออกแบบต้องเป็นรูปแบบ YYYY-MM-DD' };
   }
+  const v2 = (meta.schema_version ?? 1) >= 2;
+  if (!v2 && needsV2(doc)) return { path: 'schema_version', message: 'แบบนี้ต้องใช้รูปแบบข้อมูลรุ่น 2 (รูปภาพ/มาตราส่วน/เส้นบอกระยะ)' };
+  if (v2 && !doc.measurement) return { path: 'document.measurement', message: 'ไม่มีการตั้งค่าหน่วยวัด' };
+  const scale = doc.scale || {};
+  if (scale.mode === 'scaled' && !(Number.isInteger(scale.denominator) && scale.denominator >= 1 && scale.denominator <= 10000)) {
+    return { path: 'document.scale.denominator', message: 'มาตราส่วนต้องเป็นจำนวนเต็ม 1–10000' };
+  }
+  if (scale.mode !== 'scaled' && scale.denominator !== null && scale.denominator !== undefined) return { path: 'document.scale.denominator', message: 'แบบไม่ตามมาตราส่วนต้องไม่มีตัวหารมาตราส่วน' };
+  const maxImages = L.max_image_objects || IMAGE_LIMITS.max_image_objects;
+  if (doc.objects.filter(o => o.type === 'image').length > maxImages) return { path: 'document.objects', message: `รูปภาพเกิน ${maxImages} รูป` };
   const boxIds = new Set(doc.objects.filter(isBox).map(o => o.id));
   const seen = new Set();
   const inRange = (n) => Number.isFinite(n) && n >= L.coordinate_min && n <= L.coordinate_max;
@@ -332,6 +398,20 @@ export function validateDrawing({ meta, doc }, limits = DEFAULT_LIMITS) {
     if (o.type === 'cable') {
       for (const end of ['start', 'end']) {
         if (o[end] && !boxIds.has(o[end].object_id)) return { path: `${at}.${end}.object_id`, message: 'ปลายสายอ้างวัตถุที่ไม่มีแล้ว', objectId: o.id };
+      }
+    }
+    if (o.type === 'image') {
+      if (!o.asset_id) return { path: `${at}.asset_id`, message: 'รูปภาพยังไม่ได้อัปโหลด', objectId: o.id };
+      if (!(o.opacity >= 0 && o.opacity <= 1)) return { path: `${at}.opacity`, message: 'ความทึบต้องอยู่ระหว่าง 0–1', objectId: o.id };
+    }
+    if (o.type === 'dimension') {
+      if (scale.mode !== 'scaled') return { path: `${at}.type`, message: 'เส้นบอกระยะใช้ได้เฉพาะแบบที่กำหนดมาตราส่วน', objectId: o.id };
+      if (![o.start, o.end].every(pt => pt && inRange(pt.x) && inRange(pt.y))) return { path: `${at}.start`, message: 'จุดของเส้นบอกระยะอยู่นอกช่วงที่อนุญาต', objectId: o.id };
+      const along = o.axis === 'horizontal' ? Math.abs(o.end.x - o.start.x) : o.axis === 'vertical' ? Math.abs(o.end.y - o.start.y) : Math.hypot(o.end.x - o.start.x, o.end.y - o.start.y);
+      if (!(along > 0)) return { path: `${at}.end`, message: 'เส้นบอกระยะต้องมีความยาวตามแนวที่วัด', objectId: o.id };
+      if (!(o.font_size > 0 && o.font_size <= 200)) return { path: `${at}.font_size`, message: 'ขนาดตัวอักษรไม่ถูกต้อง', objectId: o.id };
+      for (const k of ['start_ref', 'end_ref']) {
+        if (o[k] && !boxIds.has(o[k].object_id)) return { path: `${at}.${k}.object_id`, message: 'เส้นบอกระยะอ้างวัตถุที่ไม่มีแล้ว', objectId: o.id };
       }
     }
   }

@@ -1,7 +1,7 @@
 // Starting points for a new drawing. They carry shapes and generic labels
 // only -- no registered equipment ids, people or office names: the user
 // picks the office and links real equipment themselves.
-import { createBox, createPolyline, newDocument } from './officeDrawingDocument.js';
+import { createBox, createPolyline, newDocument, withMeasurement } from './officeDrawingDocument.js';
 import { anchorPoint } from './officeDrawingGeometry.js';
 
 export const TEMPLATES = [
@@ -97,8 +97,9 @@ function networkLayout() {
   return doc;
 }
 
-export function templateDocument(key, { size, orientation, drawingType } = {}) {
-  if (key === 'floor_plan') return floorPlan();
-  if (key === 'network_layout') return networkLayout();
-  return newDocument({ size, orientation, drawingType });
+// schemaVersion: what the server creates by default (capabilities). v2
+// documents carry measurement; templates stay schematic either way.
+export function templateDocument(key, { size, orientation, drawingType, schemaVersion = 1 } = {}) {
+  const doc = key === 'floor_plan' ? floorPlan() : key === 'network_layout' ? networkLayout() : newDocument({ size, orientation, drawingType });
+  return schemaVersion >= 2 ? withMeasurement(doc) : doc;
 }

@@ -4,7 +4,7 @@ import { DIST_LIMIT, expiryRanges, formatCount, typeBreakdown } from './officeDa
 import { EXPIRY_LABELS } from './officeDashboardState.js';
 import { BarRow, Pager, Panel } from './dashboardParts.jsx';
 
-const GROUP_BY_LABELS = { site: 'สำนักงานตามทะเบียน', department: 'แผนก', equipment_type: 'ประเภท', status: 'สถานะ' };
+const GROUP_BY_LABELS = { site: 'สำนักงานในระบบ', department: 'แผนก', equipment_type: 'ประเภท', status: 'สถานะ' };
 const DIMENSION_OF = { site: 'pea_site_id', department: 'department', equipment_type: 'equipment_type', status: 'status' };
 
 export default function OverviewTab({ state, nonce, onDrill, onChange }) {
@@ -20,7 +20,7 @@ export default function OverviewTab({ state, nonce, onDrill, onChange }) {
 
   const kpis = s ? [
     { label: totalLabel, icon: Cpu, value: s.total_equipment, drill: [{}] },
-    { label: 'สำนักงานตามทะเบียน', icon: Building2, value: s.registered_site_count },
+    { label: 'สำนักงานในระบบ', icon: Building2, value: s.registered_site_count },
     { label: 'มีผู้ครอบครอง', icon: UserCheck, value: s.assigned_owner_count },
     { label: 'ไม่มีผู้ครอบครอง', icon: UserX, value: s.missing_owner_count, drill: [{}, { issue: 'missing_owner' }], warn: true }
   ] : [];
@@ -64,7 +64,7 @@ export default function OverviewTab({ state, nonce, onDrill, onChange }) {
               ))}
             </ul>
             <h3 className="oed-subhead">วันสิ้นสุดสัญญา</h3>
-            <p className="list-muted">ยอด 90/180/365 วันเป็นยอดสะสม (ภายใน 180 วันรวมยอดภายใน 90 วันแล้ว) · ช่วงแยก: 0–90 วัน {formatCount(ranges.d0_90)} · 91–180 วัน {formatCount(ranges.d91_180)} · 181–365 วัน {formatCount(ranges.d181_365)} {unit}</p>
+            <p className="list-muted">แสดงข้อมูลเป็นยอดสะสม · *ช่วงแยก: 0–90 วัน {formatCount(ranges.d0_90)} · 91–180 วัน {formatCount(ranges.d91_180)} · 181–365 วัน {formatCount(ranges.d181_365)} {unit}</p>
             <ul className="oed-kpis oed-kpis-small">
               {expiryCards.map(([bucket, value, tone]) => (
                 <li key={bucket}>
@@ -128,10 +128,10 @@ export default function OverviewTab({ state, nonce, onDrill, onChange }) {
       </Panel>
 
       <Panel id="oed-quality" title="ข้อมูลที่ควรตรวจสอบ" resource={quality}
-        subtitle={q ? `อุปกรณ์ที่มีปัญหาอย่างน้อย 1 ข้อ ${formatCount(q.equipment_with_issues)} จาก ${formatCount(q.equipment_total)} ${unit}` : null}>
+        subtitle={q ? `อุปกรณ์ที่ข้อมูลอาจไม่ถูกต้อง ${formatCount(q.equipment_with_issues)} จาก ${formatCount(q.equipment_total)} ${unit}` : null}>
         {q && (
           <>
-            <p className="list-muted oed-note">เครื่องหนึ่งอาจมีหลายปัญหา ยอดแต่ละข้อจึงรวมกันไม่เท่ากับจำนวนเครื่องที่ควรตรวจสอบ</p>
+            <p className="list-muted oed-note">รายการอุปกรณ์ที่ต้องตรวจสอบรายละเอียดเพิ่มเติม</p>
             <ul className="oed-issues">
               {q.issues.map(issue => (
                 <li key={issue.code}>

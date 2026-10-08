@@ -1,7 +1,8 @@
 // Geometry for the drawing editor: rotation, anchors, hit tests, snapping,
 // and edits that keep attached cable ends on their boxes. Paper mm, y down,
 // box rotation clockwise in degrees around the box centre. Pure.
-import { isBox, isPolyline, renderOrder, round, isEditableObject } from './officeDrawingDocument.js';
+import { ANCHORS, isBox, isPolyline, renderOrder, round, isEditableObject } from './officeDrawingDocument.js';
+import { dimensionGeometry } from './officeDrawingMeasure.js';
 
 const RAD = Math.PI / 180;
 
@@ -27,15 +28,19 @@ export function anchorPoint(box, anchor = 'center') {
     top: { x: c.x, y: box.y },
     bottom: { x: c.x, y: box.y + box.height },
     left: { x: box.x, y: c.y },
-    right: { x: box.x + box.width, y: c.y }
+    right: { x: box.x + box.width, y: c.y },
+    top_left: { x: box.x, y: box.y },
+    top_right: { x: box.x + box.width, y: box.y },
+    bottom_left: { x: box.x, y: box.y + box.height },
+    bottom_right: { x: box.x + box.width, y: box.y + box.height }
   }[anchor] || c;
   return fromLocal(box, local);
 }
 
-export function nearestAnchor(box, p) {
+export function nearestAnchor(box, p, anchors = ANCHORS) {
   let best = 'center';
   let bestD = Infinity;
-  for (const a of ['center', 'top', 'right', 'bottom', 'left']) {
+  for (const a of anchors) {
     const q = anchorPoint(box, a);
     const d = Math.hypot(q.x - p.x, q.y - p.y);
     if (d < bestD) { bestD = d; best = a; }
@@ -89,6 +94,10 @@ export function hitTest(doc, p, { tolerance = 1.5, includeLocked = false, boxesO
     if (!layer || layer.visible === false || (!includeLocked && layer.locked)) continue;
     if (isBox(o) && pointInBox(p, o, tolerance / 2)) return o;
     if (!boxesOnly && isPolyline(o) && distanceToPolyline(p, o.points) <= tolerance + (o.type === 'wall' ? (o.thickness || 0) / 2 : 0)) return o;
+    if (!boxesOnly && o.type === 'dimension') {
+      const g = dimensionGeometry(o);
+      if (distanceToSegment(p, g.a, g.b) <= tolerance || distanceToSegment(p, g.mid, { x: g.mid.x, y: g.mid.y - o.font_size }) <= tolerance) return o;
+    }
   }
   return null;
 }
@@ -98,7 +107,8 @@ export function objectsInRect(doc, r) {
   const x1 = Math.min(r.x1, r.x2); const x2 = Math.max(r.x1, r.x2);
   const y1 = Math.min(r.y1, r.y2); const y2 = Math.max(r.y1, r.y2);
   const inside = (p) => p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2;
-  return doc.objects.filter(o => isEditableObject(doc, o) && (isBox(o) ? boxCorners(o) : o.points || []).every(inside)).map(o => o.id);
+  const pointsOf = (o) => (isBox(o) ? boxCorners(o) : o.type === 'dimension' ? [o.start, o.end] : o.points || []);
+  return doc.objects.filter(o => isEditableObject(doc, o) && pointsOf(o).every(inside)).map(o => o.id);
 }
 
 export const snapValue = (v, spacing) => (spacing > 0 ? Math.round(v / spacing) * spacing : v);
@@ -127,6 +137,20 @@ export function reattachCables(doc, boxIds = null) {
     if (points.every((pt, i) => pt.x === o.points[i].x && pt.y === o.points[i].y)) return o;
     changed = true;
     return { ...o, points };
+  }).map(o => {
+    // Dimension ends attached to boxes follow them the same way.
+    if (o.type !== 'dimension') return o;
+    const changes = {};
+    for (const [refKey, ptKey] of [['start_ref', 'start'], ['end_ref', 'end']]) {
+      const box = o[refKey] && boxes.get(o[refKey].object_id);
+      if (!box || (touched && !touched.has(box.id) && !touched.has(o.id))) continue;
+      const a = anchorPoint(box, o[refKey].anchor);
+      const q = { x: round(a.x), y: round(a.y) };
+      if (q.x !== o[ptKey].x || q.y !== o[ptKey].y) changes[ptKey] = q;
+    }
+    if (!Object.keys(changes).length) return o;
+    changed = true;
+    return { ...o, ...changes };
   });
   return changed ? { ...doc, objects } : doc;
 }
@@ -137,6 +161,7 @@ export function moveObjects(doc, ids, dx, dy) {
   const objects = doc.objects.map(o => {
     if (!set.has(o.id)) return o;
     if (isBox(o)) return { ...o, x: round(o.x + dx), y: round(o.y + dy) };
+    if (o.type === 'dimension') return { ...o, start: { x: round(o.start.x + dx), y: round(o.start.y + dy) }, end: { x: round(o.end.x + dx), y: round(o.end.y + dy) } };
     if (isPolyline(o)) {
       const moved = { ...o, points: o.points.map(p => ({ x: round(p.x + dx), y: round(p.y + dy) })) };
       if (o.label_position) moved.label_position = { ...o.label_position, x: round(o.label_position.x + dx), y: round(o.label_position.y + dy) };
@@ -168,6 +193,21 @@ export function resizeBox(box, handle, pointer) {
   // New centre in the old local frame -> paper (rotation unchanged).
   const c = fromLocal(box, { x: left + width / 2, y: top + height / 2 });
   return { x: round(c.x - width / 2), y: round(c.y - height / 2), width: round(width), height: round(height) };
+}
+
+// Corner drag that keeps the box's proportions (images by default).
+// Edge handles stay free: they change one side on purpose.
+export function resizeBoxKeepRatio(box, handle, pointer) {
+  const r = resizeBox(box, handle, pointer);
+  if (handle.length !== 2) return r;
+  const ratio = box.width / box.height;
+  let w = r.width;
+  let h = r.height;
+  if (w / h > ratio) w = h * ratio; else h = w / ratio;
+  const ox = handle.includes('w') ? box.x + box.width : box.x;
+  const oy = handle.includes('n') ? box.y + box.height : box.y;
+  const corner = { x: ox + (handle.includes('w') ? -w : w), y: oy + (handle.includes('n') ? -h : h) };
+  return resizeBox(box, handle, fromLocal(box, corner));
 }
 
 // Rotation from a handle dragged around the centre (handle sits above the
@@ -205,4 +245,67 @@ export function rectFromDrag(a, b, min = 2) {
   const x = Math.min(a.x, b.x);
   const y = Math.min(a.y, b.y);
   return { x: round(x), y: round(y), width: round(Math.max(min, Math.abs(b.x - a.x))), height: round(Math.max(min, Math.abs(b.y - a.y))) };
+}
+
+// ---- object snapping ----
+// Points worth snapping to near `p` (paper mm), best first:
+//   vertex   -- an end or bend of a wall/cable, or a dimension end
+//   anchor   -- a box corner, edge middle or centre
+//   segment  -- the nearest point along a wall/cable
+// Only visible, unlocked layers; `exclude` skips objects being edited.
+const BOX_SNAP_ANCHORS = ['top_left', 'top_right', 'bottom_left', 'bottom_right', 'top', 'right', 'bottom', 'left', 'center'];
+export function findSnap(doc, p, { tolerance = 2, exclude = null, extraPoints = [] } = {}) {
+  let best = null;
+  const consider = (q, kind, objectId, rank) => {
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d > tolerance) return;
+    if (!best || rank < best.rank || (rank === best.rank && d < best.d)) best = { x: q.x, y: q.y, kind, objectId, rank, d };
+  };
+  for (const e of extraPoints) consider(e.point, e.kind, e.objectId ?? null, 0);
+  for (const o of doc.objects) {
+    if (exclude && exclude.has(o.id)) continue;
+    const layer = doc.layers.find(l => l.id === o.layer_id);
+    if (!layer || layer.visible === false || layer.locked) continue;
+    if (isPolyline(o)) {
+      o.points.forEach(q => consider(q, 'vertex', o.id, 0));
+      for (let i = 1; i < o.points.length; i += 1) consider(closestOnSegment(p, o.points[i - 1], o.points[i]), 'segment', o.id, 2);
+    } else if (o.type === 'dimension') {
+      consider(o.start, 'vertex', o.id, 0);
+      consider(o.end, 'vertex', o.id, 0);
+    } else if (isBox(o)) {
+      for (const a of BOX_SNAP_ANCHORS) consider(anchorPoint(o, a), 'anchor', o.id, 1);
+    }
+  }
+  if (!best) return null;
+  return { x: round(best.x), y: round(best.y), kind: best.kind, objectId: best.objectId };
+}
+
+export function closestOnSegment(p, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2)) : 0;
+  return { x: a.x + t * dx, y: a.y + t * dy };
+}
+
+// Moving objects: the smallest shift that puts one of the moving boxes'
+// anchors (or the moving lines' points) onto another object's snap point.
+export function snapMove(doc, ids, dx, dy, tolerance) {
+  const set = new Set(ids);
+  const own = [];
+  for (const o of doc.objects) {
+    if (!set.has(o.id)) continue;
+    if (isBox(o)) BOX_SNAP_ANCHORS.forEach(a => own.push(anchorPoint(o, a)));
+    else if (isPolyline(o)) own.push(...o.points);
+    else if (o.type === 'dimension') own.push(o.start, o.end);
+  }
+  let best = null;
+  for (const q of own.slice(0, 200)) {
+    const moved = { x: q.x + dx, y: q.y + dy };
+    const s = findSnap(doc, moved, { tolerance, exclude: set });
+    if (!s) continue;
+    const d = Math.hypot(s.x - moved.x, s.y - moved.y);
+    if (!best || d < best.d) best = { d, dx: dx + (s.x - moved.x), dy: dy + (s.y - moved.y), snap: s };
+  }
+  return best;
 }

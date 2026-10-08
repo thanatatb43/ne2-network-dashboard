@@ -5,7 +5,9 @@ import {
 } from 'lucide-react';
 import ConfirmDialog from '../../equipment-form/ConfirmDialog.jsx';
 import '../../equipment-form/ConfirmDialog.css';
-import { cablesReferencing, deleteObjects, duplicateObjects } from '../officeDrawingDocument.js';
+import { allIds, cablesReferencing, createImage, deleteObjects, duplicateObjects, isScaled } from '../officeDrawingDocument.js';
+import { imageFileProblem } from '../officeDrawingApi.js';
+import ScaleDialog from './ScaleDialog.jsx';
 import { moveObjects } from '../officeDrawingGeometry.js';
 import DrawingCanvas from './DrawingCanvas.jsx';
 import { LINE_TOOLS } from './editorTools.js';
@@ -20,7 +22,8 @@ const typingIn = (el) => el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'S
 export default function DrawingEditor({
   entry, onCommit, canUndo, canRedo, onUndo, onRedo, readOnly, readOnlyNote, status, onSave, saving, dirty,
   caps, siteId, siteName, token, linkFor, linkStates, linksError, onRetryLinks, canLink, onAssetPicked,
-  onBackToList, menu, banners, focusObjectId
+  onBackToList, menu, banners, focusObjectId,
+  imageSources, assetMeta, imagesAllowed, imageLimits, onUploadImage
 }) {
   const { meta, doc } = entry;
   const [tool, setTool] = useState('select');
@@ -37,6 +40,93 @@ export default function DrawingEditor({
   const [panelOpen, setPanelOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const canvasRef = useRef(null);
+  const fileRef = useRef(null);
+  const objectClipboard = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [notice, setNotice] = useState(null);   // public-image notice, resolves a promise
+  const [scaleOpen, setScaleOpen] = useState(false);
+
+  // Images saved in a drawing become as public as the drawing itself: say so
+  // once per browser session before the first upload.
+  const NOTICE_KEY = 'ne2.drawingImageNotice';
+  const confirmPublic = () => {
+    try { if (sessionStorage.getItem(NOTICE_KEY)) return Promise.resolve(true); } catch { /* ask */ }
+    return new Promise(resolve => setNotice({ resolve }));
+  };
+
+  // Upload then place: fitted inside half the paper (max 120 x 90 mm),
+  // proportions from the decoded image, centred where the user looks/drops.
+  const insertImages = async (files, at = null) => {
+    if (readOnly || !imagesAllowed || uploading || !files.length) return;
+    const problem = files.map(f => imageFileProblem(f, imageLimits)).find(Boolean);
+    if (problem) { toast.error(problem); return; }
+    if (!(await confirmPublic())) return;
+    setUploading(true);
+    let current = doc;
+    const placed = [];
+    const centre = at || canvasRef.current?.viewCenter() || { x: doc.page.width / 2, y: doc.page.height / 2 };
+    try {
+      for (const [i, file] of files.entries()) {
+        const r = await onUploadImage(file);
+        if (!r.ok) { toast.error(r.message, { duration: 8000 }); continue; }
+        const a = r.data;
+        const maxW = Math.min(120, doc.page.width * 0.5);
+        const maxH = Math.min(90, doc.page.height * 0.5);
+        const ratio = (a.width_px || 4) / (a.height_px || 3);
+        let w = maxW;
+        let h = w / ratio;
+        if (h > maxH) { h = maxH; w = h * ratio; }
+        const layer = doc.layers.find(l => l.id === layerValid && !l.locked && l.visible !== false) || doc.layers.find(l => !l.locked && l.visible !== false);
+        if (!layer) { toast.error('ไม่มีชั้นที่แก้ไขได้สำหรับวางรูป'); break; }
+        const o = createImage({ x: centre.x - w / 2 + i * 5, y: centre.y - h / 2 + i * 5, width: w, height: h, layerId: layer.id, taken: allIds(current), assetId: a.id, label: file.name ? file.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 100) : null });
+        current = { ...current, objects: [...current.objects, o] };
+        placed.push(o.id);
+      }
+    } finally {
+      setUploading(false);
+    }
+    if (placed.length) { commitDoc(current); setSelection(placed); setTool('select'); }
+  };
+
+  // Ctrl+V of an image anywhere in the editor (not while typing in a field).
+  useEffect(() => {
+    const onCopy = (e) => {
+      if (readOnly || typingIn(document.activeElement) || document.querySelector('[aria-modal="true"]') || !e.clipboardData) return;
+      const objects = doc.objects.filter(o => selection.includes(o.id));
+      if (!objects.length) return;
+      const marker = `office-drawing-objects:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+      objectClipboard.current = { marker, objects: structuredClone(objects) };
+      e.clipboardData.setData('text/plain', marker);
+      e.preventDefault();
+      toast.success(`คัดลอก ${objects.length} วัตถุแล้ว กด Ctrl+V เพื่อวางในแบบนี้`);
+    };
+    const onPaste = (e) => {
+      if (typingIn(document.activeElement) || document.querySelector('[aria-modal="true"]')) return;
+      const copied = objectClipboard.current;
+      if (copied && e.clipboardData?.getData('text/plain') === copied.marker) {
+        e.preventDefault();
+        if (readOnly || uploading) return;
+        const layer = doc.layers.find(l => l.id === layerValid && !l.locked && l.visible !== false);
+        if (!layer) { toast.error('กรุณาเลือกชั้นที่มองเห็นและแก้ไขได้ก่อนวาง'); return; }
+        const ids = new Set(copied.objects.map(o => o.id));
+        const source = { ...doc, objects: [...doc.objects.filter(o => !ids.has(o.id)), ...copied.objects.map(o => ({ ...o, layer_id: layer.id }))] };
+        const result = duplicateObjects(source, [...ids], { dx: doc.grid?.spacing || 5, dy: doc.grid?.spacing || 5 });
+        const placed = result.doc.objects.filter(o => result.ids.includes(o.id));
+        commitDoc({ ...doc, objects: [...doc.objects, ...placed] });
+        setSelection(result.ids);
+        setTool('select');
+        return;
+      }
+      const files = [...(e.clipboardData?.items || [])].filter(it => it.kind === 'file' && it.type.startsWith('image/')).map(it => it.getAsFile()).filter(Boolean);
+      if (!files.length) return;
+      e.preventDefault();
+      if (readOnly || !imagesAllowed) { toast.error(readOnly ? 'โหมดดูอย่างเดียว วางรูปไม่ได้' : 'เซิร์ฟเวอร์ยังไม่รองรับรูปภาพในแบบ'); return; }
+      insertImages(files);
+    };
+    window.addEventListener('paste', onPaste);
+    window.addEventListener('copy', onCopy);
+    return () => { window.removeEventListener('paste', onPaste); window.removeEventListener('copy', onCopy); };
+  });
 
   // Selection follows the document (undo can remove what was selected).
   const liveSelection = selection.filter(id => id === '__legend' ? Boolean(doc.legend) : doc.objects.some(o => o.id === id));
@@ -158,7 +248,8 @@ export default function DrawingEditor({
       <div className="od-workspace">
         {!readOnly && (
           <DrawingToolbar tool={tool} onTool={chooseTool} options={toolOptions} onOptions={(c) => setToolOptions(o => ({ ...o, ...c }))}
-            symbolKeys={caps.symbolKeys} cableStyles={caps.cableStyles} axisLock={axisLock} onAxisLock={setAxisLock} />
+            symbolKeys={caps.symbolKeys} cableStyles={caps.cableStyles} axisLock={axisLock} onAxisLock={setAxisLock}
+            scaled={isScaled(doc)} imagesAllowed={imagesAllowed} uploading={uploading} onImage={() => fileRef.current?.click()} />
         )}
         <div className="od-stage">
           <div className="od-viewbar" role="toolbar" aria-label="มุมมอง">
@@ -174,13 +265,17 @@ export default function DrawingEditor({
             selection={liveSelection} onSelect={setSelection} onCommit={commitDoc} onToolDone={() => setTool('select')}
             onMessage={(m) => toast.error(m, { id: 'od-tool' })}
             scale={scale} onScale={setScale} showGrid={showGrid} snap={snap} axisLock={axisLock}
-            cableStyles={caps.cableStyles} linkStates={linkStates} siteName={siteName} />
+            cableStyles={caps.cableStyles} linkStates={linkStates} siteName={siteName}
+            imageSources={imageSources} onDropFiles={imagesAllowed ? (files, at) => insertImages(files, at) : null} />
+          <input ref={fileRef} type="file" accept={(imageLimits?.image_formats || ['image/png', 'image/jpeg', 'image/webp']).join(',')} multiple hidden
+            onChange={e => { const files = [...e.target.files]; e.target.value = ''; insertImages(files); }} />
         </div>
         <aside className="od-panel" aria-label="คุณสมบัติ">
           <DrawingInspector doc={doc} meta={meta} selection={liveSelection} readOnly={readOnly} onDoc={commitDoc} onMeta={commitMeta}
             cableStyles={caps.cableStyles} symbolKeys={caps.symbolKeys} limits={caps.limits}
             linkFor={linkFor} canLink={canLink} linksError={linksError} onRetryLinks={onRetryLinks}
             onPick={(o) => setPicker(o)} onDelete={requestDelete} onDuplicate={duplicate}
+            assetMeta={assetMeta} imageSources={imageSources} onScale={() => setScaleOpen(true)}
             activeLayerId={layerValid} onActiveLayer={setActiveLayerId} />
         </aside>
       </div>
@@ -196,11 +291,16 @@ export default function DrawingEditor({
           }} />
       )}
       <ConfirmDialog open={Boolean(confirmDelete)} tone="danger" title="ลบวัตถุที่มีสายต่ออยู่"
-        message={confirmDelete && <>มีแนวสาย {confirmDelete.cables} เส้นต่อกับวัตถุที่จะลบ เลือกว่าจะเก็บเส้นไว้ (ถอดปลายที่ต่อ) หรือลบเส้นด้วย<br />
+        message={confirmDelete && <>มีแนวสายหรือเส้นบอกระยะ {confirmDelete.cables} เส้นยึดกับวัตถุที่จะลบ เลือกว่าจะเก็บเส้นไว้ (ถอดจุดที่ยึด) หรือลบเส้นด้วย<br />
           <button type="button" className="list-button" style={{ marginTop: 12 }} onClick={() => { commitDoc(deleteObjects(doc, confirmDelete.ids, { cables: 'detach' })); setConfirmDelete(null); setSelection([]); }}>ลบวัตถุ เก็บเส้นไว้</button></>}
         confirmLabel="ลบพร้อมเส้นที่ต่อ" onCancel={() => setConfirmDelete(null)}
         onConfirm={() => { commitDoc(deleteObjects(doc, confirmDelete.ids, { cables: 'delete' })); setConfirmDelete(null); setSelection([]); }} />
-      {printOpen && <DrawingPrintPreview doc={doc} cableStyles={caps.cableStyles} siteName={siteName} title={meta.name} onClose={() => setPrintOpen(false)} />}
+      {printOpen && <DrawingPrintPreview doc={doc} cableStyles={caps.cableStyles} siteName={siteName} title={meta.name} imageSources={imageSources} onClose={() => setPrintOpen(false)} />}
+      {scaleOpen && <ScaleDialog doc={doc} onClose={() => setScaleOpen(false)} onApply={(next) => { setScaleOpen(false); commitDoc(next); }} />}
+      <ConfirmDialog open={Boolean(notice)} title="รูปภาพในแบบเปิดให้ทุกคนดูได้"
+        message="แบบสำนักงานเปิดดูได้โดยไม่ต้องเข้าสู่ระบบ รูปที่บันทึกลงแบบจะดูได้เช่นเดียวกับแบบ อย่าใช้รูปที่มีข้อมูลส่วนบุคคลหรือข้อมูลที่ไม่ควรเปิดเผย (รูปที่เคยมีผู้ดาวน์โหลดไปแล้วเรียกคืนไม่ได้)"
+        confirmLabel="เข้าใจแล้ว วางรูป" onCancel={() => { notice.resolve(false); setNotice(null); }}
+        onConfirm={() => { try { sessionStorage.setItem(NOTICE_KEY, '1'); } catch { /* ask again next time */ } notice.resolve(true); setNotice(null); }} />
     </div>
   );
 }

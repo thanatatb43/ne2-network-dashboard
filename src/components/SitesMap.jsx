@@ -309,8 +309,8 @@ const SitesMap = ({ onDeviceClick, intro = null }) => {
         <div>
           <h1>แผนที่สำนักงาน กฟฉ.2</h1>
           <p>
-            สถานะอุปกรณ์เครือข่ายที่ผูกกับแต่ละสำนักงาน (นับเฉพาะสำนักงานที่มีอุปกรณ์และ IP)
-            {loadedAt && <> · โหลดล่าสุด {timeLabel} · อัปเดตทุก 1 นาที{latestCheck && <> · ตรวจวัดล่าสุด {latestCheck.toLocaleTimeString('th-TH')}</>}</>}
+            สถานะอุปกรณ์คอมพิวเตอร์และเครือข่ายของสำนักงาน กฟฉ.2
+            {loadedAt && <> · ข้อมูลล่าสุด {timeLabel} · อัปเดตทุก 1 นาที{latestCheck && <> · ผลตรวจ {latestCheck.toLocaleTimeString('th-TH')}</>}</>}
           </p>
         </div>
         <div className="list-actions">

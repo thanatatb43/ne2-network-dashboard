@@ -1,12 +1,13 @@
 import { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import DrawingSheet from '../rendering/DrawingRenderer.jsx';
 import {
-  createBox, createPolyline, allIds, isBox, isPolyline, legendRect, round, DEFAULT_SIZES
+  createBox, createDimension, createPolyline, allIds, isBox, isPolyline, legendRect, round, DEFAULT_SIZES, DIMENSION_ANCHORS
 } from '../officeDrawingDocument.js';
 import {
   anchorPoint, boxCorners, hitTest, insertVertex, removeVertex, lockAxis, moveObjects, moveVertex, nearestAnchor, objectsInRect,
-  rectFromDrag, resizeBox, rotationFromPointer, snapPoint, updateBox, boxCenter
+  rectFromDrag, resizeBox, resizeBoxKeepRatio, rotationFromPointer, snapPoint, updateBox, boxCenter, findSnap, snapMove
 } from '../officeDrawingGeometry.js';
+import { dimensionGeometry, formatPaper, isScaledDoc, polylineLength, sizeLabel } from '../officeDrawingMeasure.js';
 
 import { LINE_TOOLS, PLACE_TOOLS, RECT_TOOLS } from './editorTools.js';
 const HANDLE_PX = 9;
@@ -24,7 +25,7 @@ const handlePoint = (b, dir) => {
 // Pan, zoom, selection and the preview never touch history or dirty state.
 export default function DrawingCanvas({
   ref, doc, readOnly, tool, toolOptions, activeLayerId, selection, onSelect, onCommit, onToolDone, onMessage,
-  scale, onScale, showGrid, snap, axisLock, cableStyles, linkStates, siteName
+  scale, onScale, showGrid, snap, axisLock, cableStyles, linkStates, siteName, imageSources, onDropFiles
 }) {
   const scrollRef = useRef(null);
   const svgRef = useRef(null);
@@ -33,11 +34,27 @@ export default function DrawingCanvas({
   const [overlay, setOverlay] = useState(null);      // marquee / new rect / line draft
   const [hover, setHover] = useState(null);          // cable tool: box + anchor under pointer
   const [panning, setPanning] = useState(false);
+  const [snapMark, setSnapMark] = useState(null);     // object snap shown under the pointer
   // The preview shown last, committed at pointer up (state may lag a frame).
   const lastPreview = useRef(null);
   const showPreview = (d) => { lastPreview.current = d; setPreview(d); };
   const shown = preview || doc;
   const sn = (p) => (snap ? snapPoint(p, { snap: true, spacing: doc.grid?.spacing || 5 }) : { x: round(p.x), y: round(p.y) });
+  // Object snap (other lines' ends/bends/segments, box corners/edges/centre)
+  // wins over the grid when the pointer is within a few screen pixels.
+  const snapTol = 9 / scale;
+  const objSnap = (p, exclude = null, extraPoints = []) => {
+    if (!snap) return null;
+    const s = findSnap(doc, p, { tolerance: snapTol, exclude, extraPoints });
+    // Along a line, prefer the grid point when it lies on that same line.
+    if (s?.kind === 'segment') {
+      const g = sn(p);
+      const on = findSnap(doc, g, { tolerance: 0.05, exclude });
+      if (on && on.objectId === s.objectId && Math.hypot(g.x - p.x, g.y - p.y) <= snapTol) return { ...s, x: g.x, y: g.y };
+    }
+    return s;
+  };
+  const snapAll = (p, exclude = null) => { const s = objSnap(p, exclude); return s ? { x: s.x, y: s.y } : sn(p); };
 
   const toDoc = (e) => {
     const svg = svgRef.current;
@@ -84,6 +101,7 @@ export default function DrawingCanvas({
     lastPreview.current = null;
     setPreview(null);
     setHover(null);
+    setSnapMark(null);
     if (g?.kind === 'line' || overlay) setOverlay(null);
     return Boolean(g);
   }
@@ -107,7 +125,31 @@ export default function DrawingCanvas({
     return true;
   }
 
-  useImperativeHandle(ref, () => ({ fit, cancel: cancelGesture, finishLine }));
+  // Paper point at the middle of what is on screen (where pasted images go).
+  const viewCenter = () => {
+    const el = scrollRef.current;
+    const svg = svgRef.current;
+    if (!el || !svg) return { x: doc.page.width / 2, y: doc.page.height / 2 };
+    const r = el.getBoundingClientRect();
+    const p = toDoc({ clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 });
+    const clamp = (v, max) => Math.max(0, Math.min(max, v));
+    return { x: clamp(p.x, doc.page.width), y: clamp(p.y, doc.page.height) };
+  };
+
+  useImperativeHandle(ref, () => ({ fit, cancel: cancelGesture, finishLine, viewCenter }));
+
+  // Snap a dimension end to a box anchor (corners included) under the pointer.
+  const dimPoint = (p, exclude) => {
+    const box = boxUnder(p, exclude);
+    if (!box) { const s = objSnap(p, exclude); return { q: s ? { x: s.x, y: s.y } : sn(p), ref: null, hover: null }; }
+    const anchor = nearestAnchor(box, p, DIMENSION_ANCHORS);
+    const a = anchorPoint(box, anchor);
+    return { q: { x: round(a.x), y: round(a.y) }, ref: { object_id: box.id, anchor }, hover: { box, anchor } };
+  };
+  const dimAxis = (a, b, force) => {
+    if (!force) return 'aligned';
+    return Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? 'horizontal' : 'vertical';
+  };
 
   const layerUsable = () => {
     const layer = doc.layers.find(l => l.id === activeLayerId);
@@ -137,7 +179,8 @@ export default function DrawingCanvas({
     }
 
     const handle = e.target.closest?.('[data-handle]')?.getAttribute('data-handle');
-    if (handle && selection.length === 1) {
+    // Handles belong to the select tool; while drawing, a click is a new point.
+    if (handle && tool === 'select' && selection.length === 1) {
       const o = doc.objects.find(x => x.id === selection[0]);
       if (o) {
         const [kind, arg] = handle.split(':');
@@ -153,9 +196,31 @@ export default function DrawingCanvas({
         return;
       }
     }
-    if (handle === 'legend') {
+    if (handle === 'legend' && tool === 'select') {
       gesture.current = { kind: 'legend', base: doc, start: p, orig: { x: doc.legend.x, y: doc.legend.y } };
       e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    if (tool === 'dimension') {
+      if (!isScaledDoc(doc)) { onMessage?.('เส้นบอกระยะใช้ได้เมื่อกำหนดมาตราส่วนของแบบแล้ว (แผงขวา > มาตราส่วน)'); return; }
+      if (!layerUsable()) return;
+      const { q, ref } = dimPoint(p);
+      const g = gesture.current?.kind === 'dim' ? gesture.current : null;
+      if (!g) {
+        gesture.current = { kind: 'dim', start: q, startRef: ref };
+        setOverlay({ kind: 'dim', start: q, end: q });
+        return;
+      }
+      if (q.x === g.start.x && q.y === g.start.y) return;
+      const axis = dimAxis(g.start, q, axisLock || e.shiftKey);
+      const o = createDimension({ start: g.start, end: q, axis, offset: axis === 'vertical' ? -6 : axis === 'horizontal' ? -6 : 6, layerId: activeLayerId, taken: allIds(doc), startRef: g.startRef, endRef: ref });
+      gesture.current = null;
+      setOverlay(null);
+      setHover(null);
+      if (!(axis === 'horizontal' ? Math.abs(q.x - g.start.x) : axis === 'vertical' ? Math.abs(q.y - g.start.y) : 1)) { onMessage?.('จุดปลายต้องห่างกันตามแนวที่วัด'); return; }
+      onCommit({ ...doc, objects: [...doc.objects, o] });
+      onSelect([o.id]);
       return;
     }
 
@@ -165,19 +230,27 @@ export default function DrawingCanvas({
       if (e.detail >= 2 && g) { finishLine(); return; }
       let q = sn(p);
       let ref = null;
+      let joins = false;
       if (tool === 'cable') {
         const box = boxUnder(p);
         if (box) { const anchor = nearestAnchor(box, p); const a = anchorPoint(box, anchor); q = { x: round(a.x), y: round(a.y) }; ref = { object_id: box.id, anchor }; }
       }
-      if (g && (axisLock || e.shiftKey) && !ref) q = lockAxis(g.points[g.points.length - 1], q);
+      if (!ref) {
+        // Back on its own first point closes the shape.
+        const close = g && g.points.length >= 2 ? [{ point: g.points[0], kind: 'close' }] : [];
+        const s = objSnap(p, null, close);
+        if (s) { q = { x: s.x, y: s.y }; joins = Boolean(g) && ['vertex', 'segment', 'close'].includes(s.kind); }
+        else if (g && (axisLock || e.shiftKey)) q = lockAxis(g.points[g.points.length - 1], q);
+      }
       if (!g) {
         gesture.current = { kind: 'line', type: tool, points: [q], start: ref, end: null };
       } else {
         const last = g.points[g.points.length - 1];
         if (last.x === q.x && last.y === q.y) return;
         gesture.current = { ...g, points: [...g.points, q], end: ref };
-        // Clicking a box ends a cable there.
-        if (tool === 'cable' && ref) { finishLine(); return; }
+        // One click is enough when the line ends on a box (cable) or meets
+        // another line / its own start: no double-click needed.
+        if ((tool === 'cable' && ref) || joins) { setSnapMark(null); finishLine(); return; }
       }
       setOverlay({ kind: 'line', points: gesture.current.points, cursor: q });
       return;
@@ -195,7 +268,7 @@ export default function DrawingCanvas({
 
     if (RECT_TOOLS.includes(tool)) {
       if (!layerUsable()) return;
-      const a = sn(p);
+      const a = snapAll(p);
       gesture.current = { kind: 'create', type: tool, a };
       setOverlay({ kind: 'rect', ...rectFromDrag(a, a, 0) });
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -234,6 +307,14 @@ export default function DrawingCanvas({
         const box = boxUnder(p);
         setHover(box ? { box, anchor: nearestAnchor(box, p) } : null);
       }
+      if (!readOnly && tool === 'dimension') setHover(dimPoint(toDoc(e)).hover);
+      if (!readOnly && tool !== 'select' && tool !== 'pan') setSnapMark(objSnap(toDoc(e)));
+      return;
+    }
+    if (g.kind === 'dim') {
+      const { q, hover: hv } = dimPoint(toDoc(e));
+      setHover(hv);
+      setOverlay({ kind: 'dim', start: g.start, end: q, axis: dimAxis(g.start, q, axisLock || e.shiftKey) });
       return;
     }
     if (g.kind === 'pan') {
@@ -250,18 +331,35 @@ export default function DrawingCanvas({
         const box = boxUnder(p);
         if (box) { const anchor = nearestAnchor(box, p); const a = anchorPoint(box, anchor); q = a; hv = { box, anchor }; }
       }
-      if ((axisLock || e.shiftKey) && !hv) q = lockAxis(g.points[g.points.length - 1], q);
+      let mark = null;
+      if (!hv) {
+        const close = g.points.length >= 2 ? [{ point: g.points[0], kind: 'close' }] : [];
+        const s = objSnap(p, null, close);
+        if (s) { q = { x: s.x, y: s.y }; mark = s; }
+        else if (axisLock || e.shiftKey) q = lockAxis(g.points[g.points.length - 1], q);
+      }
       setHover(hv);
+      setSnapMark(mark);
       setOverlay({ kind: 'line', points: g.points, cursor: q });
       return;
     }
     if (g.kind === 'marquee') { setOverlay({ kind: 'marquee', x1: g.start.x, y1: g.start.y, x2: p.x, y2: p.y }); return; }
-    if (g.kind === 'create') { setOverlay({ kind: 'rect', ...rectFromDrag(g.a, sn(p), 0) }); return; }
+    if (g.kind === 'create') { setSnapMark(objSnap(p)); setOverlay({ kind: 'rect', ...rectFromDrag(g.a, snapAll(p), 0) }); return; }
     if (g.kind === 'move') {
       let dx = p.x - g.start.x;
       let dy = p.y - g.start.y;
+      // A click (or a jitter) is not a move: nothing shifts, nothing snaps.
+      if (!g.dragging && Math.hypot(dx, dy) * scale < 3) { lastPreview.current = null; setPreview(null); return; }
+      g.dragging = true;
       if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
       const ref = g.anchorObj;
+      const os = snap && !e.altKey ? snapMove(g.base, g.ids, dx, dy, snapTol) : null;
+      if (os) {
+        setSnapMark(os.snap);
+        showPreview(moveObjects(g.base, g.ids, round(os.dx), round(os.dy)));
+        return;
+      }
+      setSnapMark(null);
       if (snap && isBox(ref)) {
         const target = sn({ x: ref.x + dx, y: ref.y + dy });
         dx = target.x - ref.x; dy = target.y - ref.y;
@@ -274,7 +372,33 @@ export default function DrawingCanvas({
       showPreview({ ...g.base, legend: { ...g.base.legend, x: t.x, y: t.y } });
       return;
     }
-    if (g.kind === 'resize') { showPreview(updateBox(g.base, g.id, resizeBox(g.orig, g.arg, sn(p)))); return; }
+    if (g.kind === 'resize') {
+      // Images keep their proportions unless Shift is held.
+      const r = g.orig.type === 'image' && !e.shiftKey ? resizeBoxKeepRatio(g.orig, g.arg, sn(p)) : resizeBox(g.orig, g.arg, sn(p));
+      showPreview(updateBox(g.base, g.id, r));
+      return;
+    }
+    if (g.kind === 'dimpt') {
+      const key = g.arg;
+      const { q, ref, hover: hv } = dimPoint(p, new Set([g.id]));
+      setHover(hv);
+      const moved = { ...g.orig, [key]: q, [`${key}_ref`]: ref };
+      showPreview({ ...g.base, objects: g.base.objects.map(x => (x.id === g.id ? moved : x)) });
+      return;
+    }
+    if (g.kind === 'dimoff') {
+      const o = g.orig;
+      let offset;
+      if (o.axis === 'horizontal') offset = p.y - o.start.y;
+      else if (o.axis === 'vertical') offset = p.x - o.start.x;
+      else {
+        const len = Math.hypot(o.end.x - o.start.x, o.end.y - o.start.y) || 1;
+        offset = ((p.x - o.start.x) * -(o.end.y - o.start.y) + (p.y - o.start.y) * (o.end.x - o.start.x)) / len;
+      }
+      const moved = { ...o, offset: round(offset) };
+      showPreview({ ...g.base, objects: g.base.objects.map(x => (x.id === g.id ? moved : x)) });
+      return;
+    }
     if (g.kind === 'rotate') { showPreview(updateBox(g.base, g.id, { rotation: rotationFromPointer(g.orig, p, e.shiftKey ? 1 : 15) })); return; }
     if (g.kind === 'vertex') {
       const o = g.orig;
@@ -285,9 +409,15 @@ export default function DrawingCanvas({
         const box = boxUnder(p, new Set([o.id]));
         const key = g.index === 0 ? 'start' : 'end';
         if (box) { const anchor = nearestAnchor(box, p); const a = anchorPoint(box, anchor); q = a; changes = { [key]: { object_id: box.id, anchor } }; setHover({ box, anchor }); } else { changes = { [key]: null }; setHover(null); }
-      } else if (axisLock || e.shiftKey) {
-        const nb = o.points[g.index === 0 ? 1 : g.index - 1];
-        q = lockAxis(nb, q);
+      }
+      if (!changes.start && !changes.end) {
+        const s = objSnap(p, new Set([o.id]));
+        setSnapMark(s);
+        if (s) q = { x: s.x, y: s.y };
+        else if (axisLock || e.shiftKey) {
+          const nb = o.points[g.index === 0 ? 1 : g.index - 1];
+          q = lockAxis(nb, q);
+        }
       }
       const moved = { ...moveVertex(o, g.index, q), ...changes };
       showPreview({ ...g.base, objects: g.base.objects.map(x => (x.id === o.id ? moved : x)) });
@@ -296,9 +426,9 @@ export default function DrawingCanvas({
 
   const onPointerUp = (e) => {
     const g = gesture.current;
-    if (!g || g.kind === 'line') return;
+    if (!g || g.kind === 'line' || g.kind === 'dim') return;
     // The release point counts even if its last move event was coalesced.
-    if (['move', 'legend', 'resize', 'rotate', 'vertex'].includes(g.kind)) onPointerMove(e);
+    if (['move', 'legend', 'resize', 'rotate', 'vertex', 'dimpt', 'dimoff'].includes(g.kind)) onPointerMove(e);
     gesture.current = null;
     if (g.kind === 'pan') { setPanning(false); return; }
     if (g.kind === 'marquee') {
@@ -314,7 +444,8 @@ export default function DrawingCanvas({
       const b = toDoc(e);
       setOverlay(null);
       const dragged = Math.abs(b.x - g.a.x) * scale > 6 || Math.abs(b.y - g.a.y) * scale > 6;
-      const r = dragged ? rectFromDrag(g.a, sn(b)) : { x: g.a.x, y: g.a.y };
+      const r = dragged ? rectFromDrag(g.a, snapAll(b)) : { x: g.a.x, y: g.a.y };
+      setSnapMark(null);
       const o = createBox(g.type, { ...r, layerId: activeLayerId, taken: allIds(doc) });
       onCommit({ ...doc, objects: [...doc.objects, o] });
       onSelect([o.id]);
@@ -322,6 +453,7 @@ export default function DrawingCanvas({
       return;
     }
     setHover(null);
+    setSnapMark(null);
     if (lastPreview.current) onCommit(lastPreview.current);
     lastPreview.current = null;
     setPreview(null);
@@ -334,10 +466,14 @@ export default function DrawingCanvas({
   const sel = selection.map(id => shown.objects.find(o => o.id === id)).filter(Boolean);
   const single = sel.length === 1 ? sel[0] : null;
   const layerOk = (o) => { const l = shown.layers.find(x => x.id === o.layer_id); return l && !l.locked && l.visible !== false; };
-  const handles = !readOnly && single && layerOk(single) && !preview;
+  const handles = !readOnly && tool === 'select' && single && layerOk(single) && !preview;
   const legendSelected = selection.includes('__legend') && shown.legend;
 
   const outline = (o) => {
+    if (o.type === 'dimension') {
+      const d = dimensionGeometry(o);
+      return <polyline key={o.id} points={[o.start, d.a, d.b, o.end].map(p => `${p.x},${p.y}`).join(' ')} className="od-sel od-sel-line" />;
+    }
     if (isBox(o)) {
       const pts = boxCorners(o).map(p => `${p.x},${p.y}`).join(' ');
       return <polygon key={o.id} points={pts} className="od-sel" />;
@@ -346,12 +482,39 @@ export default function DrawingCanvas({
   };
 
   const lineDraft = overlay?.kind === 'line' ? [...overlay.points, overlay.cursor].filter(Boolean) : null;
+
+  // Live real-size label (scaled drawings only), fixed size on screen.
+  let measure = null;
+  if (isScaledDoc(doc)) {
+    if (overlay?.kind === 'rect' && (overlay.width > 0 || overlay.height > 0)) measure = { at: { x: overlay.x + overlay.width, y: overlay.y + overlay.height }, text: sizeLabel(overlay.width, overlay.height, doc) };
+    else if (lineDraft && lineDraft.length > 1) {
+      const last = lineDraft.slice(-2);
+      measure = { at: last[1], text: `${formatPaper(polylineLength(last), doc)} · รวม ${formatPaper(polylineLength(lineDraft), doc)}` };
+    } else if (overlay?.kind === 'dim') {
+      const len = overlay.axis === 'horizontal' ? Math.abs(overlay.end.x - overlay.start.x) : overlay.axis === 'vertical' ? Math.abs(overlay.end.y - overlay.start.y) : Math.hypot(overlay.end.x - overlay.start.x, overlay.end.y - overlay.start.y);
+      measure = { at: overlay.end, text: formatPaper(len, doc) };
+    } else if (preview && single && isBox(single)) {
+      measure = { at: { x: single.x + single.width, y: single.y + single.height }, text: sizeLabel(single.width, single.height, doc) };
+    } else if (preview && single && isPolyline(single)) {
+      measure = { at: single.points[single.points.length - 1], text: `รวม ${formatPaper(polylineLength(single.points), doc)}` };
+    } else if (preview && single?.type === 'dimension') {
+      measure = null; // the dimension's own label already updates live
+    }
+  }
+  const fs = 11 / scale;
   const cursor = readOnly ? 'default' : tool === 'pan' ? (panning ? 'grabbing' : 'grab') : tool === 'select' ? 'default' : 'crosshair';
 
   return (
-    <div ref={scrollRef} className={`od-canvas${readOnly ? ' is-readonly' : ''}`}>
+    <div ref={scrollRef} className={`od-canvas${readOnly ? ' is-readonly' : ''}`}
+      onDragOver={readOnly || !onDropFiles ? undefined : (e) => { if ([...e.dataTransfer.types].includes('Files')) e.preventDefault(); }}
+      onDrop={readOnly || !onDropFiles ? undefined : (e) => {
+        const files = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
+        if (!files.length) return;
+        e.preventDefault();
+        onDropFiles(files, toDoc(e));
+      }}>
       <div className="od-canvas-inner">
-        <DrawingSheet doc={shown} cableStyles={cableStyles} siteName={siteName} mode="edit" scale={scale} showGrid={showGrid} linkStates={linkStates} svgRef={svgRef}
+        <DrawingSheet doc={shown} cableStyles={cableStyles} siteName={siteName} mode="edit" scale={scale} showGrid={showGrid} linkStates={linkStates} imageSources={imageSources} svgRef={svgRef}
           svgProps={{
             onPointerDown, onPointerMove, onPointerUp, onPointerCancel,
             onDoubleClick: (e) => {
@@ -390,6 +553,16 @@ export default function DrawingCanvas({
                 })}
               </>
             )}
+            {handles && single.type === 'dimension' && (() => {
+              const d = dimensionGeometry(single);
+              return (
+                <>
+                  <rect x={single.start.x - hs / 2} y={single.start.y - hs / 2} width={hs} height={hs} className="od-handle od-handle-end" data-handle="dimpt:start"><title>ลากเพื่อย้ายจุดเริ่ม (วางบนวัตถุเพื่อยึดติด)</title></rect>
+                  <rect x={single.end.x - hs / 2} y={single.end.y - hs / 2} width={hs} height={hs} className="od-handle od-handle-end" data-handle="dimpt:end"><title>ลากเพื่อย้ายจุดปลาย</title></rect>
+                  <circle cx={d.mid.x} cy={d.mid.y} r={hs / 2} className="od-handle od-handle-mid" data-handle="dimoff" style={{ cursor: 'move' }}><title>ลากเพื่อเลื่อนเส้นบอกระยะออกจากวัตถุ</title></circle>
+                </>
+              );
+            })()}
             {handles && isPolyline(single) && (
               <>
                 {single.points.slice(1).map((pt, i) => {
@@ -410,7 +583,19 @@ export default function DrawingCanvas({
                 {overlay.points.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r={hs / 3} className="od-draft-point" />)}
               </>
             )}
+            {overlay?.kind === 'dim' && <line x1={overlay.start.x} y1={overlay.start.y} x2={overlay.end.x} y2={overlay.end.y} className="od-draft-line" />}
             {hover && (() => { const a = anchorPoint(hover.box, hover.anchor); return <circle cx={a.x} cy={a.y} r={hs / 1.8} className="od-anchor-hint" />; })()}
+            {snapMark && !hover && (
+              snapMark.kind === 'segment'
+                ? <path d={`M ${snapMark.x - hs / 2} ${snapMark.y - hs / 2} L ${snapMark.x + hs / 2} ${snapMark.y + hs / 2} M ${snapMark.x - hs / 2} ${snapMark.y + hs / 2} L ${snapMark.x + hs / 2} ${snapMark.y - hs / 2}`} className="od-snap-mark" />
+                : <rect x={snapMark.x - hs / 2} y={snapMark.y - hs / 2} width={hs} height={hs} className={`od-snap-mark${snapMark.kind === 'close' ? ' is-close' : ''}`} />
+            )}
+            {measure?.text && (
+              <g className="od-measure" transform={`translate(${measure.at.x + fs * 0.8} ${measure.at.y + fs * 0.8})`}>
+                <rect x="0" y="0" width={[...measure.text].length * fs * 0.56 + fs} height={fs * 1.6} rx={fs * 0.3} />
+                <text x={fs * 0.5} y={fs * 1.15} fontSize={fs}>{measure.text}</text>
+              </g>
+            )}
           </g>
         </DrawingSheet>
       </div>

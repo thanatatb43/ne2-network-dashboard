@@ -1,4 +1,4 @@
-import { AppWindow, BrickWall, Building2, Cable, CircleDot, DoorOpen, Hand, Monitor, MousePointer2, Plug, Square, Table, Type } from 'lucide-react';
+import { AppWindow, BrickWall, Building2, Cable, CircleDot, DoorOpen, Hand, ImagePlus, Loader2, Monitor, MousePointer2, Plug, Ruler, Square, Table, Type } from 'lucide-react';
 import { SymbolIcon } from '../rendering/DrawingSymbols.jsx';
 import { SYMBOL_LABELS } from '../officeDrawingDocument.js';
 
@@ -6,7 +6,7 @@ const GROUPS = [
   { title: 'ทั่วไป', tools: [['select', 'เลือก/ย้าย', MousePointer2, 'V'], ['pan', 'เลื่อนผัง', Hand, 'H']] },
   { title: 'โครงสร้าง', tools: [['building', 'อาคาร', Building2], ['room', 'ห้อง', Square], ['wall', 'ผนัง', BrickWall], ['door', 'ประตู', DoorOpen], ['window', 'หน้าต่าง', AppWindow], ['desk', 'โต๊ะ', Table]] },
   { title: 'อุปกรณ์และสาย', tools: [['equipment', 'อุปกรณ์', Monitor], ['outlet', 'Outlet', Plug], ['junction', 'จุดต่อสาย', CircleDot], ['cable', 'แนวสาย', Cable]] },
-  { title: 'ข้อความ', tools: [['text', 'ข้อความ', Type]] }
+  { title: 'ข้อความและระยะ', tools: [['text', 'ข้อความ', Type], ['dimension', 'เส้นบอกระยะ', Ruler]] }
 ];
 
 const HINTS = {
@@ -17,10 +17,11 @@ const HINTS = {
   wall: 'คลิกทีละจุด · ดับเบิลคลิกหรือ Enter เพื่อจบ · Esc ยกเลิก · Shift ล็อกแนวนอน/ตั้ง',
   cable: 'คลิกที่อุปกรณ์/จุดต่อเพื่อเริ่ม คลิกจุดหักมุม แล้วคลิกอุปกรณ์ปลายทางเพื่อจบ (หรือดับเบิลคลิก/Enter)',
   equipment: 'เลือกสัญลักษณ์ แล้วคลิกบนผังเพื่อวาง (วางต่อได้หลายชิ้น)', outlet: 'เลือกชนิด Outlet แล้วคลิกเพื่อวาง', junction: 'คลิกเพื่อวางจุดต่อสาย',
-  text: 'ลากเพื่อกำหนดกรอบข้อความ แล้วพิมพ์ข้อความในแผงขวา'
+  text: 'ลากเพื่อกำหนดกรอบข้อความ แล้วพิมพ์ข้อความในแผงขวา',
+  dimension: 'คลิกจุดเริ่มและจุดปลาย (วางบนมุม/ขอบวัตถุเพื่อยึดติด) · Shift วัดแนวนอน/แนวตั้ง · ลากจุดกลมเพื่อเลื่อนเส้นออกจากวัตถุ'
 };
 
-export default function DrawingToolbar({ tool, onTool, options, onOptions, symbolKeys, cableStyles, axisLock, onAxisLock }) {
+export default function DrawingToolbar({ tool, onTool, options, onOptions, symbolKeys, cableStyles, axisLock, onAxisLock, scaled, onImage, uploading, imagesAllowed }) {
   return (
     <div className="od-toolbar" role="toolbar" aria-label="เครื่องมือวาด" aria-orientation="vertical">
       {GROUPS.map(g => (
@@ -29,7 +30,8 @@ export default function DrawingToolbar({ tool, onTool, options, onOptions, symbo
           <div className="od-tool-grid">
             {g.tools.map((entry) => { const [key, label, Icon, kb] = entry; return (
               <button key={key} type="button" className={`od-tool${tool === key ? ' is-active' : ''}`} aria-pressed={tool === key}
-                title={`${label}${kb ? ` (${kb})` : ''}`} onClick={() => onTool(key)}>
+                disabled={key === 'dimension' && !scaled}
+                title={key === 'dimension' && !scaled ? 'ใช้ได้เมื่อกำหนดมาตราส่วนของแบบแล้ว (แผงขวา > มาตราส่วน)' : `${label}${kb ? ` (${kb})` : ''}`} onClick={() => onTool(key)}>
                 <Icon size={18} aria-hidden="true" /><span>{label}</span>
               </button>
             ); })}
@@ -37,7 +39,18 @@ export default function DrawingToolbar({ tool, onTool, options, onOptions, symbo
         </div>
       ))}
 
-      <p className="od-tool-hint">{HINTS[tool]}</p>
+      {imagesAllowed && (
+        <div className="od-tool-group" role="group" aria-label="รูปภาพ">
+          <span className="od-tool-group-title">รูปภาพ</span>
+          <div className="od-tool-grid">
+            <button type="button" className="od-tool" onClick={onImage} disabled={uploading} title="เลือกไฟล์รูป หรือกด Ctrl+V เพื่อวางรูปจากคลิปบอร์ด หรือลากไฟล์มาวางบนผัง">
+              {uploading ? <Loader2 size={18} className="animate-spin" aria-hidden="true" /> : <ImagePlus size={18} aria-hidden="true" />}<span>{uploading ? 'กำลังอัปโหลด' : 'วางรูปภาพ'}</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      <p className="od-tool-hint">{HINTS[tool]}{imagesAllowed && tool === 'select' ? ' · Ctrl+V วางรูปจากคลิปบอร์ด' : ''}</p>
 
       {(tool === 'equipment' || tool === 'outlet') && (
         <div className="od-tool-group" role="group" aria-label="เลือกสัญลักษณ์">

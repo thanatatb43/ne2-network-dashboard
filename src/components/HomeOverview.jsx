@@ -23,7 +23,7 @@ function ComputerSummary({ onOpenDashboard }) {
     <section className="home-computers" aria-labelledby="home-computers-title">
       <div className="home-computers-head">
         <div>
-          <h2 id="home-computers-title">คอมพิวเตอร์ในทะเบียน (PC + Notebook)</h2>
+          <h2 id="home-computers-title">อุปกรณ์คอมพิวเตอร์ในระบบ</h2>
           <p className="list-muted">
             ไม่รวมจอภาพและอุปกรณ์อื่น{summary.meta?.generated_at && <> · ข้อมูล ณ {formatDateTime(summary.meta.generated_at)}</>}
           </p>

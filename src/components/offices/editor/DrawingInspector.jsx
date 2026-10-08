@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, BringToFront, Copy, Link2, SendToBack, Trash2, Unlink, Plus, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, BringToFront, Copy, Link2, Ruler, SendToBack, Trash2, Unlink, Plus, X } from 'lucide-react';
 import {
   SYMBOL_LABELS, TITLE_BLOCK_FIELDS, TYPE_NAMES, TYPE_DEFAULTS, effectiveStyle, isBox, pageDimensions, reorderObjects, objectName
 } from '../officeDrawingDocument.js';
 import { updateBox } from '../officeDrawingGeometry.js';
 import { TYPE_LABELS } from '../officeDrawingApi.js';
+import { dimensionLength, formatPaper, isScaledDoc } from '../officeDrawingMeasure.js';
 import { ColorField, NumberField, SelectField, TextField } from './fields.jsx';
 import DrawingLayers from './DrawingLayers.jsx';
 
@@ -49,6 +50,56 @@ function LinkSection({ object, link, readOnly, canLink, onPick, onUnlink, linksE
   );
 }
 
+const IMAGE_STATE = {
+  temporary: 'อัปโหลดแล้ว ยังไม่ได้บันทึกลงแบบ (จะเก็บถาวรเมื่อบันทึก)',
+  referenced: 'บันทึกในแบบแล้ว',
+  detached: 'ไม่มีแบบใดใช้อยู่ (เก็บไว้ชั่วคราว)',
+  missing: 'ไม่พบไฟล์รูป — นำรูปนี้ออกหรือวางใหม่'
+};
+
+function ImageSection({ object: o, meta, source, readOnly, onChange }) {
+  const state = source?.state === 'missing' ? 'missing' : meta?.state;
+  const ratioOk = meta?.width_px && meta?.height_px;
+  return (
+    <section className="od-inspect-section">
+      <h4>รูปภาพ</h4>
+      {state && <p className={`od-small${state === 'missing' ? ' od-danger' : ' list-muted'}`}>{IMAGE_STATE[state] || state}</p>}
+      {meta?.width_px && <p className="list-muted od-small">{meta.width_px}×{meta.height_px} px · {meta.mime_type?.replace('image/', '').toUpperCase()}</p>}
+      <NumberField label="ความทึบ" unit="0–1" value={o.opacity ?? 1} min={0} max={1} step={0.05} disabled={readOnly} onCommit={v => onChange({ opacity: Math.round(v * 100) / 100 })} />
+      {!readOnly && ratioOk && (
+        <button type="button" className="list-button" onClick={() => onChange({ height: Math.round((o.width * meta.height_px / meta.width_px) * 10) / 10 })}>ใช้สัดส่วนตามรูปต้นฉบับ</button>
+      )}
+      <p className="list-muted od-small">ลากมุมเพื่อปรับขนาดโดยคงสัดส่วน (กด Shift ค้างเพื่อปรับอิสระ) · รูปไม่ใช่ตัวกำหนดมาตราส่วนของแบบ</p>
+    </section>
+  );
+}
+
+const ANCHOR_NAMES = { center: 'กลาง', top: 'บน', right: 'ขวา', bottom: 'ล่าง', left: 'ซ้าย', top_left: 'มุมบนซ้าย', top_right: 'มุมบนขวา', bottom_left: 'มุมล่างซ้าย', bottom_right: 'มุมล่างขวา' };
+
+function DimensionSection({ doc, object: o, readOnly, onChange }) {
+  const refText = (ref) => {
+    if (!ref) return 'ไม่ได้ยึดกับวัตถุ';
+    const target = doc.objects.find(x => x.id === ref.object_id);
+    return `${target ? objectName(target) : ref.object_id} (${ANCHOR_NAMES[ref.anchor] || ref.anchor})`;
+  };
+  return (
+    <section className="od-inspect-section">
+      <h4>เส้นบอกระยะ</h4>
+      <p className="od-dim-length"><Ruler size={16} aria-hidden="true" /> {formatPaper(dimensionLength(o), doc) || '—'}</p>
+      <p className="list-muted od-small">ตัวเลขคำนวณจากระยะบนแบบและมาตราส่วน แก้ตัวเลขเองไม่ได้</p>
+      <SelectField label="แนวที่วัด" value={o.axis} disabled={readOnly} options={[['aligned', 'ตามแนวเส้น'], ['horizontal', 'แนวนอน'], ['vertical', 'แนวตั้ง']]} onCommit={v => onChange({ axis: v })} />
+      <div className="od-grid-2">
+        <NumberField label="ระยะห่างจากวัตถุ" unit="มม. กระดาษ" value={o.offset} min={-10000} max={10000} disabled={readOnly} onCommit={v => onChange({ offset: v })} />
+        <NumberField label="ขนาดตัวเลข" unit="มม." value={o.font_size} min={0.5} max={200} step={0.5} disabled={readOnly} onCommit={v => onChange({ font_size: v })} />
+      </div>
+      <dl className="od-ends">
+        <div><dt>จุดเริ่ม</dt><dd>{refText(o.start_ref)}{o.start_ref && !readOnly && <button type="button" className="od-link" onClick={() => onChange({ start_ref: null })}>ถอด</button>}</dd></div>
+        <div><dt>จุดปลาย</dt><dd>{refText(o.end_ref)}{o.end_ref && !readOnly && <button type="button" className="od-link" onClick={() => onChange({ end_ref: null })}>ถอด</button>}</dd></div>
+      </dl>
+    </section>
+  );
+}
+
 function StyleSection({ object, cableStyles, onChange, readOnly }) {
   const st = effectiveStyle(object, cableStyles);
   const own = object.style || {};
@@ -57,7 +108,7 @@ function StyleSection({ object, cableStyles, onChange, readOnly }) {
     const empty = Object.values(next).every(x => x === null || x === undefined);
     onChange({ style: empty ? null : next });
   };
-  const hasFill = !['wall', 'cable', 'door'].includes(object.type);
+  const hasFill = !['wall', 'cable', 'door', 'dimension'].includes(object.type);
   return (
     <section className="od-inspect-section">
       <h4>สีและเส้น</h4>
@@ -74,7 +125,7 @@ function StyleSection({ object, cableStyles, onChange, readOnly }) {
   );
 }
 
-function ObjectInspector({ doc, object: o, readOnly, onDoc, cableStyles, symbolKeys, link, canLink, onPick, onDelete, onDuplicate, linksError, onRetryLinks }) {
+function ObjectInspector({ doc, object: o, readOnly, onDoc, cableStyles, symbolKeys, link, canLink, onPick, onDelete, onDuplicate, linksError, onRetryLinks, assetMeta, imageSources }) {
   const change = (changes) => onDoc(isBox(o) ? updateBox(doc, o.id, changes) : { ...doc, objects: doc.objects.map(x => (x.id === o.id ? { ...x, ...changes } : x)) });
   const layerOptions = doc.layers.map(l => [l.id, `${l.name}${l.locked ? ' (ล็อก)' : ''}`]);
   const ends = (end) => {
@@ -98,7 +149,9 @@ function ObjectInspector({ doc, object: o, readOnly, onDoc, cableStyles, symbolK
       </div>
       {o.type === 'text'
         ? <TextField label="ข้อความ" value={o.text} multiline rows={4} nullable={false} maxLength={5000} disabled={readOnly} onCommit={v => change({ text: v })} />
-        : <TextField label="ป้ายชื่อ" value={o.label} maxLength={500} disabled={readOnly} onCommit={v => change({ label: v })} />}
+        : o.type !== 'dimension' && <TextField label={o.type === 'image' ? 'คำอธิบายรูป' : 'ป้ายชื่อ'} value={o.label} maxLength={500} disabled={readOnly} onCommit={v => change({ label: v })} />}
+      {o.type === 'image' && <ImageSection object={o} meta={assetMeta?.get(o.asset_id)} source={imageSources?.get(o.asset_id)} readOnly={readOnly} onChange={change} />}
+      {o.type === 'dimension' && <DimensionSection doc={doc} object={o} readOnly={readOnly} onChange={change} />}
       <SelectField label="ชั้น" value={o.layer_id} options={layerOptions} disabled={readOnly} onCommit={v => change({ layer_id: v })} />
       {(o.type === 'equipment' || o.type === 'outlet') && (
         <SelectField label="สัญลักษณ์" value={o.symbol_key} disabled={readOnly}
@@ -118,7 +171,8 @@ function ObjectInspector({ doc, object: o, readOnly, onDoc, cableStyles, symbolK
       )}
       {isBox(o) && (
         <section className="od-inspect-section">
-          <h4>ตำแหน่งและขนาด (มม.)</h4>
+          <h4>ตำแหน่งและขนาด (มม. บนกระดาษ)</h4>
+          {isScaledDoc(doc) && <p className="list-muted od-small">ขนาดจริง {formatPaper(o.width, doc)} × {formatPaper(o.height, doc)}</p>}
           <div className="od-grid-2">
             <NumberField label="X" value={o.x} min={-10000} max={10000} disabled={readOnly} onCommit={v => change({ x: v })} />
             <NumberField label="Y" value={o.y} min={-10000} max={10000} disabled={readOnly} onCommit={v => change({ y: v })} />
@@ -142,7 +196,7 @@ function ObjectInspector({ doc, object: o, readOnly, onDoc, cableStyles, symbolK
           <p className="list-muted od-small">{o.points.length} จุด · ลากจุดสี่เหลี่ยมเพื่อย้าย ลากจุดกลมเพื่อเพิ่มจุดหักมุม ดับเบิลคลิกจุดเพื่อลบ · ลากปลายสายไปวางบนอุปกรณ์เพื่อต่อ</p>
         </section>
       )}
-      {o.type === 'wall' && <p className="list-muted od-small">{o.points.length} จุด · ลากจุดเพื่อแก้ ลากจุดกลมเพื่อเพิ่มจุด ดับเบิลคลิกจุดเพื่อลบ</p>}
+      {o.type === 'wall' && <p className="list-muted od-small">{o.points.length} จุด{isScaledDoc(doc) ? ` · ยาวรวม ${formatPaper(o.points.slice(1).reduce((s, p, i) => s + Math.hypot(p.x - o.points[i].x, p.y - o.points[i].y), 0), doc)}` : ''} · ลากจุดเพื่อแก้ ลากจุดกลมเพื่อเพิ่มจุด ดับเบิลคลิกจุดเพื่อลบ</p>}
       {['equipment', 'outlet', 'junction'].includes(o.type) && (
         <LinkSection object={o} link={link} readOnly={readOnly} canLink={canLink} onPick={onPick} onUnlink={() => change({ asset_ref: null })} linksError={linksError} onRetryLinks={onRetryLinks} />
       )}
@@ -200,7 +254,7 @@ function LegendInspector({ doc, onDoc, readOnly, symbolKeys, cableStyles, maxIte
   );
 }
 
-function DocumentInspector({ doc, meta, onDoc, onMeta, readOnly, symbolKeys, cableStyles, limits }) {
+function DocumentInspector({ doc, meta, onDoc, onMeta, readOnly, symbolKeys, cableStyles, limits, onScale }) {
   const page = doc.page;
   const setPage = (changes) => {
     const next = { ...page, ...changes };
@@ -227,9 +281,35 @@ function DocumentInspector({ doc, meta, onDoc, onMeta, readOnly, symbolKeys, cab
           <NumberField label="ระยะขอบ" unit="มม." value={page.margin} min={0} max={50} step={1} disabled={readOnly} onCommit={v => setPage({ margin: v })} />
           <NumberField label="ระยะตาราง" unit="มม." value={doc.grid.spacing} min={0.5} max={100} step={0.5} disabled={readOnly} onCommit={v => onDoc({ ...doc, grid: { ...doc.grid, spacing: v } })} />
         </div>
+        {isScaledDoc(doc) && (
+          <NumberField label="ระยะตารางเป็นระยะจริง" unit="ซม." value={Math.round(doc.grid.spacing * doc.scale.denominator) / 10} min={0.01} step={1} disabled={readOnly}
+            onCommit={cm => {
+              const mm = Math.round((cm * 10 / doc.scale.denominator) * 1000) / 1000;
+              if (mm > 0 && mm <= 100) onDoc({ ...doc, grid: { ...doc.grid, spacing: mm } });
+            }} />
+        )}
         <label className="od-check"><input type="checkbox" checked={doc.grid.enabled} disabled={readOnly} onChange={e => onDoc({ ...doc, grid: { ...doc.grid, enabled: e.target.checked } })} /> แสดงเส้นตารางเมื่อเปิดแบบ</label>
         <label className="od-check"><input type="checkbox" checked={doc.grid.snap} disabled={readOnly} onChange={e => onDoc({ ...doc, grid: { ...doc.grid, snap: e.target.checked } })} /> จัดวางตามเส้นตาราง (snap) เป็นค่าเริ่มต้น</label>
-        <p className="list-muted od-small">ผังเป็นแบบไม่ตามมาตราส่วน (schematic) ระยะบนผังไม่ใช่ระยะจริง</p>
+      </section>
+      <section className="od-inspect-section">
+        <div className="od-section-head">
+          <h4>มาตราส่วน</h4>
+          {!readOnly && onScale && <button type="button" className="list-button" onClick={onScale}><Ruler size={16} aria-hidden="true" /> {isScaledDoc(doc) ? 'เปลี่ยน' : 'กำหนดมาตราส่วน'}</button>}
+        </div>
+        {isScaledDoc(doc) ? (
+          <>
+            <p className="od-dim-length">1:{doc.scale.denominator}</p>
+            <p className="list-muted od-small">ตาราง {doc.grid.spacing} มม. บนกระดาษ = {formatPaper(doc.grid.spacing, doc)} จริง</p>
+            <div className="od-grid-2">
+              <SelectField label="หน่วยที่แสดง" value={doc.measurement?.display_unit || 'auto'} disabled={readOnly}
+                options={[['auto', 'อัตโนมัติ (ซม./ม.)'], ['cm', 'เซนติเมตร'], ['m', 'เมตร']]}
+                onCommit={v => onDoc({ ...doc, measurement: { ...(doc.measurement || {}), display_unit: v, precision: doc.measurement?.precision ?? 2 } })} />
+              <SelectField label="ทศนิยม" value={String(doc.measurement?.precision ?? 2)} disabled={readOnly}
+                options={[['0', '0'], ['1', '1'], ['2', '2'], ['3', '3']]}
+                onCommit={v => onDoc({ ...doc, measurement: { display_unit: doc.measurement?.display_unit || 'auto', ...(doc.measurement || {}), precision: Number(v) } })} />
+            </div>
+          </>
+        ) : <p className="list-muted od-small">ผังไม่ตามมาตราส่วน (schematic) ระยะบนผังไม่ใช่ระยะจริง กำหนดมาตราส่วนเพื่อเห็นระยะเป็น ซม./ม. และใช้เส้นบอกระยะ</p>}
       </section>
       <section className="od-inspect-section">
         <div className="od-section-head">
@@ -261,7 +341,7 @@ export default function DrawingInspector(props) {
   if (selection.includes('__legend')) {
     body = <div className="od-inspect"><LegendInspector {...props} maxItems={limits.legend_items_max} /></div>;
   } else if (objects.length === 1) {
-    body = <ObjectInspector {...props} object={objects[0]} link={props.linkFor(objects[0])} onPick={() => props.onPick(objects[0])} />;
+    body = <ObjectInspector {...props} object={objects[0]} link={props.linkFor(objects[0])} onPick={() => props.onPick(objects[0])} assetMeta={props.assetMeta} imageSources={props.imageSources} />;
   } else if (objects.length > 1) {
     body = (
       <div className="od-inspect">
